@@ -723,17 +723,11 @@ const UserLogSchema = new mongoose.Schema({
     timezone: String,
     deviceId: String
   },
-  // =============================================
-  // FIXED: Enhanced Location Field Structure
-  // Now properly stores all location data needed by admin dashboard
-  // =============================================
   location: {
-    // IP address (removed from JSON output for security)
     ip: {
       type: String,
-      select: false  // Don't expose IP in API responses by default
+      select: false
     },
-    // Country information
     country: {
       code: {
         type: String,
@@ -745,7 +739,6 @@ const UserLogSchema = new mongoose.Schema({
         default: 'Unknown'
       }
     },
-    // Region/State information
     region: {
       code: {
         type: String,
@@ -756,17 +749,14 @@ const UserLogSchema = new mongoose.Schema({
         default: 'Unknown'
       }
     },
-    // City
     city: {
       type: String,
       default: 'Unknown'
     },
-    // Postal/ZIP code
     postalCode: {
       type: String,
       default: 'Unknown'
     },
-    // Geographic coordinates (for map display)
     latitude: {
       type: Number,
       default: null
@@ -775,12 +765,10 @@ const UserLogSchema = new mongoose.Schema({
       type: Number,
       default: null
     },
-    // Timezone
     timezone: {
       type: String,
       default: 'Unknown'
     },
-    // ISP information
     isp: {
       type: String,
       default: 'Unknown'
@@ -789,17 +777,14 @@ const UserLogSchema = new mongoose.Schema({
       type: String,
       default: 'Unknown'
     },
-    // Street address (if available)
     street: {
       type: String,
       default: 'Unknown'
     },
-    // Flag indicating if this is an exact location (vs approximate)
     exactLocation: {
       type: Boolean,
       default: false
     },
-    // Formatted location string for quick display (backward compatibility)
     formatted: {
       type: String,
       default: 'Unknown'
@@ -895,7 +880,6 @@ const UserLogSchema = new mongoose.Schema({
   toJSON: { 
     virtuals: true,
     transform: function(doc, ret) {
-      // Remove sensitive data from JSON output
       delete ret.deviceInfo?.deviceId;
       delete ret.location?.ip;
       delete ret.metadata?.adminId;
@@ -913,9 +897,6 @@ const UserLogSchema = new mongoose.Schema({
   }
 });
 
-// =============================================
-// VIRTUAL: Get formatted location string for display
-// =============================================
 UserLogSchema.virtual('locationDisplay').get(function() {
   if (this.location && this.location.formatted && this.location.formatted !== 'Unknown') {
     return this.location.formatted;
@@ -929,9 +910,6 @@ UserLogSchema.virtual('locationDisplay').get(function() {
   return parts.length > 0 ? parts.join(', ') : 'Unknown';
 });
 
-// =============================================
-// VIRTUAL: Get map URL for this location
-// =============================================
 UserLogSchema.virtual('mapUrl').get(function() {
   if (this.location?.latitude && this.location?.longitude) {
     return `https://www.google.com/maps/search/?api=1&query=${this.location.latitude},${this.location.longitude}&layer=satellite`;
@@ -942,16 +920,10 @@ UserLogSchema.virtual('mapUrl').get(function() {
   return null;
 });
 
-// =============================================
-// VIRTUAL: Check if location has coordinates
-// =============================================
 UserLogSchema.virtual('hasExactCoordinates').get(function() {
   return !!(this.location?.latitude && this.location?.longitude && this.location?.exactLocation === true);
 });
 
-// =============================================
-// VIRTUAL: Action description for display
-// =============================================
 UserLogSchema.virtual('actionDescription').get(function() {
   const actionDescriptions = {
     'signup': 'User registered a new account',
@@ -968,9 +940,6 @@ UserLogSchema.virtual('actionDescription').get(function() {
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
 });
 
-// =============================================
-// VIRTUAL: Check if this is a financial action
-// =============================================
 UserLogSchema.virtual('isFinancialAction').get(function() {
   return [
     'deposit_created', 'deposit_completed', 'withdrawal_created', 
@@ -979,18 +948,12 @@ UserLogSchema.virtual('isFinancialAction').get(function() {
   ].includes(this.action);
 });
 
-// =============================================
-// VIRTUAL: Check if this is a security action
-// =============================================
 UserLogSchema.virtual('isSecurityAction').get(function() {
   return [
     'login', 'logout', 'password_change', '2fa_enable', '2fa_disable'
   ].includes(this.action);
 });
 
-// =============================================
-// INDEXES for performance
-// =============================================
 UserLogSchema.index({ user: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, createdAt: -1 });
 UserLogSchema.index({ status: 1, createdAt: -1 });
@@ -1006,9 +969,6 @@ UserLogSchema.index({ user: 1, actionCategory: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, status: 1, createdAt: -1 });
 UserLogSchema.index({ user: 1, isSuspicious: 1, createdAt: -1 });
 
-// =============================================
-// TEXT SEARCH INDEX
-// =============================================
 UserLogSchema.index({
   'username': 'text',
   'email': 'text',
@@ -1020,26 +980,19 @@ UserLogSchema.index({
   'location.region.name': 'text'
 });
 
-// =============================================
-// PRE-SAVE HOOK: Auto-calculate missing fields
-// =============================================
 UserLogSchema.pre('save', function(next) {
-  // Set userFullName if missing
   if (!this.userFullName && this.username) {
     this.userFullName = this.username;
   }
   
-  // Auto-calculate action category
   if (!this.actionCategory) {
     this.actionCategory = this.calculateActionCategory(this.action);
   }
   
-  // Auto-calculate risk level
   if (!this.riskLevel || this.riskLevel === 'low') {
     this.riskLevel = this.calculateRiskLevel();
   }
   
-  // Auto-format location string from components if formatted is missing
   if (this.location && (!this.location.formatted || this.location.formatted === 'Unknown')) {
     const parts = [];
     if (this.location.city && this.location.city !== 'Unknown') parts.push(this.location.city);
@@ -1051,11 +1004,6 @@ UserLogSchema.pre('save', function(next) {
   next();
 });
 
-// =============================================
-// STATIC METHODS
-// =============================================
-
-// Find logs by user with pagination
 UserLogSchema.statics.findByUser = function(userId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
@@ -1069,7 +1017,6 @@ UserLogSchema.statics.findByUser = function(userId, options = {}) {
     .limit(limit);
 };
 
-// Get user activity summary
 UserLogSchema.statics.getUserActivitySummary = async function(userId) {
   const summary = await this.aggregate([
     { $match: { user: mongoose.Types.ObjectId(userId) } },
@@ -1088,7 +1035,6 @@ UserLogSchema.statics.getUserActivitySummary = async function(userId) {
   return summary;
 };
 
-// Find suspicious activities
 UserLogSchema.statics.findSuspiciousActivities = function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -1099,7 +1045,6 @@ UserLogSchema.statics.findSuspiciousActivities = function(days = 7) {
   }).sort({ createdAt: -1 });
 };
 
-// Get location statistics (for admin dashboard)
 UserLogSchema.statics.getLocationStats = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -1131,11 +1076,6 @@ UserLogSchema.statics.getLocationStats = async function(days = 30) {
   ]);
 };
 
-// =============================================
-// INSTANCE METHODS
-// =============================================
-
-// Calculate action category based on action type
 UserLogSchema.methods.calculateActionCategory = function(action) {
   const categoryMap = {
     'signup': 'authentication',
@@ -1158,7 +1098,6 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
   return categoryMap[action] || 'system';
 };
 
-// Calculate risk level based on action and status
 UserLogSchema.methods.calculateRiskLevel = function() {
   const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created'];
   const mediumRiskActions = ['login', 'password_change', 'deposit_created'];
@@ -1170,7 +1109,6 @@ UserLogSchema.methods.calculateRiskLevel = function() {
   return 'low';
 };
 
-// Mark as suspicious with reason
 UserLogSchema.methods.markAsSuspicious = function(reason) {
   this.isSuspicious = true;
   this.riskLevel = 'high';
@@ -1180,7 +1118,6 @@ UserLogSchema.methods.markAsSuspicious = function(reason) {
   return this.save();
 };
 
-// Update location with new data
 UserLogSchema.methods.updateLocation = function(locationData) {
   this.location = {
     ...this.location,
@@ -1189,10 +1126,6 @@ UserLogSchema.methods.updateLocation = function(locationData) {
   };
   return this.save();
 };
-
-// =============================================
-// QUERY HELPERS
-// =============================================
 
 UserLogSchema.query.byDateRange = function(startDate, endDate) {
   return this.where('createdAt').gte(startDate).lte(endDate);
@@ -1218,9 +1151,6 @@ UserLogSchema.query.byCity = function(cityName) {
   return this.where('location.city', new RegExp(cityName, 'i'));
 };
 
-// =============================================
-// COMPILE AND EXPORT MODEL
-// =============================================
 const UserLog = mongoose.model('UserLog', UserLogSchema);
 
 const LoginRecordSchema = new mongoose.Schema({
@@ -1250,27 +1180,6 @@ LoginRecordSchema.index({ email: 1, timestamp: -1 });
 LoginRecordSchema.index({ timestamp: -1 });
 
 const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 const MarketPairSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
@@ -1414,7 +1323,6 @@ const CandleSchema = new mongoose.Schema({
 });
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
-
 
 const PairLimitsSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
@@ -1748,7 +1656,6 @@ const InvestmentSchema = new mongoose.Schema({
     required: [true, 'Amount is required'], 
     min: [0, 'Amount cannot be negative']
   },
-  // CRITICAL: These fields MUST exist for cron job
   amountBTC: {
     type: Number,
     default: 0,
@@ -1788,7 +1695,6 @@ const InvestmentSchema = new mongoose.Schema({
     required: true,
     default: 0
   },
-  // CRITICAL: Fee fields for accurate accounting
   investmentFee: {
     type: Number,
     default: 0
@@ -1797,7 +1703,6 @@ const InvestmentSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  // CRITICAL: BTC price tracking
   btcPriceAtInvestment: {
     type: Number,
     default: 0
@@ -2232,16 +2137,7 @@ TransactionSchema.index({ createdAt: -1 });
 
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
-
-
-
-
-
-
 const FinancialStatementSchema = new mongoose.Schema({
-    // =============================================
-    // 1. STATEMENT IDENTIFICATION
-    // =============================================
     user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -2263,22 +2159,15 @@ const FinancialStatementSchema = new mongoose.Schema({
         unique: true,
         required: true
     },
-
-    // =============================================
-    // 2. OPENING & CLOSING BALANCES (SNAPSHOTS)
-    // =============================================
     openingBalances: {
-        // Sum of all crypto assets in USD value at start of period
         totalUSD: { type: Number, required: true },
-        // Detailed breakdown per wallet type
         mainWalletUSD: { type: Number, required: true },
-        activeWalletUSD: { type: Number, required: true }, // Mining contracts
+        activeWalletUSD: { type: Number, required: true },
         maturedWalletUSD: { type: Number, required: true },
-        // Detailed crypto balances (for pro users)
         cryptoDetails: [{
-            asset: { type: String, required: true }, // e.g., 'btc', 'eth'
+            asset: { type: String, required: true },
             amount: { type: Number, required: true },
-            usdValue: { type: Number, required: true }, // Value at period start
+            usdValue: { type: Number, required: true },
             walletType: { type: String, enum: ['main', 'matured'] }
         }],
         timestamp: { type: Date, required: true }
@@ -2291,35 +2180,29 @@ const FinancialStatementSchema = new mongoose.Schema({
         cryptoDetails: [{
             asset: { type: String, required: true },
             amount: { type: Number, required: true },
-            usdValue: { type: Number, required: true }, // Value at period end
+            usdValue: { type: Number, required: true },
             walletType: { type: String, enum: ['main', 'matured'] }
         }],
         timestamp: { type: Date, required: true }
     },
-    netChangeUSD: { type: Number, required: true }, // closingBalances.totalUSD - openingBalances.totalUSD
-
-    // =============================================
-    // 3. TRANSACTIONS (ALL FINANCIAL MOVEMENTS)
-    // =============================================
+    netChangeUSD: { type: Number, required: true },
     transactions: {
-        // All standard transactions from the Transaction model
         list: [{
             transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
             type: { type: String, enum: ['deposit', 'withdrawal', 'transfer', 'investment', 'interest', 'referral', 'loan', 'buy', 'sell'] },
             amountUSD: { type: Number, required: true },
-            asset: { type: String }, // e.g., 'BTC', 'ETH'
+            asset: { type: String },
             assetAmount: { type: Number },
             status: { type: String, enum: ['pending', 'completed', 'failed', 'cancelled'] },
-            method: { type: String }, // e.g., 'BTC', 'CARD', 'BANK'
-            description: { type: String }, // From Transaction.details
+            method: { type: String },
+            description: { type: String },
             reference: { type: String },
             feeUSD: { type: Number, default: 0 },
             netAmountUSD: { type: Number, required: true },
-            exchangeRate: { type: Number }, // Rate at time of transaction
+            exchangeRate: { type: Number },
             createdAt: { type: Date, required: true },
             processedAt: { type: Date }
         }],
-        // Aggregated summaries
         summary: {
             totalDepositsUSD: { type: Number, default: 0 },
             totalWithdrawalsUSD: { type: Number, default: 0 },
@@ -2332,12 +2215,7 @@ const FinancialStatementSchema = new mongoose.Schema({
             }
         }
     },
-
-    // =============================================
-    // 4. INVESTMENTS & MINING RETURNS
-    // =============================================
     investments: {
-        // Active investments during the period
         active: [{
             investmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Investment' },
             planName: { type: String, required: true },
@@ -2348,18 +2226,16 @@ const FinancialStatementSchema = new mongoose.Schema({
             endDate: { type: Date },
             status: { type: String }
         }],
-        // Investments that matured/completed in this period
         matured: [{
             investmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Investment' },
             planName: { type: String, required: true },
             initialAmountUSD: { type: Number, required: true },
-            returnAmountUSD: { type: Number, required: true }, // Principal + Profit
+            returnAmountUSD: { type: Number, required: true },
             profitUSD: { type: Number, required: true },
             profitPercentage: { type: Number, required: true },
             completionDate: { type: Date, required: true },
-            btcPriceAtCompletion: { type: Number } // If applicable
+            btcPriceAtCompletion: { type: Number }
         }],
-        // New investments started in this period
         started: [{
             investmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Investment' },
             planName: { type: String, required: true },
@@ -2370,16 +2246,12 @@ const FinancialStatementSchema = new mongoose.Schema({
         }],
         summary: {
             totalPrincipalInvestedUSD: { type: Number, default: 0 },
-            totalReturnsEarnedUSD: { type: Number, default: 0 }, // From matured investments
+            totalReturnsEarnedUSD: { type: Number, default: 0 },
             totalProfitUSD: { type: Number, default: 0 },
             totalActiveInvestmentsCount: { type: Number, default: 0 },
             totalActivePrincipalUSD: { type: Number, default: 0 }
         }
     },
-
-    // =============================================
-    // 5. TRADING ACTIVITY (BUYS & SELLS)
-    // =============================================
     trading: {
         buys: [{
             buyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Buy' },
@@ -2409,10 +2281,6 @@ const FinancialStatementSchema = new mongoose.Schema({
             netTradingPnLUSD: { type: Number, default: 0 }
         }
     },
-
-    // =============================================
-    // 6. FEES PAID (PLATFORM REVENUE)
-    // =============================================
     fees: {
         items: [{
             source: { type: String, enum: ['investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'conversion_fee', 'loan_disbursement_fee'] },
@@ -2430,10 +2298,6 @@ const FinancialStatementSchema = new mongoose.Schema({
             loanFeesUSD: { type: Number, default: 0 }
         }
     },
-
-    // =============================================
-    // 7. REFERRAL & DOWNLINE COMMISSIONS
-    // =============================================
     referrals: {
         commissionsEarned: [{
             commissionId: { type: mongoose.Schema.Types.ObjectId, ref: 'CommissionHistory' },
@@ -2442,7 +2306,7 @@ const FinancialStatementSchema = new mongoose.Schema({
                 name: { type: String }
             },
             amountUSD: { type: Number, required: true },
-            level: { type: Number }, // 1 for direct, 2+ for downline
+            level: { type: Number },
             sourceInvestmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Investment' },
             date: { type: Date, required: true }
         }],
@@ -2452,10 +2316,6 @@ const FinancialStatementSchema = new mongoose.Schema({
             downlineCommissionEarningsUSD: { type: Number, default: 0 }
         }
     },
-
-    // =============================================
-    // 8. LOANS
-    // =============================================
     loans: {
         activeLoans: [{
             loanId: { type: mongoose.Schema.Types.ObjectId, ref: 'Loan' },
@@ -2480,28 +2340,18 @@ const FinancialStatementSchema = new mongoose.Schema({
             totalInterestPaidUSD: { type: Number, default: 0 }
         }
     },
-
-    // =============================================
-    // 9. CRYPTO ASSET PERFORMANCE (PnL)
-    // =============================================
     assetPerformance: [{
-        asset: { type: String, required: true }, // e.g., 'btc'
-        openingBalance: { type: Number, required: true }, // Amount at period start
-        closingBalance: { type: Number, required: true }, // Amount at period end
-        netChangeAmount: { type: Number, required: true }, // Closing - Opening (in units)
-        openingValueUSD: { type: Number, required: true }, // Value at start price
-        closingValueUSD: { type: Number, required: true }, // Value at end price
-        netChangeValueUSD: { type: Number, required: true }, // Unrealized PnL from holding
-        priceChangePercentage: { type: Number, required: true }, // Asset's market price change
-        // Realized PnL from trading this asset
+        asset: { type: String, required: true },
+        openingBalance: { type: Number, required: true },
+        closingBalance: { type: Number, required: true },
+        netChangeAmount: { type: Number, required: true },
+        openingValueUSD: { type: Number, required: true },
+        closingValueUSD: { type: Number, required: true },
+        netChangeValueUSD: { type: Number, required: true },
+        priceChangePercentage: { type: Number, required: true },
         realizedPnLUSD: { type: Number, default: 0 },
-        // Total PnL = Realized + Unrealized
         totalPnLUSD: { type: Number, default: 0 }
     }],
-
-    // =============================================
-    // 10. CARD PAYMENTS (If used)
-    // =============================================
     cardPayments: [{
         cardPaymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'CardPayment' },
         amountUSD: { type: Number, required: true },
@@ -2510,46 +2360,29 @@ const FinancialStatementSchema = new mongoose.Schema({
         status: { type: String },
         date: { type: Date, required: true }
     }],
-
-    // =============================================
-    // 11. STATEMENT METADATA & GENERATION INFO
-    // =============================================
     summary: {
-        // Overall net performance for the period
-        totalInflowUSD: { type: Number, default: 0 }, // Deposits + Interest + Referrals + Trading Profits
-        totalOutflowUSD: { type: Number, default: 0 }, // Withdrawals + Fees + Trading Losses
-        netCashFlowUSD: { type: Number, default: 0 }, // Inflow - Outflow
-        totalProfitUSD: { type: Number, default: 0 }, // Investment profits + Trading profits + Referral earnings
-        totalLossUSD: { type: Number, default: 0 }, // Trading losses + Fees
-        netProfitUSD: { type: Number, default: 0 }, // TotalProfit - TotalLoss
-        roiPercentage: { type: Number, default: 0 } // (NetProfit / OpeningBalance) * 100
+        totalInflowUSD: { type: Number, default: 0 },
+        totalOutflowUSD: { type: Number, default: 0 },
+        netCashFlowUSD: { type: Number, default: 0 },
+        totalProfitUSD: { type: Number, default: 0 },
+        totalLossUSD: { type: Number, default: 0 },
+        netProfitUSD: { type: Number, default: 0 },
+        roiPercentage: { type: Number, default: 0 }
     },
-    
-    // For compliance and auditing
     ipAddress: { type: String },
     userAgent: { type: String },
     location: { type: String },
     isDelivered: { type: Boolean, default: false },
     deliveredAt: { type: Date },
-    downloadUrl: { type: String } // For PDF version
-
+    downloadUrl: { type: String }
 }, { timestamps: true });
 
-// Indexes for fast queries
 FinancialStatementSchema.index({ user: 1, 'period.endDate': -1 });
 FinancialStatementSchema.index({ reference: 1 }, { unique: true });
 FinancialStatementSchema.index({ 'period.startDate': 1, 'period.endDate': 1 });
 FinancialStatementSchema.index({ statementType: 1, 'period.endDate': -1 });
 
 const FinancialStatement = mongoose.model('FinancialStatement', FinancialStatementSchema);
-
-
-
-
-
-
-
-
 
 const NotificationSchema = new mongoose.Schema({
   title: {
@@ -2936,26 +2769,7 @@ PlatformRevenueSchema.index({ userId: 1 });
 
 const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-// =============================================
-// SYSTEM LOG SCHEMA - ENTERPRISE ROBUST VERSION
-// Captures every activity in the system with extreme detail
-// =============================================
-
 const SystemLogSchema = new mongoose.Schema({
-  // Core identification
   action: { 
     type: String, 
     required: [true, 'Action is required'],
@@ -2982,8 +2796,6 @@ const SystemLogSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     index: true
   },
-  
-  // Who performed the action
   performedBy: { 
     type: mongoose.Schema.Types.ObjectId, 
     refPath: 'performedByModel',
@@ -2996,8 +2808,6 @@ const SystemLogSchema = new mongoose.Schema({
   },
   performedByEmail: { type: String, index: true },
   performedByName: { type: String },
-  
-  // Network and location details (ENHANCED)
   ip: { type: String, index: true },
   ipType: { type: String, enum: ['public', 'private', 'localhost', 'unknown'], default: 'unknown' },
   userAgent: { type: String },
@@ -3013,8 +2823,6 @@ const SystemLogSchema = new mongoose.Schema({
   longitude: { type: Number },
   timezone: { type: String },
   isp: { type: String },
-  
-  // Request details
   requestMethod: { type: String, enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'] },
   requestUrl: { type: String },
   requestPath: { type: String },
@@ -3025,13 +2833,9 @@ const SystemLogSchema = new mongoose.Schema({
     of: String,
     select: false
   },
-  
-  // Response details
   responseStatus: { type: Number, index: true },
   responseTime: { type: Number },
   responseSize: { type: Number },
-  
-  // Status and outcome
   status: { 
     type: String, 
     enum: ['success', 'failed', 'pending', 'processing', 'cancelled', 'blocked', 'retry'],
@@ -3041,8 +2845,6 @@ const SystemLogSchema = new mongoose.Schema({
   errorCode: { type: String, index: true },
   errorMessage: { type: String },
   errorStack: { type: String, select: false },
-  
-  // Security and risk assessment
   riskLevel: { 
     type: String, 
     enum: ['low', 'medium', 'high', 'critical'],
@@ -3053,8 +2855,6 @@ const SystemLogSchema = new mongoose.Schema({
   riskFactors: [{ type: String }],
   isSuspicious: { type: Boolean, default: false, index: true },
   isAnomaly: { type: Boolean, default: false },
-  
-  // Financial details (when applicable)
   financial: {
     amount: { type: Number },
     amountUSD: { type: Number },
@@ -3069,39 +2869,27 @@ const SystemLogSchema = new mongoose.Schema({
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
     reference: { type: String, index: true }
   },
-  
-  // Changes tracking (for updates)
   changes: {
     before: { type: mongoose.Schema.Types.Mixed },
     after: { type: mongoose.Schema.Types.Mixed },
     fields: [{ type: String }],
     diff: { type: mongoose.Schema.Types.Mixed }
   },
-  
-  // Related entities
   relatedEntities: [{
     entityType: { type: String },
     entityId: { type: mongoose.Schema.Types.ObjectId },
     entityModel: { type: String }
   }],
-  
-  // Session and request tracking
   sessionId: { type: String, index: true },
   requestId: { type: String, index: true },
   correlationId: { type: String, index: true },
-  
-  // Performance metrics
   performance: {
     memoryUsage: { type: Number },
     cpuUsage: { type: Number },
     dbQueryTime: { type: Number },
     externalApiTime: { type: Number }
   },
-  
-  // Metadata (flexible for any additional data)
   metadata: { type: mongoose.Schema.Types.Mixed },
-  
-  // Audit trail
   audit: {
     requiresReview: { type: Boolean, default: false },
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
@@ -3109,8 +2897,6 @@ const SystemLogSchema = new mongoose.Schema({
     reviewNotes: { type: String },
     retentionPeriod: { type: Number, default: 90 }
   },
-  
-  // Timestamps
   createdAt: { type: Date, default: Date.now, index: true },
   updatedAt: { type: Date, default: Date.now }
 }, { 
@@ -3143,10 +2929,6 @@ const SystemLogSchema = new mongoose.Schema({
   }
 });
 
-// =============================================
-// INDEXES FOR PERFORMANCE
-// =============================================
-
 SystemLogSchema.index({ createdAt: -1, action: 1 });
 SystemLogSchema.index({ performedBy: 1, createdAt: -1 });
 SystemLogSchema.index({ entity: 1, entityId: 1, createdAt: -1 });
@@ -3158,7 +2940,6 @@ SystemLogSchema.index({ 'financial.reference': 1 });
 SystemLogSchema.index({ sessionId: 1, createdAt: -1 });
 SystemLogSchema.index({ correlationId: 1 });
 
-// Text search index
 SystemLogSchema.index({
   action: 'text',
   errorMessage: 'text',
@@ -3168,12 +2949,7 @@ SystemLogSchema.index({
   'metadata.description': 'text'
 });
 
-// TTL index for automatic cleanup (90 days default)
 SystemLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
-
-// =============================================
-// PRE-SAVE HOOKS
-// =============================================
 
 SystemLogSchema.pre('save', function(next) {
   this.updatedAt = new Date();
@@ -3191,10 +2967,6 @@ SystemLogSchema.pre('save', function(next) {
   
   next();
 });
-
-// =============================================
-// VIRTUALS
-// =============================================
 
 SystemLogSchema.virtual('actionDescription').get(function() {
   const descriptions = {
@@ -3261,14 +3033,6 @@ SystemLogSchema.virtual('isSecurityRelated').get(function() {
   return securityActions.includes(this.action);
 });
 
-// =============================================
-// STATIC METHODS
-// =============================================
-
-// Initialize stats object
-SystemLogSchema.statics.stats = {};
-
-// Get logs by user
 SystemLogSchema.statics.findByUser = function(userId, options = {}) {
   const { limit = 50, page = 1, action = null, startDate = null, endDate = null } = options;
   const skip = (page - 1) * limit;
@@ -3287,7 +3051,6 @@ SystemLogSchema.statics.findByUser = function(userId, options = {}) {
     .limit(limit);
 };
 
-// Get logs by admin
 SystemLogSchema.statics.findByAdmin = function(adminId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
@@ -3301,7 +3064,6 @@ SystemLogSchema.statics.findByAdmin = function(adminId, options = {}) {
     .limit(limit);
 };
 
-// Get logs by entity
 SystemLogSchema.statics.findByEntity = function(entityType, entityId, options = {}) {
   const { limit = 50, page = 1 } = options;
   const skip = (page - 1) * limit;
@@ -3312,7 +3074,6 @@ SystemLogSchema.statics.findByEntity = function(entityType, entityId, options = 
     .limit(limit);
 };
 
-// Get suspicious activities
 SystemLogSchema.statics.findSuspicious = function(days = 7, options = {}) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3325,7 +3086,6 @@ SystemLogSchema.statics.findSuspicious = function(days = 7, options = {}) {
   .limit(options.limit || 100);
 };
 
-// Get activities by risk level
 SystemLogSchema.statics.findByRiskLevel = function(riskLevel, days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3336,7 +3096,6 @@ SystemLogSchema.statics.findByRiskLevel = function(riskLevel, days = 7) {
   }).sort({ createdAt: -1 });
 };
 
-// Get user activity summary
 SystemLogSchema.statics.getUserActivitySummary = async function(userId, days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3369,12 +3128,7 @@ SystemLogSchema.statics.getUserActivitySummary = async function(userId, days = 3
   return summary;
 };
 
-// =============================================
-// STATS METHODS (attached to the stats object)
-// =============================================
-
-// Get geographical distribution
-SystemLogSchema.stats.stats.getGeoDistribution = async function(days = 7) {
+SystemLogSchema.statics.stats.getGeoDistribution = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3399,7 +3153,6 @@ SystemLogSchema.stats.stats.getGeoDistribution = async function(days = 7) {
   ]);
 };
 
-// Get hourly activity pattern
 SystemLogSchema.stats.stats.getHourlyPattern = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3425,7 +3178,6 @@ SystemLogSchema.stats.stats.getHourlyPattern = async function(days = 7) {
   ]);
 };
 
-// Get activity by entity type
 SystemLogSchema.stats.stats.getByEntityType = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3450,7 +3202,6 @@ SystemLogSchema.stats.stats.getByEntityType = async function(days = 30) {
   ]);
 };
 
-// Get risk level distribution
 SystemLogSchema.stats.stats.getRiskDistribution = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3475,7 +3226,6 @@ SystemLogSchema.stats.stats.getRiskDistribution = async function(days = 30) {
   ]);
 };
 
-// Get top users by activity
 SystemLogSchema.stats.stats.getTopActiveUsers = async function(limit = 10, days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3513,11 +3263,6 @@ SystemLogSchema.stats.stats.getTopActiveUsers = async function(limit = 10, days 
   ]);
 };
 
-// =============================================
-// INSTANCE METHODS
-// =============================================
-
-// Mark as reviewed
 SystemLogSchema.methods.markAsReviewed = async function(adminId, notes) {
   this.audit = {
     requiresReview: false,
@@ -3529,7 +3274,6 @@ SystemLogSchema.methods.markAsReviewed = async function(adminId, notes) {
   return this.save();
 };
 
-// Mark as suspicious with reason
 SystemLogSchema.methods.markAsSuspicious = async function(reason, riskLevel = 'high') {
   this.isSuspicious = true;
   this.riskLevel = riskLevel;
@@ -3539,16 +3283,11 @@ SystemLogSchema.methods.markAsSuspicious = async function(reason, riskLevel = 'h
   return this.save();
 };
 
-// Add related entity
 SystemLogSchema.methods.addRelatedEntity = function(entityType, entityId, entityModel) {
   if (!this.relatedEntities) this.relatedEntities = [];
   this.relatedEntities.push({ entityType, entityId, entityModel });
   return this;
 };
-
-// =============================================
-// QUERY HELPERS
-// =============================================
 
 SystemLogSchema.query.byDateRange = function(startDate, endDate) {
   return this.where('createdAt').gte(startDate).lte(endDate);
@@ -3576,20 +3315,7 @@ SystemLogSchema.query.byPerformedBy = function(performedBy, model = null) {
   return query;
 };
 
-// =============================================
-// COMPILE SYSTEM LOG MODEL
-// =============================================
-
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
-
-
-
-
-
-
-
-
-
 
 const KYCSchema = new mongoose.Schema({
   user: {
@@ -4190,18 +3916,10 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
-
-
-
-
-
-
-// Cache configuration
 const cryptoPriceCache = new Map();
-const CACHE_TTL = 30000; // 30 seconds cache TTL (reduces API calls while keeping prices reasonably fresh)
-const RATE_LIMIT_COOLDOWN = 1000; // 1 second cooldown between API calls
+const CACHE_TTL = 30000;
+const RATE_LIMIT_COOLDOWN = 1000;
 
-// Helper function to get cached price
 const getCachedPrice = (asset) => {
   const cached = cryptoPriceCache.get(asset);
   if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
@@ -4211,7 +3929,6 @@ const getCachedPrice = (asset) => {
   return null;
 };
 
-// Helper function to set cached price
 const setCachedPrice = (asset, price) => {
   cryptoPriceCache.set(asset, {
     price: price,
@@ -4220,7 +3937,6 @@ const setCachedPrice = (asset, price) => {
 };
 
 const getCryptoPrice = async (asset) => {
-  // Check cache first
   const cachedPrice = getCachedPrice(asset);
   if (cachedPrice !== null) {
     return cachedPrice;
@@ -4229,7 +3945,6 @@ const getCryptoPrice = async (asset) => {
   try {
     const assetUpper = asset.toUpperCase();
     
-    // Handle stablecoins - they are always $1 (this is factual, not a fallback)
     const stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP'];
     if (stablecoins.includes(assetUpper)) {
       console.log(`${assetUpper} is a stablecoin, price is $1`);
@@ -4237,12 +3952,10 @@ const getCryptoPrice = async (asset) => {
       return 1;
     }
     
-    // No hardcoded asset map - fetch all trading cryptos dynamically from Binance
     let allSymbols = [];
     let assetFound = false;
     let coinId = null;
     
-    // Fetch all trading symbols from Binance to find matching asset
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -4255,7 +3968,6 @@ const getCryptoPrice = async (asset) => {
         const exchangeInfo = await exchangeInfoResponse.json();
         const tradingPairs = exchangeInfo.symbols.filter(s => s.status === 'TRADING');
         
-        // Try to find the asset in trading pairs (as base asset)
         const matchingPair = tradingPairs.find(p => 
           p.baseAsset.toUpperCase() === assetUpper || 
           p.quoteAsset.toUpperCase() === assetUpper
@@ -4270,7 +3982,6 @@ const getCryptoPrice = async (asset) => {
       console.log(`Failed to fetch exchange info: ${err.message}`);
     }
     
-    // If asset not found in Binance, try CoinGecko to get coin ID
     if (!assetFound) {
       try {
         const controller = new AbortController();
@@ -4298,12 +4009,10 @@ const getCryptoPrice = async (asset) => {
       }
     }
     
-    // If asset still not found, try direct API calls without mapping
     if (!assetFound) {
       console.log(`No mapping found for ${assetUpper}, trying direct API calls...`);
     }
     
-    // Try direct price fetch using Binance (works for any USD pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4325,7 +4034,6 @@ const getCryptoPrice = async (asset) => {
       console.log(`Binance direct failed for ${asset}:`, err.message);
     }
     
-    // Try Binance direct with different pair format (USD)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4347,10 +4055,8 @@ const getCryptoPrice = async (asset) => {
       console.log(`Binance USD direct failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown before next API batch
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try CoinGecko with dynamic coin ID lookup
     if (coinId) {
       try {
         const controller = new AbortController();
@@ -4374,10 +4080,8 @@ const getCryptoPrice = async (asset) => {
       }
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try CoinGecko search endpoint for unknown coins
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4410,10 +4114,8 @@ const getCryptoPrice = async (asset) => {
       console.log(`CoinGecko search failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try CryptoCompare (works with any crypto symbol)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4435,12 +4137,9 @@ const getCryptoPrice = async (asset) => {
       console.log(`CryptoCompare failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try Kraken with dynamic symbol lookup
     try {
-      // Fetch available pairs from Kraken
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
       const pairsResponse = await fetch('https://api.kraken.com/0/public/AssetPairs', {
@@ -4451,7 +4150,6 @@ const getCryptoPrice = async (asset) => {
       if (pairsResponse.ok) {
         const pairsData = await pairsResponse.json();
         if (pairsData && pairsData.result) {
-          // Find matching pair
           const matchingPair = Object.keys(pairsData.result).find(key => 
             key.includes(assetUpper) && (key.includes('USD') || key.includes('USDT'))
           );
@@ -4481,10 +4179,8 @@ const getCryptoPrice = async (asset) => {
       console.log(`Kraken failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try KuCoin (works with any USDT pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4506,10 +4202,8 @@ const getCryptoPrice = async (asset) => {
       console.log(`KuCoin failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try Bybit (works with any USDT pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4533,10 +4227,8 @@ const getCryptoPrice = async (asset) => {
       console.log(`Bybit failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try OKX (works with any USDT pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4558,10 +4250,8 @@ const getCryptoPrice = async (asset) => {
       console.log(`OKX failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try Gate.io (works with any USDT pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4583,10 +4273,8 @@ const getCryptoPrice = async (asset) => {
       console.log(`Gate.io failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try Coinbase (works with any USD pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4608,14 +4296,12 @@ const getCryptoPrice = async (asset) => {
       console.log(`Coinbase failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try Huobi (works with any USDT pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`https://api.huobi.pro/market/detail/merged?symbol=${assetUpper.toLowerCase()}usdt`, {
+      const response = await fetch(`https://api.huobi.pro/market/detail/merged?symbol=${assetLower.toLowerCase()}usdt`, {
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -4633,10 +4319,8 @@ const getCryptoPrice = async (asset) => {
       console.log(`Huobi failed for ${asset}:`, err.message);
     }
     
-    // Rate limiting cooldown
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
-    // Try Bitfinex (works with any USD pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4658,7 +4342,6 @@ const getCryptoPrice = async (asset) => {
       console.log(`Bitfinex failed for ${asset}:`, err.message);
     }
     
-    // If all APIs failed, return null (no fake fallback)
     console.error(`❌ All APIs failed to fetch price for ${asset}`);
     return null;
     
@@ -4667,13 +4350,6 @@ const getCryptoPrice = async (asset) => {
     return null;
   }
 };
-
-
-
-
-
-
-
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
@@ -4873,33 +4549,24 @@ const getComprehensiveDeviceInfo = (req) => {
   const userAgent = req.headers['user-agent'] || '';
   const ip = getRealClientIP(req);
   
-  // Use device-detector for comprehensive parsing
   const result = deviceDetector.detect(userAgent);
   
-  // Get bot info if applicable
   const botInfo = deviceDetector.parseBot(userAgent);
   
-  // Get client info (browser, engine, OS)
   const clientInfo = result.client || {};
   const osInfo = result.os || {};
   const deviceInfo = result.device || {};
   
-  // Build comprehensive device information
   const comprehensiveInfo = {
-    // Basic device type
     type: deviceInfo.type || 'unknown',
     brand: deviceInfo.brand || '',
     model: deviceInfo.model || '',
-    
-    // Operating System
     os: {
       name: osInfo.name || 'Unknown',
       version: osInfo.version || '',
       platform: osInfo.platform || '',
       family: osInfo.family || ''
     },
-    
-    // Browser/Client
     browser: {
       name: clientInfo.name || 'Unknown',
       version: clientInfo.version || '',
@@ -4907,8 +4574,6 @@ const getComprehensiveDeviceInfo = (req) => {
       engine: clientInfo.engine || '',
       engineVersion: clientInfo.engineVersion || ''
     },
-    
-    // Bot detection
     isBot: !!botInfo,
     botInfo: botInfo ? {
       name: botInfo.name,
@@ -4916,8 +4581,6 @@ const getComprehensiveDeviceInfo = (req) => {
       url: botInfo.url,
       producer: botInfo.producer
     } : null,
-    
-    // Additional device characteristics
     characteristics: {
       isMobile: deviceInfo.type === 'smartphone' || deviceInfo.type === 'feature phone',
       isTablet: deviceInfo.type === 'tablet',
@@ -4928,14 +4591,8 @@ const getComprehensiveDeviceInfo = (req) => {
       isCarBrowser: deviceInfo.type === 'car browser',
       isBot: !!botInfo
     },
-    
-    // Original user agent
     userAgent: userAgent,
-    
-    // IP address
     ip: ip,
-    
-    // Timestamp
     detectedAt: new Date().toISOString()
   };
   
@@ -5116,7 +4773,6 @@ const getUserDeviceInfo = async (req) => {
       console.log(`Private IP detected: ${ip}, using local network location`);
     }
 
-    // Get comprehensive device info using device-detector
     const deviceInfo = getComprehensiveDeviceInfo(req);
 
     return {
@@ -5126,7 +4782,6 @@ const getUserDeviceInfo = async (req) => {
       isPublicIP: isPublicIP,
       exactLocation: exactLocation,
       locationDetails: locationDetails,
-      // Enhanced device information from device-detector
       deviceDetails: {
         type: deviceInfo.type,
         brand: deviceInfo.brand,
@@ -5608,10 +5263,8 @@ const recalculateAllUserBalances = async (io) => {
       let totalActiveValue = 0;
       let totalMaturedValue = 0;
       
-      // Calculate MAIN wallet value (crypto assets only - fluctuates with price)
       if (user.balances && user.balances.main) {
         const mainBalances = user.balances.main;
-        // Handle both Map and plain object formats
         const entries = mainBalances instanceof Map ? mainBalances.entries() : Object.entries(mainBalances);
         
         for (const [asset, balance] of entries) {
@@ -5624,25 +5277,21 @@ const recalculateAllUserBalances = async (io) => {
         }
       }
       
-      // Calculate ACTIVE wallet value (mining contracts - FIXED, does NOT fluctuate)
       if (user.balances && user.balances.active) {
         const activeBalances = user.balances.active;
         const entries = activeBalances instanceof Map ? activeBalances.entries() : Object.entries(activeBalances);
         
         for (const [asset, balance] of entries) {
           if (balance > 0) {
-            // Active wallet stores USD value directly - no price fluctuation
             if (asset === 'usd') {
               totalActiveValue += balance;
             } else {
-              // For crypto in active wallet, use stored value (not recalculated with current price)
               totalActiveValue += balance;
             }
           }
         }
       }
       
-      // Calculate MATURED wallet value (crypto assets only - fluctuates with price)
       if (user.balances && user.balances.matured) {
         const maturedBalances = user.balances.matured;
         const entries = maturedBalances instanceof Map ? maturedBalances.entries() : Object.entries(maturedBalances);
@@ -5657,7 +5306,6 @@ const recalculateAllUserBalances = async (io) => {
         }
       }
       
-      // Check if we need to update (avoid unnecessary writes)
       const currentMainUSD = user.balances?.main?.get?.('usd') || user.balances?.main?.usd || 0;
       const currentActiveUSD = user.balances?.active?.get?.('usd') || user.balances?.active?.usd || 0;
       const currentMaturedUSD = user.balances?.matured?.get?.('usd') || user.balances?.matured?.usd || 0;
@@ -5667,7 +5315,6 @@ const recalculateAllUserBalances = async (io) => {
       const needsMaturedUpdate = Math.abs(currentMaturedUSD - totalMaturedValue) > 0.01;
       
       if (needsMainUpdate || needsActiveUpdate || needsMaturedUpdate) {
-        // Update USD values in the balances Maps
         if (!user.balances) user.balances = { main: new Map(), active: new Map(), matured: new Map() };
         if (!user.balances.main) user.balances.main = new Map();
         if (!user.balances.active) user.balances.active = new Map();
@@ -5680,7 +5327,6 @@ const recalculateAllUserBalances = async (io) => {
         await User.findByIdAndUpdate(user._id, { balances: user.balances });
         updatedCount++;
         
-        // Emit real-time updates via Socket.IO
         if (io) {
           io.to(`user_${user._id}`).emit('balance_update', {
             main: totalMainValue,
@@ -5688,7 +5334,6 @@ const recalculateAllUserBalances = async (io) => {
             matured: totalMaturedValue
           });
           
-          // Calculate daily PnL for main wallet (if we have previous day's value)
           const previousDayKey = `user:${user._id}:prev_main_value`;
           const cachedPrev = await redis.get(previousDayKey);
           let dailyPnL = 0;
@@ -5711,7 +5356,6 @@ const recalculateAllUserBalances = async (io) => {
             }
           });
           
-          // Store today's value for tomorrow's PnL
           const today = new Date().toDateString();
           const lastDate = await redis.get(`user:${user._id}:pnl_date`);
           if (lastDate !== today) {
@@ -5728,6 +5372,377 @@ const recalculateAllUserBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
+
+// =============================================
+// BANK-LIKE AUTOMATIC FINANCIAL STATEMENT CRON JOB
+// =============================================
+const generateFinancialStatementsForAllUsers = async () => {
+  console.log('🏦 [BANK CRON] Starting automatic financial statement generation...');
+  const startTime = Date.now();
+  
+  try {
+    // Determine statement period
+    const now = new Date();
+    let periodStart, periodEnd;
+    let statementType;
+    
+    // Check if we should generate weekly or monthly
+    // Weekly: Generate every Sunday at 23:59
+    // Monthly: Generate on last day of month at 23:59
+    const isLastDayOfMonth = now.getDate() === new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const isSunday = now.getDay() === 0;
+    
+    if (isLastDayOfMonth) {
+      // Monthly statement
+      statementType = 'monthly';
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      periodStart.setHours(0, 0, 0, 0);
+      periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      periodEnd.setHours(23, 59, 59, 999);
+      console.log(`📅 Generating MONTHLY statements for ${periodStart.toLocaleDateString()} to ${periodEnd.toLocaleDateString()}`);
+    } else if (isSunday) {
+      // Weekly statement
+      statementType = 'weekly';
+      periodStart = new Date(now);
+      periodStart.setDate(now.getDate() - 7);
+      periodStart.setHours(0, 0, 0, 0);
+      periodEnd = new Date(now);
+      periodEnd.setHours(23, 59, 59, 999);
+      console.log(`📅 Generating WEEKLY statements for ${periodStart.toLocaleDateString()} to ${periodEnd.toLocaleDateString()}`);
+    } else {
+      console.log('⏭️ Not a statement generation day. Skipping cron job.');
+      return;
+    }
+    
+    // Get all active users
+    const users = await User.find({ status: 'active' }).select('_id firstName lastName email balances');
+    console.log(`📊 Found ${users.length} active users to generate statements for`);
+    
+    let generatedCount = 0;
+    let failedCount = 0;
+    
+    for (const user of users) {
+      try {
+        // Check if statement already exists for this period
+        const existingStatement = await FinancialStatement.findOne({
+          user: user._id,
+          statementType: statementType,
+          'period.startDate': periodStart,
+          'period.endDate': periodEnd
+        });
+        
+        if (existingStatement && existingStatement.isDelivered) {
+          console.log(`⏭️ Statement already exists for user ${user.email}. Skipping.`);
+          continue;
+        }
+        
+        // =============================================
+        // FETCH ALL TRANSACTIONS FOR THE PERIOD
+        // =============================================
+        const transactions = await Transaction.find({
+          user: user._id,
+          createdAt: { $gte: periodStart, $lte: periodEnd },
+          status: 'completed'
+        }).sort({ createdAt: -1 });
+        
+        // =============================================
+        // CALCULATE OPENING AND CLOSING BALANCES
+        // =============================================
+        
+        // Get transactions BEFORE the period start to calculate accurate opening balance
+        const previousTransactions = await Transaction.find({
+          user: user._id,
+          createdAt: { $lt: periodStart },
+          status: 'completed'
+        });
+        
+        // Calculate opening balances using transaction history (more accurate than balance snapshot)
+        let openingMainUSD = 0;
+        let openingMaturedUSD = 0;
+        let openingActiveUSD = 0;
+        
+        // Add initial deposits and subtract withdrawals before period start
+        for (const tx of previousTransactions) {
+          if (tx.type === 'deposit') {
+            if (tx.method === 'btc' || tx.method === 'crypto') {
+              openingMainUSD += tx.netAmount || tx.amount || 0;
+            }
+          } else if (tx.type === 'withdrawal') {
+            if (tx.method === 'btc' || tx.method === 'crypto') {
+              openingMainUSD -= tx.amount || 0;
+            }
+          } else if (tx.type === 'investment') {
+            if (tx.details?.walletType === 'main') {
+              openingMainUSD -= tx.amount || 0;
+            }
+            openingActiveUSD += tx.amount || 0;
+          } else if (tx.type === 'interest') {
+            openingMaturedUSD += tx.amount || 0;
+          }
+        }
+        
+        // Also include any crypto balances from user balances at period start
+        // For crypto holdings, we need the price at period start
+        if (user.balances && user.balances.main) {
+          const mainMap = user.balances.main;
+          const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
+          for (const [asset, balance] of entries) {
+            if (balance > 0 && asset !== 'usd') {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              if (price && price > 0) {
+                openingMainUSD += balance * price;
+              }
+            }
+          }
+        }
+        
+        if (user.balances && user.balances.matured) {
+          const maturedMap = user.balances.matured;
+          const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
+          for (const [asset, balance] of entries) {
+            if (balance > 0 && asset !== 'usd') {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              if (price && price > 0) {
+                openingMaturedUSD += balance * price;
+              }
+            }
+          }
+        }
+        
+        // Calculate closing balances (current)
+        let closingMainUSD = 0;
+        let closingMaturedUSD = 0;
+        let closingActiveUSD = 0;
+        
+        if (user.balances && user.balances.main) {
+          const mainMap = user.balances.main;
+          const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
+          for (const [asset, balance] of entries) {
+            if (balance > 0 && asset !== 'usd') {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              if (price && price > 0) {
+                closingMainUSD += balance * price;
+              }
+            }
+          }
+        }
+        
+        if (user.balances && user.balances.matured) {
+          const maturedMap = user.balances.matured;
+          const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
+          for (const [asset, balance] of entries) {
+            if (balance > 0 && asset !== 'usd') {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              if (price && price > 0) {
+                closingMaturedUSD += balance * price;
+              }
+            }
+          }
+        }
+        
+        if (user.balances && user.balances.active) {
+          const activeMap = user.balances.active;
+          const entries = activeMap instanceof Map ? activeMap.entries() : Object.entries(activeMap);
+          for (const [asset, balance] of entries) {
+            if (balance > 0) {
+              closingActiveUSD += balance;
+            }
+          }
+        }
+        
+        const openingTotalUSD = openingMainUSD + openingActiveUSD + openingMaturedUSD;
+        const closingTotalUSD = closingMainUSD + closingActiveUSD + closingMaturedUSD;
+        const netChangeUSD = closingTotalUSD - openingTotalUSD;
+        
+        // =============================================
+        // AGGREGATE TRANSACTION SUMMARIES
+        // =============================================
+        let totalDeposits = 0;
+        let totalWithdrawals = 0;
+        let totalFees = 0;
+        
+        for (const tx of transactions) {
+          if (tx.type === 'deposit') {
+            totalDeposits += tx.netAmount || tx.amount || 0;
+          } else if (tx.type === 'withdrawal') {
+            totalWithdrawals += tx.amount || 0;
+            if (tx.fee) totalFees += tx.fee;
+          } else if (tx.type === 'buy' || tx.type === 'sell') {
+            if (tx.fee) totalFees += tx.fee;
+          } else if (tx.type === 'investment' && tx.fee) {
+            totalFees += tx.fee;
+          }
+        }
+        
+        // =============================================
+        // FETCH INVESTMENTS IN PERIOD
+        // =============================================
+        const investmentsInPeriod = await Investment.find({
+          user: user._id,
+          createdAt: { $gte: periodStart, $lte: periodEnd }
+        }).populate('plan');
+        
+        const maturedInvestments = await Investment.find({
+          user: user._id,
+          completionDate: { $gte: periodStart, $lte: periodEnd },
+          status: 'completed'
+        }).populate('plan');
+        
+        const activeInvestments = await Investment.find({
+          user: user._id,
+          status: 'active'
+        }).populate('plan');
+        
+        // =============================================
+        // CREATE FINANCIAL STATEMENT
+        // =============================================
+        const statement = new FinancialStatement({
+          user: user._id,
+          statementType: statementType,
+          period: {
+            startDate: periodStart,
+            endDate: periodEnd,
+            generationDate: new Date()
+          },
+          reference: `FS-${statementType.toUpperCase()}-${user._id.toString().slice(-6)}-${Date.now()}`,
+          openingBalances: {
+            totalUSD: openingTotalUSD,
+            mainWalletUSD: openingMainUSD,
+            activeWalletUSD: openingActiveUSD,
+            maturedWalletUSD: openingMaturedUSD,
+            cryptoDetails: [],
+            timestamp: periodStart
+          },
+          closingBalances: {
+            totalUSD: closingTotalUSD,
+            mainWalletUSD: closingMainUSD,
+            activeWalletUSD: closingActiveUSD,
+            maturedWalletUSD: closingMaturedUSD,
+            cryptoDetails: [],
+            timestamp: periodEnd
+          },
+          netChangeUSD: netChangeUSD,
+          transactions: {
+            list: transactions.map(tx => ({
+              transactionId: tx._id,
+              type: tx.type,
+              amountUSD: tx.amount,
+              asset: tx.asset,
+              assetAmount: tx.assetAmount,
+              status: tx.status,
+              method: tx.method,
+              description: tx.details?.description || `${tx.type} transaction`,
+              reference: tx.reference,
+              feeUSD: tx.fee || 0,
+              netAmountUSD: tx.netAmount || tx.amount,
+              exchangeRate: tx.exchangeRateAtTime,
+              createdAt: tx.createdAt,
+              processedAt: tx.processedAt
+            })),
+            summary: {
+              totalDepositsUSD: totalDeposits,
+              totalWithdrawalsUSD: totalWithdrawals,
+              totalFeesPaidUSD: totalFees,
+              totalTransfersUSD: 0,
+              count: {
+                deposits: transactions.filter(t => t.type === 'deposit').length,
+                withdrawals: transactions.filter(t => t.type === 'withdrawal').length,
+                transfers: 0
+              }
+            }
+          },
+          investments: {
+            active: activeInvestments.map(inv => ({
+              investmentId: inv._id,
+              planName: inv.plan?.name || 'Unknown Plan',
+              principalUSD: inv.amount,
+              principalBTC: inv.amountBTC,
+              expectedReturnUSD: inv.expectedReturn,
+              startDate: inv.startDate,
+              endDate: inv.endDate,
+              status: inv.status
+            })),
+            started: investmentsInPeriod.map(inv => ({
+              investmentId: inv._id,
+              planName: inv.plan?.name || 'Unknown Plan',
+              amountUSD: inv.amount,
+              amountBTC: inv.amountBTC,
+              startDate: inv.createdAt,
+              expectedReturnUSD: inv.expectedReturn
+            })),
+            matured: maturedInvestments.map(inv => ({
+              investmentId: inv._id,
+              planName: inv.plan?.name || 'Unknown Plan',
+              initialAmountUSD: inv.originalAmount || inv.amount,
+              returnAmountUSD: inv.expectedReturn || inv.amount,
+              profitUSD: (inv.expectedReturn || inv.amount) - (inv.originalAmount || inv.amount),
+              profitPercentage: inv.returnPercentage || 0,
+              completionDate: inv.completionDate || inv.endDate,
+              btcPriceAtCompletion: inv.btcPriceAtCompletion
+            })),
+            summary: {
+              totalPrincipalInvestedUSD: investmentsInPeriod.reduce((sum, i) => sum + (i.amount || 0), 0),
+              totalReturnsEarnedUSD: maturedInvestments.reduce((sum, i) => sum + ((i.expectedReturn || 0) - (i.originalAmount || 0)), 0),
+              totalProfitUSD: maturedInvestments.reduce((sum, i) => sum + ((i.expectedReturn || 0) - (i.originalAmount || 0)), 0),
+              totalActiveInvestmentsCount: activeInvestments.length,
+              totalActivePrincipalUSD: activeInvestments.reduce((sum, i) => sum + (i.amount || 0), 0)
+            }
+          },
+          summary: {
+            totalInflowUSD: totalDeposits,
+            totalOutflowUSD: totalWithdrawals,
+            netCashFlowUSD: totalDeposits - totalWithdrawals,
+            totalProfitUSD: netChangeUSD > 0 ? netChangeUSD : 0,
+            totalLossUSD: netChangeUSD < 0 ? Math.abs(netChangeUSD) : 0,
+            netProfitUSD: netChangeUSD,
+            roiPercentage: openingTotalUSD > 0 ? (netChangeUSD / openingTotalUSD) * 100 : 0
+          },
+          ipAddress: 'system.cron.job',
+          userAgent: 'Automated Statement Generator',
+          location: 'System',
+          isDelivered: true,
+          deliveredAt: new Date()
+        });
+        
+        await statement.save();
+        generatedCount++;
+        
+        console.log(`✅ Generated ${statementType} statement for ${user.email} (Net Change: $${netChangeUSD.toFixed(2)})`);
+        
+      } catch (userError) {
+        console.error(`❌ Failed to generate statement for user ${user._id}:`, userError.message);
+        failedCount++;
+      }
+    }
+    
+    const elapsedTime = Date.now() - startTime;
+    console.log(`🏦 [BANK CRON] Completed in ${elapsedTime}ms`);
+    console.log(`   ✅ Generated: ${generatedCount} statements`);
+    console.log(`   ❌ Failed: ${failedCount} statements`);
+    
+  } catch (err) {
+    console.error('❌ [BANK CRON] Fatal error in statement generation:', err);
+  }
+};
+
+// =============================================
+// SCHEDULE THE BANK-LIKE CRON JOB
+// =============================================
+// Run every day at 23:55 (5 minutes before midnight)
+cron.schedule('55 23 * * *', async () => {
+  console.log(`\n${'='.repeat(70)}`);
+  console.log(`🏦 [BANK CRON] Running automatic financial statement generation at ${new Date().toISOString()}`);
+  console.log(`${'='.repeat(70)}`);
+  await generateFinancialStatementsForAllUsers();
+  console.log(`${'='.repeat(70)}\n`);
+});
+
+// Also run once on server startup to catch up any missed statements
+setTimeout(() => {
+  generateFinancialStatementsForAllUsers();
+}, 30000);
+
+console.log('🏦 Bank-like financial statement cron job scheduled (runs daily at 23:55)');
 
 
 
