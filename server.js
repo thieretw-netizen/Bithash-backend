@@ -3712,7 +3712,7 @@ const logActivity = async (action, details = {}) => {
   }
 };
 
-
+module.exports.SystemLog = SystemLog;
 
 
 
