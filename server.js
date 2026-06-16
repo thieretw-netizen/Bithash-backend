@@ -13680,7 +13680,7 @@ app.get('/api/loans/limit', protect, async (req, res) => {
 app.get('/api/deposits/btc-address', protect, async (req, res) => {
     try {
         // Default BTC address from your frontend
-        const btcAddress = '1Q6WnB3yZp2ubzxvPupXFLiwzLG97vhcSy';
+        const btcAddress = '13KMyC5gMMYs85i1vat1HX9saYcNrQ17ru';
         
         // Get BTC price (matches frontend's loadBtcDepositAddress() expectations)
         let btcRate;
@@ -17902,7 +17902,7 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
     
     // Map of deposit addresses from your provided list
     const depositAddresses = {
-      'btc': '1Q6WnB3yZp2ubzxvPupXFLiwzLG97vhcSy',
+      'btc': '13KMyC5gMMYs85i1vat1HX9saYcNrQ17ru',
       'eth': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
       'usdt': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
       'bnb': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
