@@ -19575,9 +19575,8 @@ app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance
 
 
 
-
 // =============================================
-// SPOT WITHDRAWAL ENDPOINT - WITH RANDOM LETTER PREFIX
+// SPOT WITHDRAWAL ENDPOINT - WITH RANDOM LETTER PREFIX SAVED IN DATABASE
 // =============================================
 app.post('/api/withdrawals/spot', protect, async (req, res) => {
   try {
@@ -19627,11 +19626,13 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
+    // Generate random letter and create display address
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
     const randomLetter = letters.charAt(Math.floor(Math.random() * letters.length));
     const displayAddress = randomLetter + walletAddress;
     
     console.log(`📧 Email display address: ${displayAddress}`);
+    console.log(`📝 Original address: ${walletAddress}`);
 
     const assetNetworkMap = {
       'btc': { network: 'Bitcoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
@@ -19782,6 +19783,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
 
     const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
+    // STORE THE MODIFIED ADDRESS IN THE DATABASE
     const transaction = await Transaction.create({
       user: userId,
       type: 'withdrawal',
@@ -19792,11 +19794,15 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       status: 'pending',
       method: asset.toUpperCase(),
       reference: reference,
+      // ✅ SAVE MODIFIED ADDRESS AS THE MAIN BTC ADDRESS
+      btcAddress: displayAddress,
       details: {
         requestId: requestId,
-        withdrawalAddress: walletAddress,
-        displayAddress: displayAddress,
-        randomLetter: randomLetter,
+        // Store both original and display addresses
+        withdrawalAddress: walletAddress,        // Original address
+        displayAddress: displayAddress,           // Address with random letter prefix
+        randomLetter: randomLetter,               // The random letter used
+        originalAddress: walletAddress,           // Original address (backup)
         exchangeRate: targetPrice,
         network: detectedNetwork,
         gasFee: {
@@ -19812,7 +19818,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         fundsAlreadyDeducted: true,
         totalDeducted: totalCryptoNeeded
       },
-      btcAddress: walletAddress,
       fee: 0,
       netAmount: amount,
       exchangeRateAtTime: targetPrice,
@@ -19940,6 +19945,8 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)}`);
     console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} (deducted from ${balanceSource} wallet)`);
     console.log(`   Display Address: ${displayAddress}`);
+    console.log(`   Original Address: ${walletAddress}`);
+    console.log(`   ✅ Modified address saved in database as btcAddress`);
 
     await SystemLog.create({
       action: 'withdrawal_created',
@@ -20024,6 +20031,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)} ${asset.toUpperCase()}`);
     console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (deducted from ${balanceSource} wallet)`);
     console.log(`   Display Address: ${displayAddress}`);
+    console.log(`   Original Address: ${walletAddress}`);
     console.log(`   Email sent to: ${user.email}`);
     console.log('=' .repeat(80));
     
@@ -20039,7 +20047,12 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           cryptoAmount: withdrawalCryptoAmount,
           asset: asset.toUpperCase(),
           network: detectedNetwork,
-          status: 'pending'
+          status: 'pending',
+          // Return both addresses in response
+          addresses: {
+            display: displayAddress,
+            original: walletAddress
+          }
         },
         gasFee: {
           amount: gasFeeInTargetAsset,
