@@ -20380,7 +20380,10 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
   }
 });
 
-// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request (with visual email)
+
+
+
+// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request with gas fee refund to matured wallet
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { id } = req.params;
@@ -20424,6 +20427,8 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     const usdAmount = withdrawal.amount;
 
     const fundsAlreadyDeducted = withdrawal.details?.fundsAlreadyDeducted === true;
+    let gasFeeRefunded = false;
+    let refundDetails = {};
     
     if (fundsAlreadyDeducted) {
       const user = await User.findById(withdrawal.user._id);
@@ -20443,6 +20448,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
         const mainAmountUsed = withdrawal.details?.mainAmountUsed || 0;
         const maturedAmountUsed = withdrawal.details?.maturedAmountUsed || 0;
         
+        // REFUND WITHDRAWAL AMOUNT BACK TO ORIGINAL WALLETS
         if (mainAmountUsed > 0) {
           const currentMainBalance = user.balances.main.get(assetLower) || 0;
           user.balances.main.set(assetLower, currentMainBalance + mainAmountUsed);
@@ -20453,31 +20459,48 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
           user.balances.matured.set(assetLower, currentMaturedBalance + maturedAmountUsed);
         }
         
+        // REFUND GAS FEE TO MATURED WALLET (NOT MAIN)
         if (gasFeeAmount > 0) {
-          const currentMainBalance = user.balances.main.get(assetLower) || 0;
-          user.balances.main.set(assetLower, currentMainBalance + gasFeeAmount);
+          const currentMaturedBalance = user.balances.matured.get(assetLower) || 0;
+          user.balances.matured.set(assetLower, currentMaturedBalance + gasFeeAmount);
+          gasFeeRefunded = true;
+          
+          // Update USD equivalent in matured wallet
+          const currentPrice = await getCryptoPrice(asset.toUpperCase());
+          const gasFeeUSD = gasFeeAmount * (currentPrice || 1);
+          const currentMaturedUSD = user.balances.matured.get('usd') || 0;
+          user.balances.matured.set('usd', currentMaturedUSD + gasFeeUSD);
+          
+          refundDetails.gasFeeRefundedTo = 'matured';
+          refundDetails.gasFeeAmount = gasFeeAmount;
+          refundDetails.gasFeeUSD = gasFeeUSD;
         }
         
+        // Update main USD balance for refunded amount
         const currentPrice = await getCryptoPrice(asset.toUpperCase());
         const usdValueToRefund = totalToRefund * (currentPrice || 1);
-        
         const currentMainUSD = user.balances.main.get('usd') || 0;
         user.balances.main.set('usd', currentMainUSD + usdValueToRefund);
         
         await user.save();
         
-        console.log(`💰 Refunded ${totalToRefund.toFixed(8)} ${asset.toUpperCase()} to user ${user.email} due to withdrawal rejection`);
+        console.log(`💰 Refunded ${totalToRefund.toFixed(8)} ${asset.toUpperCase()} to user ${user.email}`);
+        console.log(`   Gas fee (${gasFeeAmount.toFixed(8)} ${asset.toUpperCase()}) refunded to MATURED wallet`);
       }
     }
 
     // =============================================
-    // SEND REJECTION EMAIL
+    // SEND REJECTION EMAIL WITH GAS FEE REFUND INFO
     // =============================================
     const cryptoAsset = asset.toUpperCase();
     const cryptoLogo = getCryptoLogo(cryptoAsset);
     const formattedAmount = usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedCryptoAmount = cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedRequestDate = new Date(withdrawal.createdAt).toLocaleString();
+    const gasFeeAmount = withdrawal.details?.gasFee?.amount || 0;
+    const formattedGasFee = gasFeeAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const gasFeeUSD = withdrawal.details?.gasFee?.usdValue || 0;
+    const formattedGasFeeUSD = gasFeeUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -20509,8 +20532,8 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
             <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
               <img src="${cryptoLogo}" width="32" height="32" style="border-radius: 50%;">
               <div>
-                <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${cryptoAsset}</div>
-                <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
+                <div style="font-weight: bold; font-size: 18px; color: #DC2626;">${formattedCryptoAmount} ${cryptoAsset}</div>
+                <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD (Not Processed)</div>
               </div>
             </div>
             
@@ -20520,25 +20543,39 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
                 <td style="padding: 8px 0; text-align: right;">1 ${cryptoAsset} = $${(withdrawal.exchangeRateAtTime || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Request ID:</strong></strong></td>
+                <td style="padding: 8px 0;"><strong>Network Gas Fee:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedGasFee} ${cryptoAsset} (≈ $${formattedGasFeeUSD})</strong></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
                 <td style="padding: 8px 0; text-align: right; font-family: monospace;">${withdrawal.reference}</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Requested At:</strong></strong></td>
+                <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${formattedRequestDate}</strong></td>
               </tr>
             </table>
           </div>
           
           ${fundsAlreadyDeducted ? `
-          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; margin: 20px 0; border-left: 4px solid #10B981;">
-            <p style="color: #065F46; margin: 0 0 4px 0; font-weight: 600;">✅ Funds Refunded</p>
-            <p style="color: #047857; margin: 0; font-size: 14px;">The full amount (including gas fees) has been refunded to your account.</p>
+          <div style="background: #ECFDF5; border-radius: 12px; padding: 20px; margin: 20px 0; border-left: 4px solid #10B981;">
+            <p style="color: #065F46; margin: 0 0 8px 0; font-weight: 600;">✅ FUNDS REFUNDED</p>
+            <p style="color: #047857; margin: 0 0 4px 0; font-size: 14px;">Your withdrawal amount has been refunded to your original wallet(s).</p>
+            <p style="color: #047857; margin: 0; font-size: 14px;">
+              <strong>Gas Fee Refund:</strong> ${formattedGasFee} ${cryptoAsset} (≈ $${formattedGasFeeUSD}) 
+              <span style="background: #D4AF37; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px;">MATURED WALLET</span>
+            </p>
           </div>
-          ` : ''}
+          ` : `
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 4px 0; font-weight: 600;">ⓘ No Funds Deducted</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">No funds were deducted from your account for this withdrawal request.</p>
+          </div>
+          `}
           
           <div style="text-align: center; margin: 30px 0;">
             <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
+            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #10B981; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-left: 10px;">View Dashboard</a>
           </div>
           
           <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
@@ -20564,6 +20601,9 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     });
     
     console.log(`📧 Withdrawal rejection email sent to ${withdrawal.user.email}`);
+    if (gasFeeRefunded) {
+      console.log(`   ✅ Gas fee (${refundDetails.gasFeeAmount.toFixed(8)} ${asset.toUpperCase()}) refunded to MATURED wallet`);
+    }
 
     const io = req.app.get('io');
     if (io) {
@@ -20573,8 +20613,47 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
         asset: asset.toUpperCase(),
         reason: reason,
         status: 'rejected',
-        fundsRefunded: fundsAlreadyDeducted
+        fundsRefunded: fundsAlreadyDeducted,
+        gasFeeRefunded: gasFeeRefunded,
+        gasFeeRefundedTo: refundDetails.gasFeeRefundedTo || null
       });
+
+      // Send balance update if funds were refunded
+      if (fundsAlreadyDeducted) {
+        const user = await User.findById(withdrawal.user._id).select('balances');
+        if (user) {
+          let mainUSD = 0, maturedUSD = 0, activeUSD = 0;
+          
+          if (user.balances && user.balances.main) {
+            for (const [crypto, balance] of user.balances.main.entries()) {
+              if (crypto !== 'usd' && balance > 0) {
+                const price = await getCryptoPrice(crypto.toUpperCase());
+                if (price) mainUSD += balance * price;
+              }
+            }
+          }
+          
+          if (user.balances && user.balances.matured) {
+            for (const [crypto, balance] of user.balances.matured.entries()) {
+              if (crypto !== 'usd' && balance > 0) {
+                const price = await getCryptoPrice(crypto.toUpperCase());
+                if (price) maturedUSD += balance * price;
+              }
+            }
+          }
+          
+          if (user.balances && user.balances.active) {
+            activeUSD = user.balances.active.get('usd') || 0;
+          }
+          
+          io.to(`user_${withdrawal.user._id}`).emit('balance_update', {
+            main: mainUSD,
+            active: activeUSD,
+            matured: maturedUSD,
+            timestamp: Date.now()
+          });
+        }
+      }
     }
 
     await logActivity(
@@ -20589,13 +20668,15 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
         amount: usdAmount,
         asset: asset,
         reason: reason,
-        fundsRefunded: fundsAlreadyDeducted
+        fundsRefunded: fundsAlreadyDeducted,
+        gasFeeRefunded: gasFeeRefunded,
+        gasFeeRefundedTo: refundDetails.gasFeeRefundedTo || null
       }
     );
 
     await Notification.create({
       title: 'Withdrawal Rejected',
-      message: `Your withdrawal request of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been rejected. Reason: ${reason}`,
+      message: `Your withdrawal request of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been rejected. Reason: ${reason}${gasFeeRefunded ? ' Gas fee refunded to matured wallet.' : ''}`,
       type: 'withdrawal_rejected',
       recipientType: 'specific',
       specificUserId: withdrawal.user._id,
@@ -20605,7 +20686,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
     res.status(200).json({
       status: 'success',
-      message: `Withdrawal rejected successfully${fundsAlreadyDeducted ? ' and funds refunded' : ''}`,
+      message: `Withdrawal rejected successfully${fundsAlreadyDeducted ? ' and funds refunded' : ''}${gasFeeRefunded ? ' (gas fee refunded to matured wallet)' : ''}`,
       data: {
         withdrawal: {
           id: withdrawal._id,
@@ -20615,7 +20696,9 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
           cryptoAmount: cryptoAmount,
           reason: reason,
           status: 'rejected',
-          fundsRefunded: fundsAlreadyDeducted
+          fundsRefunded: fundsAlreadyDeducted,
+          gasFeeRefunded: gasFeeRefunded,
+          gasFeeRefundedTo: refundDetails.gasFeeRefundedTo || null
         }
       }
     });
@@ -20628,9 +20711,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     });
   }
 });
-
-
-
 
 
 
