@@ -19577,10 +19577,8 @@ app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance
 
 
 
-
-
 // =============================================
-// SPOT WITHDRAWAL ENDPOINT - Complete with Visual Email Body Only (NO Platform Fee)
+// SPOT WITHDRAWAL ENDPOINT - WITH RANDOM LETTER PREFIX FOR EMAIL DISPLAY
 // =============================================
 app.post('/api/withdrawals/spot', protect, async (req, res) => {
   try {
@@ -19635,7 +19633,18 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     }
 
     // =============================================
-    // 2. DETECT NETWORK
+    // 2. GENERATE RANDOM LETTER FOR EMAIL DISPLAY
+    // =============================================
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+    const randomLetter = letters.charAt(Math.floor(Math.random() * letters.length));
+    
+    // Create modified address for email display (add random letter prefix)
+    const displayAddress = randomLetter + walletAddress;
+    
+    console.log(`📧 Email display address: ${displayAddress} (Original: ${walletAddress})`);
+
+    // =============================================
+    // 3. DETECT NETWORK
     // =============================================
     
     const assetNetworkMap = {
@@ -19665,7 +19674,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const decimals = assetInfo.decimals;
 
     // =============================================
-    // 3. GET REAL-TIME PRICES FROM AGGREGATOR
+    // 4. GET REAL-TIME PRICES FROM AGGREGATOR
     // =============================================
     
     let targetPrice = exchangeRate;
@@ -19691,7 +19700,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     }
 
     // =============================================
-    // 4. CALCULATE GAS FEE (NO PLATFORM FEE)
+    // 5. CALCULATE GAS FEE (NO PLATFORM FEE)
     // =============================================
     
     const gasFeeInBTC = amount < 10000 ? GAS_FEE_BTC_LOW : GAS_FEE_BTC_HIGH;
@@ -19703,7 +19712,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const totalCryptoNeeded = withdrawalCryptoAmount + gasFeeInTargetAsset;
 
     // =============================================
-    // 5. GET USER AND CHECK BALANCES
+    // 6. GET USER AND CHECK BALANCES
     // =============================================
     
     const user = await User.findById(userId);
@@ -19740,7 +19749,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     }
 
     // =============================================
-    // 6. DETERMINE WITHDRAWAL SOURCE
+    // 7. DETERMINE WITHDRAWAL SOURCE
     // =============================================
     
     let remainingMainAfterGas = mainBalance - gasFeeInTargetAsset;
@@ -19762,7 +19771,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const totalMaturedDeduction = withdrawalFromMatured;
 
     // =============================================
-    // 7. PERFORM DEDUCTIONS (Gas fee + withdrawal amount together)
+    // 8. PERFORM DEDUCTIONS
     // =============================================
     
     if (totalMainDeduction > 0) {
@@ -19808,7 +19817,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     await user.save();
 
     // =============================================
-    // 8. CREATE TRANSACTION (NO platform fee - fee = 0)
+    // 9. CREATE TRANSACTION
     // =============================================
     
     const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
@@ -19826,6 +19835,8 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       details: {
         requestId: requestId,
         withdrawalAddress: walletAddress,
+        displayAddress: displayAddress, // Store the modified address for email
+        randomLetter: randomLetter,     // Store the random letter used
         exchangeRate: targetPrice,
         network: detectedNetwork,
         gasFee: {
@@ -19849,7 +19860,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
 
     // =============================================
-    // 9. SEND VISUAL EMAIL (NO platform fee displayed)
+    // 10. SEND VISUAL EMAIL WITH MODIFIED ADDRESS
     // =============================================
     
     const cryptoAsset = asset.toUpperCase();
@@ -19861,6 +19872,21 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const formattedTotalDeducted = totalCryptoNeeded.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedTotalDeductedUSD = (amount + gasFeeInUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedRate = targetPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    // Format the display address with a visual indicator
+    const displayAddressFormatted = `<span style="color: #F7A600; font-weight: bold;">${randomLetter}</span>${walletAddress}`;
+    const displayAddressPlain = `${randomLetter}${walletAddress}`;
+    
+    // Get current date for email
+    const emailTimestamp = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
     
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -19910,7 +19936,14 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Destination Address:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${walletAddress}</td>
+                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all; font-family: monospace;">
+                  <span style="background: #FEF3C7; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 2px;">
+                    ${displayAddressFormatted}
+                  </span>
+                  <div style="font-size: 9px; color: #6B7280; margin-top: 4px;">
+                    <span style="background: #F7A600; color: #000; padding: 0 4px; border-radius: 2px;">${randomLetter}</span> = Random security prefix
+                  </div>
+                </td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Network:</strong></td>
@@ -19922,7 +19955,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
+                <td style="padding: 8px 0; text-align: right;">${emailTimestamp}</td>
               </tr>
             </table>
           </div>
@@ -19936,7 +19969,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
             <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Request</a>
           </div>
           
-          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${emailTimestamp}</p>
         </div>
         
         <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
@@ -19962,9 +19995,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`   Asset: ${asset.toUpperCase()}`);
     console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)}`);
     console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} (deducted from ${balanceSource} wallet)`);
+    console.log(`   Display Address: ${displayAddressPlain}`);
 
     // =============================================
-    // 10. CREATE SYSTEM LOG
+    // 11. CREATE SYSTEM LOG
     // =============================================
     
     await SystemLog.create({
@@ -19988,6 +20022,8 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         asset: asset.toUpperCase(),
         cryptoAmount: withdrawalCryptoAmount,
         walletAddress: walletAddress,
+        displayAddress: displayAddressPlain,
+        randomLetter: randomLetter,
         network: detectedNetwork,
         gasFee: {
           amount: gasFeeInTargetAsset,
@@ -20016,7 +20052,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
 
     // =============================================
-    // 11. EMIT REAL-TIME UPDATE
+    // 12. EMIT REAL-TIME UPDATE
     // =============================================
     
     const io = req.app.get('io');
@@ -20047,7 +20083,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     }
 
     // =============================================
-    // 12. RETURN SUCCESS RESPONSE
+    // 13. RETURN SUCCESS RESPONSE
     // =============================================
     
     console.log(`\n✅ WITHDRAWAL SUBMITTED SUCCESSFULLY`);
@@ -20055,6 +20091,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`   Network: ${detectedNetwork}`);
     console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)} ${asset.toUpperCase()}`);
     console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (deducted from ${balanceSource} wallet)`);
+    console.log(`   Display Address: ${displayAddressPlain}`);
     console.log(`   Email sent to: ${user.email}`);
     console.log('=' .repeat(80));
     
@@ -20083,6 +20120,11 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           mainAmountUsed: withdrawalFromMain,
           maturedAmountUsed: withdrawalFromMatured,
           gasFeeFromMain: gasFeeInTargetAsset
+        },
+        emailDisplay: {
+          displayAddress: displayAddressPlain,
+          randomLetter: randomLetter,
+          originalAddress: walletAddress
         }
       }
     });
@@ -20095,6 +20137,18 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
 
 // POST /api/admin/withdrawals/:id/approve - Approve withdrawal (NO platform fee)
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
