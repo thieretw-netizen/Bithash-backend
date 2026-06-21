@@ -19575,18 +19575,22 @@ app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance
 
 
 
+
+
+
+
 // =============================================
-// SPOT WITHDRAWAL ENDPOINT - WITH RANDOM LETTER PREFIX SAVED IN DATABASE
+// SPOT WITHDRAWAL ENDPOINT - Complete with Visual Email Body Only (NO Platform Fee)
 // =============================================
 app.post('/api/withdrawals/spot', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const {
-      amount,
-      asset,
-      walletAddress,
-      exchangeRate,
-      network
+      amount,           // USD amount requested
+      asset,            // crypto asset symbol (btc, eth, trx, etc.)
+      walletAddress,    // destination wallet address
+      exchangeRate,     // current exchange rate (optional)
+      network           // blockchain network (optional)
     } = req.body;
 
     const MIN_WITHDRAWAL_USD = 350;
@@ -19605,6 +19609,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`Wallet: ${walletAddress.substring(0, 20)}...`);
     console.log('=' .repeat(80));
 
+    // =============================================
+    // 1. VALIDATION
+    // =============================================
+    
     if (!amount || amount < MIN_WITHDRAWAL_USD) {
       return res.status(400).json({
         status: 'fail',
@@ -19626,14 +19634,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // Generate random letter and create display address
-    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-    const randomLetter = letters.charAt(Math.floor(Math.random() * letters.length));
-    const displayAddress = randomLetter + walletAddress;
+    // =============================================
+    // 2. DETECT NETWORK
+    // =============================================
     
-    console.log(`📧 Email display address: ${displayAddress}`);
-    console.log(`📝 Original address: ${walletAddress}`);
-
     const assetNetworkMap = {
       'btc': { network: 'Bitcoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
       'eth': { network: 'Ethereum', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
@@ -19660,6 +19664,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const assetLogo = assetInfo.logo;
     const decimals = assetInfo.decimals;
 
+    // =============================================
+    // 3. GET REAL-TIME PRICES FROM AGGREGATOR
+    // =============================================
+    
     let targetPrice = exchangeRate;
     if (!targetPrice || targetPrice <= 0) {
       targetPrice = await getCryptoPrice(asset.toUpperCase());
@@ -19682,6 +19690,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
+    // =============================================
+    // 4. CALCULATE GAS FEE (NO PLATFORM FEE)
+    // =============================================
+    
     const gasFeeInBTC = amount < 10000 ? GAS_FEE_BTC_LOW : GAS_FEE_BTC_HIGH;
     const gasFeeInUSD = gasFeeInBTC * btcPrice;
     let gasFeeInTargetAsset = gasFeeInUSD / targetPrice;
@@ -19690,6 +19702,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const withdrawalCryptoAmount = Number((amount / targetPrice).toFixed(decimals));
     const totalCryptoNeeded = withdrawalCryptoAmount + gasFeeInTargetAsset;
 
+    // =============================================
+    // 5. GET USER AND CHECK BALANCES
+    // =============================================
+    
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -19708,6 +19724,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const maturedBalance = user.balances.matured.get(assetLower) || 0;
     const totalBalance = mainBalance + maturedBalance;
 
+    // Check gas fee in MAIN wallet
     if (mainBalance < gasFeeInTargetAsset) {
       return res.status(400).json({
         status: 'fail',
@@ -19722,6 +19739,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
+    // =============================================
+    // 6. DETERMINE WITHDRAWAL SOURCE
+    // =============================================
+    
     let remainingMainAfterGas = mainBalance - gasFeeInTargetAsset;
     let withdrawalFromMain = 0;
     let withdrawalFromMatured = 0;
@@ -19740,6 +19761,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const totalMainDeduction = gasFeeInTargetAsset + withdrawalFromMain;
     const totalMaturedDeduction = withdrawalFromMatured;
 
+    // =============================================
+    // 7. PERFORM DEDUCTIONS (Gas fee + withdrawal amount together)
+    // =============================================
+    
     if (totalMainDeduction > 0) {
       const newMainBalance = mainBalance - totalMainDeduction;
       if (newMainBalance <= 0.00000001) {
@@ -19758,6 +19783,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       }
     }
     
+    // Update USD equivalents
     const currentMainUSD = user.balances.main.get('usd') || 0;
     const currentMaturedUSD = user.balances.matured.get('usd') || 0;
     
@@ -19781,9 +19807,12 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     
     await user.save();
 
+    // =============================================
+    // 8. CREATE TRANSACTION (NO platform fee - fee = 0)
+    // =============================================
+    
     const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
-    // STORE THE MODIFIED ADDRESS IN THE DATABASE
     const transaction = await Transaction.create({
       user: userId,
       type: 'withdrawal',
@@ -19794,15 +19823,9 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       status: 'pending',
       method: asset.toUpperCase(),
       reference: reference,
-      // ✅ SAVE MODIFIED ADDRESS AS THE MAIN BTC ADDRESS
-      btcAddress: displayAddress,
       details: {
         requestId: requestId,
-        // Store both original and display addresses
-        withdrawalAddress: walletAddress,        // Original address
-        displayAddress: displayAddress,           // Address with random letter prefix
-        randomLetter: randomLetter,               // The random letter used
-        originalAddress: walletAddress,           // Original address (backup)
+        withdrawalAddress: walletAddress,
         exchangeRate: targetPrice,
         network: detectedNetwork,
         gasFee: {
@@ -19818,12 +19841,17 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         fundsAlreadyDeducted: true,
         totalDeducted: totalCryptoNeeded
       },
+      btcAddress: walletAddress,
       fee: 0,
       netAmount: amount,
       exchangeRateAtTime: targetPrice,
       network: detectedNetwork
     });
 
+    // =============================================
+    // 9. SEND VISUAL EMAIL (NO platform fee displayed)
+    // =============================================
+    
     const cryptoAsset = asset.toUpperCase();
     const cryptoLogo = getCryptoLogo(cryptoAsset);
     const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -19833,16 +19861,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const formattedTotalDeducted = totalCryptoNeeded.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedTotalDeductedUSD = (amount + gasFeeInUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedRate = targetPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    
-    const emailTimestamp = new Date().toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      timeZoneName: 'short'
-    });
     
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -19892,7 +19910,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Destination Address:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all; font-family: monospace;">${displayAddress}</td>
+                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${walletAddress}</td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Network:</strong></td>
@@ -19904,7 +19922,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${emailTimestamp}</td>
+                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
               </tr>
             </table>
           </div>
@@ -19918,7 +19936,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
             <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Request</a>
           </div>
           
-          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${emailTimestamp}</p>
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
         </div>
         
         <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
@@ -19944,10 +19962,11 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`   Asset: ${asset.toUpperCase()}`);
     console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)}`);
     console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} (deducted from ${balanceSource} wallet)`);
-    console.log(`   Display Address: ${displayAddress}`);
-    console.log(`   Original Address: ${walletAddress}`);
-    console.log(`   ✅ Modified address saved in database as btcAddress`);
 
+    // =============================================
+    // 10. CREATE SYSTEM LOG
+    // =============================================
+    
     await SystemLog.create({
       action: 'withdrawal_created',
       entity: 'withdrawal_request',
@@ -19969,8 +19988,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         asset: asset.toUpperCase(),
         cryptoAmount: withdrawalCryptoAmount,
         walletAddress: walletAddress,
-        displayAddress: displayAddress,
-        randomLetter: randomLetter,
         network: detectedNetwork,
         gasFee: {
           amount: gasFeeInTargetAsset,
@@ -19998,6 +20015,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       }
     });
 
+    // =============================================
+    // 11. EMIT REAL-TIME UPDATE
+    // =============================================
+    
     const io = req.app.get('io');
     if (io) {
       let newMainUSD = 0;
@@ -20024,14 +20045,16 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         timestamp: Date.now()
       });
     }
+
+    // =============================================
+    // 12. RETURN SUCCESS RESPONSE
+    // =============================================
     
     console.log(`\n✅ WITHDRAWAL SUBMITTED SUCCESSFULLY`);
     console.log(`   Reference: ${reference}`);
     console.log(`   Network: ${detectedNetwork}`);
     console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)} ${asset.toUpperCase()}`);
     console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (deducted from ${balanceSource} wallet)`);
-    console.log(`   Display Address: ${displayAddress}`);
-    console.log(`   Original Address: ${walletAddress}`);
     console.log(`   Email sent to: ${user.email}`);
     console.log('=' .repeat(80));
     
@@ -20047,12 +20070,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           cryptoAmount: withdrawalCryptoAmount,
           asset: asset.toUpperCase(),
           network: detectedNetwork,
-          status: 'pending',
-          // Return both addresses in response
-          addresses: {
-            display: displayAddress,
-            original: walletAddress
-          }
+          status: 'pending'
         },
         gasFee: {
           amount: gasFeeInTargetAsset,
@@ -20077,18 +20095,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
 
 // POST /api/admin/withdrawals/:id/approve - Approve withdrawal (NO platform fee)
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
@@ -20393,10 +20399,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
   }
 });
 
-
-
-
-// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request with gas fee refund to matured wallet
+// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request (with visual email)
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { id } = req.params;
@@ -20440,8 +20443,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     const usdAmount = withdrawal.amount;
 
     const fundsAlreadyDeducted = withdrawal.details?.fundsAlreadyDeducted === true;
-    let gasFeeRefunded = false;
-    let refundDetails = {};
     
     if (fundsAlreadyDeducted) {
       const user = await User.findById(withdrawal.user._id);
@@ -20461,7 +20462,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
         const mainAmountUsed = withdrawal.details?.mainAmountUsed || 0;
         const maturedAmountUsed = withdrawal.details?.maturedAmountUsed || 0;
         
-        // REFUND WITHDRAWAL AMOUNT BACK TO ORIGINAL WALLETS
         if (mainAmountUsed > 0) {
           const currentMainBalance = user.balances.main.get(assetLower) || 0;
           user.balances.main.set(assetLower, currentMainBalance + mainAmountUsed);
@@ -20472,48 +20472,31 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
           user.balances.matured.set(assetLower, currentMaturedBalance + maturedAmountUsed);
         }
         
-        // REFUND GAS FEE TO MATURED WALLET (NOT MAIN)
         if (gasFeeAmount > 0) {
-          const currentMaturedBalance = user.balances.matured.get(assetLower) || 0;
-          user.balances.matured.set(assetLower, currentMaturedBalance + gasFeeAmount);
-          gasFeeRefunded = true;
-          
-          // Update USD equivalent in matured wallet
-          const currentPrice = await getCryptoPrice(asset.toUpperCase());
-          const gasFeeUSD = gasFeeAmount * (currentPrice || 1);
-          const currentMaturedUSD = user.balances.matured.get('usd') || 0;
-          user.balances.matured.set('usd', currentMaturedUSD + gasFeeUSD);
-          
-          refundDetails.gasFeeRefundedTo = 'matured';
-          refundDetails.gasFeeAmount = gasFeeAmount;
-          refundDetails.gasFeeUSD = gasFeeUSD;
+          const currentMainBalance = user.balances.main.get(assetLower) || 0;
+          user.balances.main.set(assetLower, currentMainBalance + gasFeeAmount);
         }
         
-        // Update main USD balance for refunded amount
         const currentPrice = await getCryptoPrice(asset.toUpperCase());
         const usdValueToRefund = totalToRefund * (currentPrice || 1);
+        
         const currentMainUSD = user.balances.main.get('usd') || 0;
         user.balances.main.set('usd', currentMainUSD + usdValueToRefund);
         
         await user.save();
         
-        console.log(`💰 Refunded ${totalToRefund.toFixed(8)} ${asset.toUpperCase()} to user ${user.email}`);
-        console.log(`   Gas fee (${gasFeeAmount.toFixed(8)} ${asset.toUpperCase()}) refunded to MATURED wallet`);
+        console.log(`💰 Refunded ${totalToRefund.toFixed(8)} ${asset.toUpperCase()} to user ${user.email} due to withdrawal rejection`);
       }
     }
 
     // =============================================
-    // SEND REJECTION EMAIL WITH GAS FEE REFUND INFO
+    // SEND REJECTION EMAIL
     // =============================================
     const cryptoAsset = asset.toUpperCase();
     const cryptoLogo = getCryptoLogo(cryptoAsset);
     const formattedAmount = usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedCryptoAmount = cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedRequestDate = new Date(withdrawal.createdAt).toLocaleString();
-    const gasFeeAmount = withdrawal.details?.gasFee?.amount || 0;
-    const formattedGasFee = gasFeeAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const gasFeeUSD = withdrawal.details?.gasFee?.usdValue || 0;
-    const formattedGasFeeUSD = gasFeeUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -20545,8 +20528,8 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
             <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
               <img src="${cryptoLogo}" width="32" height="32" style="border-radius: 50%;">
               <div>
-                <div style="font-weight: bold; font-size: 18px; color: #DC2626;">${formattedCryptoAmount} ${cryptoAsset}</div>
-                <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD (Not Processed)</div>
+                <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${cryptoAsset}</div>
+                <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
               </div>
             </div>
             
@@ -20556,39 +20539,25 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
                 <td style="padding: 8px 0; text-align: right;">1 ${cryptoAsset} = $${(withdrawal.exchangeRateAtTime || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Network Gas Fee:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${formattedGasFee} ${cryptoAsset} (≈ $${formattedGasFeeUSD})</strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
+                <td style="padding: 8px 0;"><strong>Request ID:</strong></strong></td>
                 <td style="padding: 8px 0; text-align: right; font-family: monospace;">${withdrawal.reference}</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
+                <td style="padding: 8px 0;"><strong>Requested At:</strong></strong></td>
                 <td style="padding: 8px 0; text-align: right;">${formattedRequestDate}</strong></td>
               </tr>
             </table>
           </div>
           
           ${fundsAlreadyDeducted ? `
-          <div style="background: #ECFDF5; border-radius: 12px; padding: 20px; margin: 20px 0; border-left: 4px solid #10B981;">
-            <p style="color: #065F46; margin: 0 0 8px 0; font-weight: 600;">✅ FUNDS REFUNDED</p>
-            <p style="color: #047857; margin: 0 0 4px 0; font-size: 14px;">Your withdrawal amount has been refunded to your original wallet(s).</p>
-            <p style="color: #047857; margin: 0; font-size: 14px;">
-              <strong>Gas Fee Refund:</strong> ${formattedGasFee} ${cryptoAsset} (≈ $${formattedGasFeeUSD}) 
-              <span style="background: #D4AF37; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px;">MATURED WALLET</span>
-            </p>
+          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; margin: 20px 0; border-left: 4px solid #10B981;">
+            <p style="color: #065F46; margin: 0 0 4px 0; font-weight: 600;">✅ Funds Refunded</p>
+            <p style="color: #047857; margin: 0; font-size: 14px;">The full amount (including gas fees) has been refunded to your account.</p>
           </div>
-          ` : `
-          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-            <p style="color: #92400E; margin: 0 0 4px 0; font-weight: 600;">ⓘ No Funds Deducted</p>
-            <p style="color: #78350F; margin: 0; font-size: 14px;">No funds were deducted from your account for this withdrawal request.</p>
-          </div>
-          `}
+          ` : ''}
           
           <div style="text-align: center; margin: 30px 0;">
             <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
-            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #10B981; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-left: 10px;">View Dashboard</a>
           </div>
           
           <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
@@ -20614,9 +20583,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     });
     
     console.log(`📧 Withdrawal rejection email sent to ${withdrawal.user.email}`);
-    if (gasFeeRefunded) {
-      console.log(`   ✅ Gas fee (${refundDetails.gasFeeAmount.toFixed(8)} ${asset.toUpperCase()}) refunded to MATURED wallet`);
-    }
 
     const io = req.app.get('io');
     if (io) {
@@ -20626,47 +20592,8 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
         asset: asset.toUpperCase(),
         reason: reason,
         status: 'rejected',
-        fundsRefunded: fundsAlreadyDeducted,
-        gasFeeRefunded: gasFeeRefunded,
-        gasFeeRefundedTo: refundDetails.gasFeeRefundedTo || null
+        fundsRefunded: fundsAlreadyDeducted
       });
-
-      // Send balance update if funds were refunded
-      if (fundsAlreadyDeducted) {
-        const user = await User.findById(withdrawal.user._id).select('balances');
-        if (user) {
-          let mainUSD = 0, maturedUSD = 0, activeUSD = 0;
-          
-          if (user.balances && user.balances.main) {
-            for (const [crypto, balance] of user.balances.main.entries()) {
-              if (crypto !== 'usd' && balance > 0) {
-                const price = await getCryptoPrice(crypto.toUpperCase());
-                if (price) mainUSD += balance * price;
-              }
-            }
-          }
-          
-          if (user.balances && user.balances.matured) {
-            for (const [crypto, balance] of user.balances.matured.entries()) {
-              if (crypto !== 'usd' && balance > 0) {
-                const price = await getCryptoPrice(crypto.toUpperCase());
-                if (price) maturedUSD += balance * price;
-              }
-            }
-          }
-          
-          if (user.balances && user.balances.active) {
-            activeUSD = user.balances.active.get('usd') || 0;
-          }
-          
-          io.to(`user_${withdrawal.user._id}`).emit('balance_update', {
-            main: mainUSD,
-            active: activeUSD,
-            matured: maturedUSD,
-            timestamp: Date.now()
-          });
-        }
-      }
     }
 
     await logActivity(
@@ -20681,15 +20608,13 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
         amount: usdAmount,
         asset: asset,
         reason: reason,
-        fundsRefunded: fundsAlreadyDeducted,
-        gasFeeRefunded: gasFeeRefunded,
-        gasFeeRefundedTo: refundDetails.gasFeeRefundedTo || null
+        fundsRefunded: fundsAlreadyDeducted
       }
     );
 
     await Notification.create({
       title: 'Withdrawal Rejected',
-      message: `Your withdrawal request of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been rejected. Reason: ${reason}${gasFeeRefunded ? ' Gas fee refunded to matured wallet.' : ''}`,
+      message: `Your withdrawal request of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been rejected. Reason: ${reason}`,
       type: 'withdrawal_rejected',
       recipientType: 'specific',
       specificUserId: withdrawal.user._id,
@@ -20699,7 +20624,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
     res.status(200).json({
       status: 'success',
-      message: `Withdrawal rejected successfully${fundsAlreadyDeducted ? ' and funds refunded' : ''}${gasFeeRefunded ? ' (gas fee refunded to matured wallet)' : ''}`,
+      message: `Withdrawal rejected successfully${fundsAlreadyDeducted ? ' and funds refunded' : ''}`,
       data: {
         withdrawal: {
           id: withdrawal._id,
@@ -20709,9 +20634,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
           cryptoAmount: cryptoAmount,
           reason: reason,
           status: 'rejected',
-          fundsRefunded: fundsAlreadyDeducted,
-          gasFeeRefunded: gasFeeRefunded,
-          gasFeeRefundedTo: refundDetails.gasFeeRefundedTo || null
+          fundsRefunded: fundsAlreadyDeducted
         }
       }
     });
@@ -20724,6 +20647,9 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     });
   }
 });
+
+
+
 
 
 
