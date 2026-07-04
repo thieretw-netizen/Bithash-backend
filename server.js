@@ -28864,24 +28864,9 @@ async function calculateAccurateClosingBalances(userId, endDate) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
-// GET /api/investments/active - FIXED VERSION
+// GET /api/investments/active - ALL DATA AND CALCULATIONS ON BACKEND
+// This ensures ALL devices see the EXACT same data at the same time
 // =============================================
 app.get('/api/investments/active', protect, async (req, res) => {
   try {
@@ -28908,69 +28893,147 @@ app.get('/api/investments/active', protect, async (req, res) => {
       status: 'active'
     });
     
-    // Get current BTC price for profit calculation
-    let currentBTCPrice;
-    try {
-      const btcPrice = await getCryptoPrice('BTC');
-      if (btcPrice && btcPrice > 0) {
-        currentBTCPrice = btcPrice;
-      } else {
-        throw new Error('Invalid BTC price received');
-      }
-    } catch (priceError) {
-      console.error('Failed to fetch BTC price:', priceError.message);
-      return res.status(503).json({
-        status: 'error',
-        message: 'Unable to fetch current BTC exchange rate. Please try again later.',
-        error: process.env.NODE_ENV === 'development' ? priceError.message : undefined
-      });
-    }
-    
     const now = new Date();
     
-    // Calculate enhanced fields for each investment
+    // =============================================
+    // ALL CALCULATIONS DONE ON BACKEND - NO EXCEPTIONS
+    // =============================================
     const enhancedInvestments = investments.map(investment => {
       const startDate = new Date(investment.startDate);
       const endDate = new Date(investment.endDate);
-      
-      // Time remaining
-      const timeLeftMs = Math.max(0, endDate - now);
-      const timeLeftHours = Math.ceil(timeLeftMs / (1000 * 60 * 60));
-      
-      // Progress percentage
-      const totalDurationMs = endDate - startDate;
-      const elapsedMs = now - startDate;
-      const progressPercentage = totalDurationMs > 0 
-        ? Math.min(100, (elapsedMs / totalDurationMs) * 100)
-        : 0;
-      
-      // ROI percentage from plan
+      const planName = investment.plan?.name || 'Cloud Mining Plan';
       const roiPercentage = investment.plan?.percentage || 0;
+      const planDuration = investment.plan?.duration || 0;
       
-      // Calculate expected profit
+      // =============================================
+      // 1. TIME REMAINING CALCULATION
+      // =============================================
+      const timeLeftMs = Math.max(0, endDate - now);
+      const hoursLeft = Math.floor(timeLeftMs / (1000 * 60 * 60));
+      const minutesLeft = Math.floor((timeLeftMs % (1000 * 60 * 60)) / (1000 * 60));
+      const secondsLeft = Math.floor((timeLeftMs % (1000 * 60)) / 1000);
+      const timeLeftDisplay = `${String(hoursLeft).padStart(2, '0')}:${String(minutesLeft).padStart(2, '0')}:${String(secondsLeft).padStart(2, '0')}`;
+      
+      // =============================================
+      // 2. PROGRESS PERCENTAGE CALCULATION
+      // =============================================
+      const totalDurationMs = planDuration * 60 * 60 * 1000;
+      const elapsedMs = Math.min(totalDurationMs, Math.max(0, now - startDate));
+      const progressPercentage = totalDurationMs > 0 ? (elapsedMs / totalDurationMs) * 100 : 0;
+      
+      // =============================================
+      // 3. PROFIT CALCULATION (USING LOCKED BTC PRICE)
+      // =============================================
       const expectedProfitUSD = investment.amount * (roiPercentage / 100);
-      const expectedProfitBTC = expectedProfitUSD / currentBTCPrice;
-      
-      // Calculate current profit based on elapsed time
+      const lockedBTCPrice = investment.btcPriceAtInvestment || investment.btcRate || 43000;
       const currentProfitUSD = expectedProfitUSD * (progressPercentage / 100);
-      const currentProfitBTC = currentProfitUSD / currentBTCPrice;
+      const currentProfitBTC = currentProfitUSD / lockedBTCPrice;
       
+      // =============================================
+      // 4. HASHRATE CALCULATION - DETERMINISTIC PER INVESTMENT
+      // =============================================
+      // Use investment._id as seed for consistent hashrate across all devices
+      const idSeed = parseInt(investment._id.toString().slice(-8), 16);
+      
+      // Define hashrate ranges per plan (in TH/s)
+      const hashrateRanges = {
+        'starter': { min: 1.2, max: 68.0 },
+        'standard': { min: 5.0, max: 110.0 },
+        'gold': { min: 10.0, max: 150.0 },
+        'enterprise': { min: 20.0, max: 234.0 },
+        'ultimate': { min: 30.0, max: 255.0 }
+      };
+      
+      // Determine plan key
+      const planKey = (() => {
+        const name = planName.toLowerCase();
+        if (name.includes('starter')) return 'starter';
+        if (name.includes('standard')) return 'standard';
+        if (name.includes('gold')) return 'gold';
+        if (name.includes('enterprise')) return 'enterprise';
+        if (name.includes('ultimate')) return 'ultimate';
+        return 'standard';
+      })();
+      
+      // Get range for this plan
+      const range = hashrateRanges[planKey] || { min: 0, max: 100 };
+      
+      // Generate DETERMINISTIC hashrate using the investment ID as seed
+      // This ensures EVERY device gets the SAME hashrate for the same investment
+      const seed = idSeed / 0xFFFFFFFF;
+      const hashrate = (range.min + (range.max - range.min) * seed).toFixed(1);
+      
+      // =============================================
+      // 5. STATUS DETERMINATION
+      // =============================================
+      let statusText = '';
+      let statusClass = '';
+      if (investment.status === 'active') {
+        if (timeLeftMs <= 0) {
+          statusText = 'Ready to Mature';
+          statusClass = 'success';
+        } else {
+          statusText = `${timeLeftDisplay} left`;
+          statusClass = 'pending';
+        }
+      } else {
+        statusText = investment.status || 'Pending';
+        statusClass = investment.status === 'completed' ? 'success' : 'pending';
+      }
+      
+      // =============================================
+      // 6. MINING ACTIVE INDICATOR (ALWAYS TRUE FOR ACTIVE)
+      // =============================================
+      const isMiningActive = investment.status === 'active' && timeLeftMs > 0;
+      
+      // =============================================
+      // 7. RETURN COMPLETE DATA - EVERYTHING PRE-CALCULATED
+      // =============================================
       return {
         id: investment._id,
-        planName: investment.plan?.name || 'Unknown Plan',
+        planName: planName,
         amount: investment.amount,
         profitPercentage: roiPercentage,
-        durationHours: investment.plan?.duration || 0,
+        durationHours: planDuration,
         startDate: investment.startDate,
         endDate: investment.endDate,
         status: investment.status,
-        timeLeftHours,
-        progressPercentage: progressPercentage.toFixed(2),
-        expectedProfitUSD: expectedProfitUSD.toFixed(2),
-        expectedProfitBTC: expectedProfitBTC.toFixed(8),
-        currentProfitUSD: currentProfitUSD.toFixed(2),
-        currentProfitBTC: currentProfitBTC.toFixed(8),
-        btcPriceUsed: currentBTCPrice,
+        
+        // Time remaining (pre-calculated)
+        timeLeft: {
+          milliseconds: timeLeftMs,
+          hours: hoursLeft,
+          minutes: minutesLeft,
+          seconds: secondsLeft,
+          display: timeLeftDisplay
+        },
+        
+        // Progress (pre-calculated)
+        progressPercentage: parseFloat(progressPercentage.toFixed(2)),
+        
+        // Profit data (pre-calculated using locked BTC price)
+        expectedProfitUSD: parseFloat(expectedProfitUSD.toFixed(2)),
+        expectedProfitBTC: parseFloat(expectedProfitBTC.toFixed(8)),
+        currentProfitUSD: parseFloat(currentProfitUSD.toFixed(2)),
+        currentProfitBTC: parseFloat(currentProfitBTC.toFixed(8)),
+        
+        // Locked BTC price at investment time
+        btcPriceAtInvestment: lockedBTCPrice,
+        
+        // Hashrate (DETERMINISTIC - same for all devices)
+        hashrate: parseFloat(hashrate),
+        hashrateUnit: 'TH/s',
+        
+        // Status display (pre-calculated)
+        statusDisplay: {
+          text: statusText,
+          class: statusClass
+        },
+        
+        // Mining active indicator
+        isMiningActive: isMiningActive,
+        
+        // Plan details
         planDetails: {
           minAmount: investment.plan?.minAmount,
           maxAmount: investment.plan?.maxAmount,
@@ -28979,7 +29042,9 @@ app.get('/api/investments/active', protect, async (req, res) => {
       };
     });
     
-    // Format response
+    // =============================================
+    // 8. RESPONSE WITH ALL DATA PRE-CALCULATED
+    // =============================================
     const response = {
       status: 'success',
       data: {
@@ -28987,7 +29052,9 @@ app.get('/api/investments/active', protect, async (req, res) => {
         totalPages: Math.ceil(total / limit),
         currentPage: page,
         totalInvestments: total,
-        btcPrice: currentBTCPrice
+        // Add server timestamp for sync
+        serverTime: now.toISOString(),
+        timestamp: Date.now()
       }
     };
     
@@ -29002,6 +29069,21 @@ app.get('/api/investments/active', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
