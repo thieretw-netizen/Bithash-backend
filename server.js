@@ -30224,7 +30224,7 @@ app.get('/api/investments/active', protect, async (req, res) => {
 // Import required dependencies
 const { ethers } = require('ethers');
 const { recoverPersonalSignature } = require('@metamask/eth-sig-util');
-const crypto = require('crypto');
+
 
 // =============================================
 // HELPER FUNCTIONS
