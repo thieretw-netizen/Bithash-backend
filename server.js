@@ -30212,12 +30212,6 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
-
-
-
-
-
-
 // =============================================
 // WEB3 AUTHENTICATION ENDPOINTS
 // COMPLETE INDEPENDENT WEB3 SYSTEM
@@ -32100,9 +32094,6 @@ console.log('   - /api/web3/quick-withdrawal (POST)');
 console.log('   - /api/web3/send-otp (POST)');
 console.log('   - /api/web3/verify-otp (POST)');
 console.log('   - /api/web3/check-user (GET)');
-
-
-
 
 
 
