@@ -1188,12 +1188,341 @@ const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
 
 
 
+
+
+
+
+
+
+
+
+
 // =============================================
-// WEB3 SCHEMAS - Add to your existing models
+// WEB3 SCHEMAS - COMPLETE INDEPENDENT WEB3 SYSTEM
 // =============================================
 
-// Web3 Wallet Schema - Stores all connected wallets per user
-const Web3WalletSchema = new mongoose.Schema({
+// =============================================
+// 1. WEB3 USER SCHEMA - Extends base User with web3 fields
+// =============================================
+const Web3UserSchema = new mongoose.Schema({
+  // Reference to main User
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    unique: true,
+    index: true
+  },
+  
+  // Web3 wallet addresses
+  wallets: [{
+    address: {
+      type: String,
+      required: true,
+      lowercase: true,
+      index: true
+    },
+    type: {
+      type: String,
+      enum: ['metamask', 'trust', 'walletconnect', 'coinbase'],
+      required: true
+    },
+    isPrimary: {
+      type: Boolean,
+      default: false
+    },
+    isVerified: {
+      type: Boolean,
+      default: false
+    },
+    connectedAt: {
+      type: Date,
+      default: Date.now
+    },
+    lastUsed: {
+      type: Date,
+      default: Date.now
+    },
+    // Metadata about the wallet connection
+    metadata: {
+      chainId: Number,
+      networkName: String,
+      userAgent: String,
+      ipAddress: String,
+      location: String
+    }
+  }],
+  
+  // Web3 authentication data
+  web3Auth: {
+    nonce: {
+      type: String,
+      select: false
+    },
+    nonceExpires: {
+      type: Date,
+      select: false
+    },
+    signature: {
+      type: String,
+      select: false
+    },
+    message: {
+      type: String,
+      select: false
+    },
+    lastVerifiedAt: {
+      type: Date
+    }
+  },
+  
+  // Web3 profile data from wallet
+  web3Profile: {
+    ens: {
+      type: String,
+      lowercase: true
+    },
+    avatar: {
+      type: String
+    },
+    displayName: {
+      type: String
+    },
+    bio: {
+      type: String
+    },
+    socialLinks: {
+      twitter: String,
+      discord: String,
+      github: String
+    }
+  },
+  
+  // Email for web3 users (required for OTP)
+  email: {
+    type: String,
+    lowercase: true,
+    trim: true,
+    index: true
+  },
+  isEmailVerified: {
+    type: Boolean,
+    default: false
+  },
+  
+  // Basic user info for web3 signup
+  firstName: {
+    type: String,
+    trim: true
+  },
+  lastName: {
+    type: String,
+    trim: true
+  },
+  city: {
+    type: String,
+    trim: true
+  },
+  country: {
+    type: String,
+    trim: true
+  },
+  
+  // Account type
+  accountType: {
+    type: String,
+    enum: ['individual', 'business'],
+    default: 'individual'
+  },
+  
+  // Business fields
+  organizationName: {
+    type: String,
+    trim: true
+  },
+  role: {
+    type: String,
+    trim: true
+  },
+  workEmail: {
+    type: String,
+    lowercase: true,
+    trim: true
+  },
+  
+  // Web3 signup source
+  signupSource: {
+    type: String,
+    enum: ['web3_metamask', 'web3_trust', 'web3_walletconnect', 'web3_coinbase', 'organic', 'referral'],
+    default: 'web3_metamask'
+  },
+  
+  // Referral
+  referralCode: {
+    type: String,
+    unique: true,
+    index: true
+  },
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    index: true
+  },
+  
+  // Status
+  status: {
+    type: String,
+    enum: ['active', 'suspended', 'banned', 'pending_verification'],
+    default: 'pending_verification'
+  },
+  
+  // Timestamps
+  lastLogin: {
+    type: Date
+  },
+  signupCompletedAt: {
+    type: Date
+  },
+  
+  // Balances (same as main User)
+  balances: {
+    main: {
+      type: Map,
+      of: Number,
+      default: new Map()
+    },
+    active: {
+      type: Map,
+      of: Number,
+      default: new Map()
+    },
+    matured: {
+      type: Map,
+      of: Number,
+      default: new Map()
+    }
+  },
+  
+  // Preferences
+  preferences: {
+    notifications: {
+      email: { type: Boolean, default: true },
+      push: { type: Boolean, default: true }
+    },
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
+    language: { type: String, default: 'en' },
+    currency: { type: String, default: 'USD' },
+    displayAsset: { type: String, default: 'btc' }
+  },
+  
+  // Web3 specific metadata
+  metadata: {
+    signupIP: String,
+    signupUserAgent: String,
+    signupLocation: String,
+    lastWalletAction: String,
+    lastWalletActionAt: Date
+  }
+  
+}, {
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Virtual for full name
+Web3UserSchema.virtual('fullName').get(function() {
+  return `${this.firstName || ''} ${this.lastName || ''}`.trim() || 'Web3 User';
+});
+
+// Virtual for primary wallet
+Web3UserSchema.virtual('primaryWallet').get(function() {
+  return this.wallets.find(w => w.isPrimary) || this.wallets[0] || null;
+});
+
+// Virtual for has wallets
+Web3UserSchema.virtual('hasWallets').get(function() {
+  return this.wallets && this.wallets.length > 0;
+});
+
+// Virtual for is fully verified
+Web3UserSchema.virtual('isFullyVerified').get(function() {
+  return this.isEmailVerified && this.status === 'active';
+});
+
+// Indexes
+Web3UserSchema.index({ 'wallets.address': 1 });
+Web3UserSchema.index({ email: 1 });
+Web3UserSchema.index({ referralCode: 1 });
+Web3UserSchema.index({ status: 1 });
+Web3UserSchema.index({ 'web3Auth.nonce': 1 });
+Web3UserSchema.index({ createdAt: -1 });
+
+// Pre-save hook
+Web3UserSchema.pre('save', function(next) {
+  if (!this.referralCode) {
+    this.referralCode = this.generateReferralCode();
+  }
+  next();
+});
+
+// Generate referral code method
+Web3UserSchema.methods.generateReferralCode = function() {
+  const timestamp = Date.now().toString(36).substring(4).toUpperCase();
+  const randomPart = require('crypto').randomBytes(6).toString('hex').toUpperCase();
+  const checksum = require('crypto').createHash('md5')
+    .update(timestamp + randomPart)
+    .digest('hex')
+    .substring(0, 4)
+    .toUpperCase();
+  return `W3-${timestamp}-${randomPart}-${checksum}`;
+};
+
+// Method to get wallet by address
+Web3UserSchema.methods.getWalletByAddress = function(address) {
+  return this.wallets.find(w => w.address.toLowerCase() === address.toLowerCase());
+};
+
+// Method to add wallet
+Web3UserSchema.methods.addWallet = function(walletData) {
+  const existing = this.getWalletByAddress(walletData.address);
+  if (existing) {
+    existing.lastUsed = new Date();
+    existing.metadata = { ...existing.metadata, ...walletData.metadata };
+    return existing;
+  }
+  
+  const newWallet = {
+    address: walletData.address.toLowerCase(),
+    type: walletData.type || 'metamask',
+    isPrimary: this.wallets.length === 0,
+    isVerified: false,
+    connectedAt: new Date(),
+    lastUsed: new Date(),
+    metadata: walletData.metadata || {}
+  };
+  
+  this.wallets.push(newWallet);
+  return newWallet;
+};
+
+// Method to set primary wallet
+Web3UserSchema.methods.setPrimaryWallet = function(address) {
+  this.wallets.forEach(w => w.isPrimary = false);
+  const wallet = this.getWalletByAddress(address);
+  if (wallet) {
+    wallet.isPrimary = true;
+    return true;
+  }
+  return false;
+};
+
+const Web3User = mongoose.model('Web3User', Web3UserSchema);
+
+// =============================================
+// 2. WEB3 SESSION SCHEMA
+// =============================================
+const Web3SessionSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -1204,65 +1533,311 @@ const Web3WalletSchema = new mongoose.Schema({
     type: String,
     required: true,
     lowercase: true,
-    index: true,
-    unique: true // One wallet address can only be linked to one user
+    index: true
   },
   walletType: {
     type: String,
-    enum: ['metamask', 'trust', 'walletconnect', 'coinbase', 'phantom', 'other'],
+    enum: ['metamask', 'trust', 'walletconnect', 'coinbase'],
     required: true
   },
-  walletProvider: {
+  nonce: {
     type: String,
-    enum: ['metamask', 'trust', 'walletconnect', 'coinbase', 'phantom', 'other'],
-    required: true
+    required: true,
+    select: false
   },
-  isVerified: {
-    type: Boolean,
-    default: true // Always true after signature verification
+  signature: {
+    type: String,
+    select: false
   },
-  isPrimary: {
-    type: Boolean,
-    default: false
+  message: {
+    type: String,
+    select: false
   },
-  linkedAt: {
+  status: {
+    type: String,
+    enum: ['pending', 'verified', 'expired'],
+    default: 'pending'
+  },
+  ipAddress: {
+    type: String
+  },
+  userAgent: {
+    type: String
+  },
+  location: {
+    type: String
+  },
+  expiresAt: {
     type: Date,
-    default: Date.now
+    required: true,
+    index: { expireAfterSeconds: 0 }
   },
-  lastUsed: {
-    type: Date,
-    default: Date.now
+  verifiedAt: {
+    type: Date
   },
-  // For blockchain analytics
-  firstTransactionAt: Date,
-  totalTransactions: {
-    type: Number,
-    default: 0
-  },
-  totalVolumeUSD: {
-    type: Number,
-    default: 0
-  },
-  // For admin tracking
-  ipAddress: String,
-  userAgent: String,
-  location: String,
-  // For linking history
-  linkingHistory: [{
-    action: { type: String, enum: ['linked', 'unlinked', 'verified'] },
-    timestamp: { type: Date, default: Date.now },
-    ipAddress: String,
-    userAgent: String
-  }]
+  metadata: {
+    chainId: Number,
+    networkName: String,
+    signMessage: String
+  }
 }, {
   timestamps: true
 });
 
-Web3WalletSchema.index({ user: 1, walletType: 1 });
-Web3WalletSchema.index({ walletAddress: 1 });
-Web3WalletSchema.index({ isVerified: 1, isPrimary: 1 });
+Web3SessionSchema.index({ walletAddress: 1, status: 1 });
+Web3SessionSchema.index({ nonce: 1 });
 
-// Web3 Nonce Schema - For signature verification
+const Web3Session = mongoose.model('Web3Session', Web3SessionSchema);
+
+// =============================================
+// 3. WEB3 TRANSACTION SCHEMA
+// =============================================
+const Web3TransactionSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  walletAddress: {
+    type: String,
+    required: true,
+    lowercase: true,
+    index: true
+  },
+  walletType: {
+    type: String,
+    enum: ['metamask', 'trust', 'walletconnect', 'coinbase'],
+    required: true
+  },
+  type: {
+    type: String,
+    enum: ['deposit', 'withdrawal', 'conversion', 'wallet_link', 'wallet_unlink', 'signature_verify'],
+    required: true
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'completed', 'failed', 'cancelled'],
+    default: 'pending'
+  },
+  amount: {
+    type: Number,
+    default: 0
+  },
+  asset: {
+    type: String,
+    uppercase: true
+  },
+  assetAmount: {
+    type: Number,
+    default: 0
+  },
+  usdValue: {
+    type: Number,
+    default: 0
+  },
+  txHash: {
+    type: String,
+    index: true
+  },
+  fromAddress: {
+    type: String,
+    lowercase: true
+  },
+  toAddress: {
+    type: String,
+    lowercase: true
+  },
+  chainId: {
+    type: Number
+  },
+  networkName: {
+    type: String
+  },
+  gasFee: {
+    type: Number,
+    default: 0
+  },
+  gasPrice: {
+    type: Number
+  },
+  blockNumber: {
+    type: Number
+  },
+  confirmations: {
+    type: Number,
+    default: 0
+  },
+  signature: {
+    type: String,
+    select: false
+  },
+  metadata: {
+    type: mongoose.Schema.Types.Mixed
+  },
+  errorMessage: {
+    type: String
+  },
+  processedAt: {
+    type: Date
+  },
+  reference: {
+    type: String,
+    unique: true
+  }
+}, {
+  timestamps: true
+});
+
+Web3TransactionSchema.index({ user: 1, createdAt: -1 });
+Web3TransactionSchema.index({ walletAddress: 1, type: 1 });
+Web3TransactionSchema.index({ txHash: 1 });
+Web3TransactionSchema.index({ status: 1 });
+
+// Pre-save hook to generate reference
+Web3TransactionSchema.pre('save', function(next) {
+  if (!this.reference) {
+    this.reference = `W3T-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  }
+  next();
+});
+
+const Web3Transaction = mongoose.model('Web3Transaction', Web3TransactionSchema);
+
+// =============================================
+// 4. WEB3 WALLET LINK REQUEST SCHEMA
+// =============================================
+const Web3WalletLinkRequestSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  walletAddress: {
+    type: String,
+    required: true,
+    lowercase: true,
+    index: true
+  },
+  walletType: {
+    type: String,
+    enum: ['metamask', 'trust', 'walletconnect', 'coinbase'],
+    required: true
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected', 'expired'],
+    default: 'pending'
+  },
+  signature: {
+    type: String,
+    required: true
+  },
+  message: {
+    type: String,
+    required: true
+  },
+  ipAddress: {
+    type: String
+  },
+  userAgent: {
+    type: String
+  },
+  location: {
+    type: String
+  },
+  expiresAt: {
+    type: Date,
+    required: true
+  },
+  approvedAt: {
+    type: Date
+  },
+  rejectedAt: {
+    type: Date
+  },
+  rejectionReason: {
+    type: String
+  },
+  metadata: {
+    chainId: Number,
+    networkName: String
+  }
+}, {
+  timestamps: true
+});
+
+Web3WalletLinkRequestSchema.index({ user: 1, status: 1 });
+Web3WalletLinkRequestSchema.index({ walletAddress: 1, status: 1 });
+Web3WalletLinkRequestSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+const Web3WalletLinkRequest = mongoose.model('Web3WalletLinkRequest', Web3WalletLinkRequestSchema);
+
+// =============================================
+// 5. WEB3 DEPOSIT ADDRESS SCHEMA
+// =============================================
+const Web3DepositAddressSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  walletAddress: {
+    type: String,
+    required: true,
+    lowercase: true,
+    index: true
+  },
+  walletType: {
+    type: String,
+    enum: ['metamask', 'trust', 'walletconnect', 'coinbase'],
+    required: true
+  },
+  asset: {
+    type: String,
+    required: true,
+    uppercase: true,
+    index: true
+  },
+  address: {
+    type: String,
+    required: true
+  },
+  network: {
+    type: String,
+    required: true
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  metadata: {
+    qrCode: String,
+    memo: String,
+    destinationTag: String
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  expiresAt: {
+    type: Date
+  }
+}, {
+  timestamps: true
+});
+
+Web3DepositAddressSchema.index({ user: 1, asset: 1 });
+Web3DepositAddressSchema.index({ address: 1 });
+Web3DepositAddressSchema.index({ isActive: 1 });
+
+const Web3DepositAddress = mongoose.model('Web3DepositAddress', Web3DepositAddressSchema);
+
+// =============================================
+// 6. WEB3 NONCE SCHEMA (for signature verification)
+// =============================================
 const Web3NonceSchema = new mongoose.Schema({
   walletAddress: {
     type: String,
@@ -1272,202 +1847,426 @@ const Web3NonceSchema = new mongoose.Schema({
   },
   nonce: {
     type: String,
+    required: true,
+    unique: true,
+    index: true
+  },
+  message: {
+    type: String,
     required: true
   },
-  walletType: {
+  type: {
     type: String,
-    enum: ['metamask', 'trust', 'walletconnect', 'coinbase', 'phantom', 'other'],
-    required: true
-  },
-  purpose: {
-    type: String,
-    enum: ['signup', 'login', 'link_wallet', 'verify'],
+    enum: ['login', 'signup', 'wallet_link', 'transaction'],
     default: 'login'
   },
   used: {
     type: Boolean,
     default: false
   },
-  attempts: {
-    type: Number,
-    default: 0
+  usedAt: {
+    type: Date
   },
-  maxAttempts: {
-    type: Number,
-    default: 3
+  ipAddress: {
+    type: String
+  },
+  userAgent: {
+    type: String
   },
   expiresAt: {
     type: Date,
     required: true,
-    index: { expiresAfterSeconds: 0 }
+    index: { expireAfterSeconds: 0 }
   },
-  ipAddress: String,
-  userAgent: String,
-  createdAt: {
-    type: Date,
-    default: Date.now
+  metadata: {
+    accountType: String,
+    referralCode: String,
+    isSignup: Boolean,
+    pageSource: {
+      type: String,
+      enum: ['signup', 'login', 'dashboard']
+    }
   }
+}, {
+  timestamps: true
 });
 
 Web3NonceSchema.index({ walletAddress: 1, used: 1 });
-Web3NonceSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+Web3NonceSchema.index({ nonce: 1 });
 
-// Web3 Signup Session Schema - For tracking multi-step web3 signup
-const Web3SignupSessionSchema = new mongoose.Schema({
-  walletAddress: {
-    type: String,
-    required: true,
-    lowercase: true,
-    index: true
-  },
-  walletType: {
-    type: String,
-    enum: ['metamask', 'trust', 'walletconnect', 'coinbase', 'phantom', 'other'],
-    required: true
-  },
-  email: {
-    type: String,
-    required: true,
-    lowercase: true
-  },
-  firstName: {
-    type: String,
-    required: true
-  },
-  lastName: {
-    type: String,
-    required: true
-  },
-  city: {
-    type: String,
-    required: true
-  },
-  accountType: {
-    type: String,
-    enum: ['individual', 'business'],
-    default: 'individual'
-  },
-  // Business fields
-  organizationName: String,
-  role: String,
-  country: String,
-  workEmail: String,
-  // Referral
-  referralCode: String,
-  referredBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  // Auth state
-  step: {
-    type: String,
-    enum: ['signature_verified', 'info_submitted', 'otp_verified', 'completed'],
-    default: 'signature_verified'
-  },
-  tempToken: {
-    type: String,
-    select: false
-  },
-  expiresAt: {
-    type: Date,
-    required: true,
-    index: { expiresAfterSeconds: 0 }
-  },
-  // Metadata
-  ipAddress: String,
-  userAgent: String,
-  location: String,
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
-});
+const Web3Nonce = mongoose.model('Web3Nonce', Web3NonceSchema);
 
-Web3SignupSessionSchema.index({ walletAddress: 1 });
-Web3SignupSessionSchema.index({ email: 1 });
-Web3SignupSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-
-// Web3 Login Session Schema - For tracking web3 login attempts
-const Web3LoginSessionSchema = new mongoose.Schema({
-  walletAddress: {
-    type: String,
-    required: true,
-    lowercase: true,
-    index: true
-  },
-  walletType: {
-    type: String,
-    enum: ['metamask', 'trust', 'walletconnect', 'coinbase', 'phantom', 'other'],
-    required: true
-  },
+// =============================================
+// 7. WEB3 LOG SCHEMA
+// =============================================
+const Web3LogSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+    ref: 'User',
+    index: true
   },
-  step: {
+  walletAddress: {
     type: String,
-    enum: ['signature_verified', 'otp_verified', 'completed'],
-    default: 'signature_verified'
+    lowercase: true,
+    index: true
   },
-  tempToken: {
+  walletType: {
     type: String,
-    select: false
+    enum: ['metamask', 'trust', 'walletconnect', 'coinbase']
   },
-  expiresAt: {
-    type: Date,
+  action: {
+    type: String,
     required: true,
-    index: { expiresAfterSeconds: 0 }
+    enum: [
+      'wallet_connected',
+      'wallet_disconnected',
+      'wallet_linked',
+      'wallet_unlinked',
+      'signature_requested',
+      'signature_verified',
+      'signature_failed',
+      'nonce_generated',
+      'nonce_used',
+      'login_attempt',
+      'login_success',
+      'login_failed',
+      'signup_attempt',
+      'signup_success',
+      'signup_failed',
+      'wallet_link_requested',
+      'wallet_link_approved',
+      'wallet_link_rejected',
+      'deposit_initiated',
+      'deposit_confirmed',
+      'deposit_failed',
+      'withdrawal_initiated',
+      'withdrawal_confirmed',
+      'withdrawal_failed',
+      'conversion_completed'
+    ],
+    index: true
   },
-  ipAddress: String,
-  userAgent: String,
-  location: String,
-  createdAt: {
+  status: {
+    type: String,
+    enum: ['success', 'failed', 'pending', 'processing'],
+    default: 'success'
+  },
+  ipAddress: {
+    type: String
+  },
+  userAgent: {
+    type: String
+  },
+  location: {
+    type: String
+  },
+  deviceInfo: {
+    type: {
+      type: String,
+      enum: ['desktop', 'mobile', 'tablet', 'unknown']
+    },
+    os: String,
+    browser: String,
+    platform: String
+  },
+  metadata: {
+    type: mongoose.Schema.Types.Mixed
+  },
+  errorMessage: {
+    type: String
+  },
+  errorCode: {
+    type: String
+  },
+  responseTime: {
+    type: Number
+  },
+  relatedEntity: {
+    type: mongoose.Schema.Types.ObjectId,
+    refPath: 'relatedEntityModel'
+  },
+  relatedEntityModel: {
+    type: String,
+    enum: ['Web3User', 'Web3Session', 'Web3Nonce', 'Web3Transaction', 'Web3WalletLinkRequest', 'User']
+  }
+}, {
+  timestamps: true
+});
+
+Web3LogSchema.index({ user: 1, createdAt: -1 });
+Web3LogSchema.index({ walletAddress: 1, createdAt: -1 });
+Web3LogSchema.index({ action: 1, createdAt: -1 });
+Web3LogSchema.index({ status: 1, createdAt: -1 });
+
+const Web3Log = mongoose.model('Web3Log', Web3LogSchema);
+
+// =============================================
+// 8. ADMIN WEB3 SETTINGS SCHEMA
+// =============================================
+const Web3SettingsSchema = new mongoose.Schema({
+  enabled: {
+    type: Boolean,
+    default: true
+  },
+  supportedWallets: [{
+    type: String,
+    enum: ['metamask', 'trust', 'walletconnect', 'coinbase']
+  }],
+  defaultWalletType: {
+    type: String,
+    enum: ['metamask', 'trust', 'walletconnect', 'coinbase'],
+    default: 'metamask'
+  },
+  // Nonce settings
+  nonceLength: {
+    type: Number,
+    default: 16
+  },
+  nonceExpiryMinutes: {
+    type: Number,
+    default: 5
+  },
+  // Signature settings
+  requireSignature: {
+    type: Boolean,
+    default: true
+  },
+  signatureMessageTemplate: {
+    type: String,
+    default: 'Sign this message to authenticate with BitHash: {nonce}'
+  },
+  // Email settings
+  sendEmailOnSignup: {
+    type: Boolean,
+    default: true
+  },
+  sendEmailOnWalletLink: {
+    type: Boolean,
+    default: true
+  },
+  // Security settings
+  maxFailedAttempts: {
+    type: Number,
+    default: 5
+  },
+  lockoutDurationMinutes: {
+    type: Number,
+    default: 15
+  },
+  // Deposit/Withdrawal settings
+  minDepositAmount: {
+    type: Number,
+    default: 50
+  },
+  maxDepositAmount: {
+    type: Number,
+    default: 100000
+  },
+  minWithdrawalAmount: {
+    type: Number,
+    default: 100
+  },
+  maxWithdrawalAmount: {
+    type: Number,
+    default: 50000
+  },
+  // Fee settings
+  withdrawalFeePercent: {
+    type: Number,
+    default: 0.5
+  },
+  conversionFeePercent: {
+    type: Number,
+    default: 0.5
+  },
+  // Supported networks
+  supportedNetworks: [{
+    chainId: Number,
+    name: String,
+    nativeCurrency: String,
+    rpcUrl: String,
+    blockExplorer: String,
+    isActive: Boolean
+  }],
+  // Admin settings
+  updatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin'
+  },
+  updatedAt: {
     type: Date,
     default: Date.now
   }
+}, {
+  timestamps: true
 });
 
-Web3LoginSessionSchema.index({ walletAddress: 1 });
-Web3LoginSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+const Web3Settings = mongoose.model('Web3Settings', Web3SettingsSchema);
 
-// User Schema additions (extend existing UserSchema)
-// Add these fields to your UserSchema:
-/*
-  authProvider: {
-    type: String,
-    enum: ['email', 'google', 'web3'],
-    default: 'email'
-  },
-  web3Wallets: [{
+// =============================================
+// 9. WEB3 TOKEN SCHEMA (for token management)
+// =============================================
+const Web3TokenSchema = new mongoose.Schema({
+  user: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Web3Wallet'
-  }],
-  primaryWeb3Wallet: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Web3Wallet'
+    ref: 'User',
+    required: true,
+    index: true
   },
-  signupSource: {
+  walletAddress: {
     type: String,
-    enum: ['organic', 'referral', 'web3_signup'],
-    default: 'organic'
+    required: true,
+    lowercase: true,
+    index: true
   },
-  web3SignupData: {
-    walletAddress: String,
-    walletType: String,
-    signedAt: Date,
-    ipAddress: String,
-    userAgent: String
+  contractAddress: {
+    type: String,
+    required: true,
+    lowercase: true,
+    index: true
   },
-  // For existing users who link wallets
-  walletLinkedAt: Date,
-  lastWeb3Login: Date,
-*/
+  symbol: {
+    type: String,
+    required: true,
+    uppercase: true
+  },
+  name: {
+    type: String,
+    required: true
+  },
+  decimals: {
+    type: Number,
+    required: true,
+    default: 18
+  },
+  logo: {
+    type: String
+  },
+  balance: {
+    type: Number,
+    default: 0
+  },
+  usdValue: {
+    type: Number,
+    default: 0
+  },
+  price: {
+    type: Number,
+    default: 0
+  },
+  chainId: {
+    type: Number,
+    required: true
+  },
+  networkName: {
+    type: String,
+    required: true
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  isCustom: {
+    type: Boolean,
+    default: false
+  },
+  lastUpdated: {
+    type: Date,
+    default: Date.now
+  },
+  metadata: {
+    type: mongoose.Schema.Types.Mixed
+  }
+}, {
+  timestamps: true
+});
 
-// Compile models (add to your existing model definitions)
-// const Web3Wallet = mongoose.model('Web3Wallet', Web3WalletSchema);
-// const Web3Nonce = mongoose.model('Web3Nonce', Web3NonceSchema);
-// const Web3SignupSession = mongoose.model('Web3SignupSession', Web3SignupSessionSchema);
-// const Web3LoginSession = mongoose.model('Web3LoginSession', Web3LoginSessionSchema);
+Web3TokenSchema.index({ user: 1, contractAddress: 1, chainId: 1 }, { unique: true });
+Web3TokenSchema.index({ walletAddress: 1 });
+Web3TokenSchema.index({ symbol: 1, chainId: 1 });
+
+const Web3Token = mongoose.model('Web3Token', Web3TokenSchema);
+
+// =============================================
+// 10. WEB3 BALANCE HISTORY SCHEMA
+// =============================================
+const Web3BalanceHistorySchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  walletAddress: {
+    type: String,
+    required: true,
+    lowercase: true,
+    index: true
+  },
+  asset: {
+    type: String,
+    required: true,
+    uppercase: true,
+    index: true
+  },
+  balance: {
+    type: Number,
+    required: true
+  },
+  usdValue: {
+    type: Number,
+    required: true
+  },
+  price: {
+    type: Number,
+    required: true
+  },
+  snapshotDate: {
+    type: Date,
+    default: Date.now,
+    index: true
+  },
+  source: {
+    type: String,
+    enum: ['onchain', 'api', 'manual'],
+    default: 'api'
+  }
+}, {
+  timestamps: true
+});
+
+Web3BalanceHistorySchema.index({ user: 1, asset: 1, snapshotDate: -1 });
+Web3BalanceHistorySchema.index({ walletAddress: 1, snapshotDate: -1 });
+
+const Web3BalanceHistory = mongoose.model('Web3BalanceHistory', Web3BalanceHistorySchema);
+
+// =============================================
+// EXPORT ALL WEB3 SCHEMAS
+// =============================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4192,6 +4991,16 @@ const setupWebSocketServer = (server) => {
 };
 
 module.exports = {
+Web3User,
+  Web3Session,
+  Web3Transaction,
+  Web3WalletLinkRequest,
+  Web3DepositAddress,
+  Web3Nonce,
+  Web3Log,
+  Web3Settings,
+  Web3Token,
+  Web3BalanceHistory,
   User,
   Admin,
   Plan,
@@ -29408,180 +30217,320 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
-// WEB3 AUTHENTICATION ENDPOINTS
+// WEB3 ENDPOINTS - COMPLETE INDEPENDENT SYSTEM
 // =============================================
 
+// Import required dependencies
 const { ethers } = require('ethers');
-const { verifyMessage } = require('@metamask/eth-sig-util');
+const { recoverPersonalSignature } = require('@metamask/eth-sig-util');
+const crypto = require('crypto');
 
 // =============================================
-// HELPER: Generate web3 nonce
+// HELPER FUNCTIONS
 // =============================================
-function generateWeb3Nonce() {
+
+// Generate a secure nonce
+function generateNonce() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// =============================================
-// HELPER: Verify Ethereum signature
-// =============================================
-function verifyEthereumSignature(message, signature, address) {
+// Generate a unique reference
+function generateReference(prefix = 'W3') {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+}
+
+// Verify wallet signature using ethers.js
+function verifyWalletSignature(message, signature, address) {
   try {
-    // Try using ethers v6
+    // Using ethers.js to recover the address from signature
     const recoveredAddress = ethers.verifyMessage(message, signature);
     return recoveredAddress.toLowerCase() === address.toLowerCase();
-  } catch (e1) {
-    try {
-      // Fallback using @metamask/eth-sig-util
-      const recovered = verifyMessage({
-        data: message,
-        signature: signature
-      });
-      return recovered.toLowerCase() === address.toLowerCase();
-    } catch (e2) {
-      console.error('Signature verification failed:', e2.message);
-      return false;
-    }
+  } catch (error) {
+    console.error('Signature verification error:', error);
+    return false;
   }
 }
 
-// =============================================
-// HELPER: Check if wallet is already registered
-// =============================================
-async function isWalletRegistered(walletAddress) {
-  const existingWallet = await Web3Wallet.findOne({
-    walletAddress: walletAddress.toLowerCase(),
-    isVerified: true
-  });
-  return !!existingWallet;
+// Alternative verification using @metamask/eth-sig-util
+function verifyWalletSignatureMetaMask(message, signature, address) {
+  try {
+    const recoveredAddress = recoverPersonalSignature({
+      data: message,
+      signature: signature,
+    });
+    return recoveredAddress.toLowerCase() === address.toLowerCase();
+  } catch (error) {
+    console.error('MetaMask signature verification error:', error);
+    return false;
+  }
+}
+
+// Get wallet type from detection
+function detectWalletType(walletInfo) {
+  if (walletInfo.isMetaMask) return 'metamask';
+  if (walletInfo.isTrust) return 'trust';
+  if (walletInfo.isWalletConnect) return 'walletconnect';
+  if (walletInfo.isCoinbaseWallet) return 'coinbase';
+  return 'metamask'; // default
+}
+
+// Check if wallet is installed (frontend detection)
+function isWalletInstalled(walletType, req) {
+  // This is handled on the frontend - backend just validates
+  return true;
+}
+
+// Get wallet download URL
+function getWalletDownloadUrl(walletType) {
+  const urls = {
+    metamask: 'https://chromewebstore.google.com/detail/metamask/nkbihfbeogaeaoehlefnkodbefgpgknn?hl=en&pli=1',
+    trust: 'https://chromewebstore.google.com/detail/trust-wallet/egjidjbpglichdcondbcbdnbeeppgdph?hl=en',
+    walletconnect: 'https://walletconnect.com/',
+    coinbase: 'https://www.coinbase.com/wallet'
+  };
+  return urls[walletType] || urls.metamask;
+}
+
+// Get wallet logo URL
+function getWalletLogoUrl(walletType) {
+  const logos = {
+    metamask: 'https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg',
+    trust: 'https://media.bithashcapital.live/Trust_Stacked%20Logo_Blue.png',
+    walletconnect: 'https://avatars.githubusercontent.com/u/37784886?s=200&v=4',
+    coinbase: 'https://assets.coingecko.com/coins/images/10791/large/Coinbase_Coin.png'
+  };
+  return logos[walletType] || logos.metamask;
+}
+
+// Get wallet brand color
+function getWalletBrandColor(walletType) {
+  const colors = {
+    metamask: '#F6851B',
+    trust: '#3375BB',
+    walletconnect: '#3B99FC',
+    coinbase: '#0052FF'
+  };
+  return colors[walletType] || '#F7A600';
 }
 
 // =============================================
-// HELPER: Get wallet user
-// =============================================
-async function getWalletUser(walletAddress) {
-  const wallet = await Web3Wallet.findOne({
-    walletAddress: walletAddress.toLowerCase(),
-    isVerified: true
-  }).populate('user');
-  return wallet?.user || null;
-}
-
-// =============================================
-// ENDPOINT 1: GET NONCE FOR WALLET SIGNING
+// ENDPOINT 1: GET NONCE FOR WALLET AUTHENTICATION
+// POST /api/auth/web3/nonce
 // =============================================
 app.post('/api/auth/web3/nonce', [
-  body('walletAddress').isEthereumAddress().withMessage('Invalid wallet address'),
-  body('walletType').isIn(['metamask', 'trust', 'walletconnect', 'coinbase', 'phantom', 'other']).withMessage('Invalid wallet type')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { walletAddress, walletType } = req.body;
-    const normalizedAddress = walletAddress.toLowerCase();
-
-    // Clean up old nonces for this wallet
-    await Web3Nonce.deleteMany({
-      walletAddress: normalizedAddress,
-      used: true
-    });
-
-    // Check rate limiting (max 5 nonces per hour)
-    const recentNonces = await Web3Nonce.countDocuments({
-      walletAddress: normalizedAddress,
-      createdAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) },
-      used: false
-    });
-
-    if (recentNonces >= 5) {
-      return res.status(429).json({
-        status: 'fail',
-        message: 'Too many nonce requests. Please wait a few minutes.',
-        retryAfter: 60
-      });
-    }
-
-    // Generate nonce
-    const nonce = generateWeb3Nonce();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-    // Determine purpose based on whether wallet is already registered
-    const isRegistered = await isWalletRegistered(normalizedAddress);
-    const purpose = isRegistered ? 'login' : 'signup';
-
-    // Save nonce
-    await Web3Nonce.create({
-      walletAddress: normalizedAddress,
-      nonce,
-      walletType,
-      purpose,
-      expiresAt,
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent']
-    });
-
-    // Create message for signing
-    const message = `Sign this message to authenticate with BitHash Capital:\n\nNonce: ${nonce}\n\nWallet: ${normalizedAddress}\n\nPurpose: ${purpose}\n\nTimestamp: ${Date.now()}\n\nBy signing, you confirm that you are the owner of this wallet and agree to our Terms of Service and Privacy Policy.`;
-
-    res.status(200).json({
-      status: 'success',
-      nonce,
-      message,
-      purpose,
-      expiresAt: expiresAt.toISOString(),
-      isRegistered
-    });
-
-    await logActivity('web3_nonce_generated', 'auth', null, null, null, req, {
-      walletAddress: normalizedAddress,
-      walletType,
-      purpose
-    });
-
-  } catch (err) {
-    console.error('Nonce generation error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to generate nonce'
-    });
-  }
-});
-
-// =============================================
-// ENDPOINT 2: VERIFY SIGNATURE AND AUTHENTICATE
-// =============================================
-app.post('/api/auth/web3/verify', [
-  body('walletAddress').isEthereumAddress().withMessage('Invalid wallet address'),
-  body('signature').notEmpty().withMessage('Signature is required'),
-  body('message').notEmpty().withMessage('Message is required'),
-  body('walletType').isIn(['metamask', 'trust', 'walletconnect', 'coinbase', 'phantom', 'other']).withMessage('Invalid wallet type'),
-  body('accountType').optional().isIn(['individual', 'business']).withMessage('Account type must be individual or business'),
+  body('walletAddress').trim().notEmpty().withMessage('Wallet address is required'),
+  body('walletType').optional().isIn(['metamask', 'trust', 'walletconnect', 'coinbase']).withMessage('Invalid wallet type'),
+  body('isSignup').optional().isBoolean().withMessage('isSignup must be a boolean'),
+  body('accountType').optional().isIn(['individual', 'business']).withMessage('Invalid account type'),
   body('referralCode').optional().trim().escape()
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({
       status: 'fail',
+      message: errors.array()[0]?.msg || 'Validation failed',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { 
+      walletAddress, 
+      walletType = 'metamask', 
+      isSignup = false, 
+      accountType = 'individual',
+      referralCode = null
+    } = req.body;
+
+    // Validate wallet address format
+    if (!ethers.isAddress(walletAddress)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid wallet address format'
+      });
+    }
+
+    const normalizedAddress = walletAddress.toLowerCase();
+
+    // Check if wallet is already registered
+    const existingWeb3User = await Web3User.findOne({
+      'wallets.address': normalizedAddress
+    });
+
+    const existingUser = await User.findOne({ email: null }); // Placeholder for web3 users
+
+    // =============================================
+    // CRITICAL: Check if user is trying to signup but already has an account
+    // =============================================
+    if (isSignup && existingWeb3User) {
+      // User already registered via web3 - ask them to login
+      const user = await User.findById(existingWeb3User.user);
+      
+      // Get the wallet info for the response
+      const wallet = existingWeb3User.wallets.find(w => w.address === normalizedAddress);
+      
+      return res.status(409).json({
+        status: 'fail',
+        message: `Wallet already registered. Please login instead.`,
+        code: 'WALLET_ALREADY_REGISTERED',
+        data: {
+          user: {
+            firstName: user?.firstName || existingWeb3User.firstName,
+            lastName: user?.lastName || existingWeb3User.lastName,
+            email: existingWeb3User.email
+          },
+          walletType: wallet?.type || walletType,
+          suggestedAction: 'login'
+        }
+      });
+    }
+
+    // =============================================
+    // CRITICAL: Check if user is trying to login but wallet not registered
+    // =============================================
+    if (!isSignup && !existingWeb3User) {
+      // Wallet not registered - ask them to signup
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Wallet not registered. Please sign up first.',
+        code: 'WALLET_NOT_REGISTERED',
+        data: {
+          walletAddress: normalizedAddress,
+          walletType: walletType,
+          suggestedAction: 'signup'
+        }
+      });
+    }
+
+    // =============================================
+    // CHECK FOR RECENT NONCE (prevent abuse)
+    // =============================================
+    const recentNonce = await Web3Nonce.findOne({
+      walletAddress: normalizedAddress,
+      used: false,
+      expiresAt: { $gt: new Date() },
+      createdAt: { $gt: new Date(Date.now() - 60000) } // Last 60 seconds
+    });
+
+    if (recentNonce) {
+      return res.status(429).json({
+        status: 'fail',
+        message: 'Please wait before requesting a new nonce',
+        retryAfter: 60
+      });
+    }
+
+    // =============================================
+    // GENERATE NEW NONCE
+    // =============================================
+    const nonce = generateNonce();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    
+    // Build the message to sign
+    const message = `Sign this message to authenticate with BitHash:\n\nNonce: ${nonce}\n\nWallet: ${normalizedAddress}\n\nTime: ${new Date().toISOString()}\n\nPurpose: ${isSignup ? 'Account Creation' : 'Account Login'}`;
+
+    // Store nonce in database
+    await Web3Nonce.create({
+      walletAddress: normalizedAddress,
+      nonce: nonce,
+      message: message,
+      type: isSignup ? 'signup' : 'login',
+      used: false,
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      expiresAt: expiresAt,
+      metadata: {
+        accountType: accountType,
+        referralCode: referralCode,
+        isSignup: isSignup,
+        pageSource: isSignup ? 'signup' : 'login',
+        walletType: walletType
+      }
+    });
+
+    // Log the nonce generation
+    await Web3Log.create({
+      walletAddress: normalizedAddress,
+      walletType: walletType,
+      action: 'nonce_generated',
+      status: 'success',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      metadata: {
+        isSignup: isSignup,
+        accountType: accountType,
+        pageSource: isSignup ? 'signup' : 'login'
+      }
+    });
+
+    // =============================================
+    // CHECK IF USER EXISTS FOR LOGIN ATTEMPT
+    // =============================================
+    let userExists = false;
+    let userData = null;
+    
+    if (!isSignup && existingWeb3User) {
+      userExists = true;
+      const user = await User.findById(existingWeb3User.user);
+      userData = {
+        id: user?._id || existingWeb3User.user,
+        firstName: user?.firstName || existingWeb3User.firstName,
+        lastName: user?.lastName || existingWeb3User.lastName,
+        email: existingWeb3User.email,
+        isEmailVerified: existingWeb3User.isEmailVerified
+      };
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        nonce: nonce,
+        message: message,
+        expiresAt: expiresAt,
+        isSignup: isSignup,
+        userExists: userExists,
+        userData: userData,
+        walletType: walletType,
+        walletLogo: getWalletLogoUrl(walletType),
+        brandColor: getWalletBrandColor(walletType)
+      }
+    });
+
+  } catch (error) {
+    console.error('Nonce generation error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to generate nonce. Please try again.'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 2: VERIFY SIGNATURE AND AUTHENTICATE
+// POST /api/auth/web3/verify
+// =============================================
+app.post('/api/auth/web3/verify', [
+  body('walletAddress').trim().notEmpty().withMessage('Wallet address is required'),
+  body('signature').trim().notEmpty().withMessage('Signature is required'),
+  body('message').trim().notEmpty().withMessage('Message is required'),
+  body('walletType').optional().isIn(['metamask', 'trust', 'walletconnect', 'coinbase']).withMessage('Invalid wallet type'),
+  body('accountType').optional().isIn(['individual', 'business']).withMessage('Invalid account type'),
+  body('referralCode').optional().trim().escape(),
+  body('firstName').optional().trim().escape(),
+  body('lastName').optional().trim().escape(),
+  body('email').optional().isEmail().withMessage('Invalid email format'),
+  body('city').optional().trim().escape(),
+  body('organizationName').optional().trim().escape(),
+  body('role').optional().trim().escape(),
+  body('country').optional().trim().escape(),
+  body('workEmail').optional().isEmail().withMessage('Invalid work email format')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      message: errors.array()[0]?.msg || 'Validation failed',
       errors: errors.array()
     });
   }
@@ -29591,39 +30540,37 @@ app.post('/api/auth/web3/verify', [
       walletAddress,
       signature,
       message,
-      walletType,
+      walletType = 'metamask',
       accountType = 'individual',
-      referralCode,
-      // Signup info fields (will be sent in step 2)
-      firstName,
-      lastName,
-      email,
-      city,
-      organizationName,
-      role,
-      country,
-      workEmail
+      referralCode = null,
+      firstName = null,
+      lastName = null,
+      email = null,
+      city = null,
+      organizationName = null,
+      role = null,
+      country = null,
+      workEmail = null
     } = req.body;
+
+    // Validate wallet address
+    if (!ethers.isAddress(walletAddress)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid wallet address format'
+      });
+    }
 
     const normalizedAddress = walletAddress.toLowerCase();
 
-    // Extract nonce from message
-    const nonceMatch = message.match(/Nonce:\s*([a-f0-9]{64})/i);
-    if (!nonceMatch) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid message format. Nonce not found.'
-      });
-    }
-    const nonce = nonceMatch[1];
-
-    // Find and validate nonce
+    // =============================================
+    // VERIFY THE NONCE
+    // =============================================
     const nonceRecord = await Web3Nonce.findOne({
       walletAddress: normalizedAddress,
-      nonce: nonce,
       used: false,
       expiresAt: { $gt: new Date() }
-    });
+    }).sort({ createdAt: -1 });
 
     if (!nonceRecord) {
       return res.status(400).json({
@@ -29632,1165 +30579,1163 @@ app.post('/api/auth/web3/verify', [
       });
     }
 
-    // Increment attempts
-    nonceRecord.attempts += 1;
-    await nonceRecord.save();
-
-    // Check max attempts
-    if (nonceRecord.attempts > nonceRecord.maxAttempts) {
-      return res.status(429).json({
+    // Check if the message matches
+    if (nonceRecord.message !== message) {
+      return res.status(400).json({
         status: 'fail',
-        message: 'Too many failed attempts. Please request a new nonce.'
+        message: 'Message does not match the generated nonce. Please try again.'
       });
     }
 
-    // Verify signature
-    const isValidSignature = verifyEthereumSignature(message, signature, normalizedAddress);
+    // =============================================
+    // VERIFY THE SIGNATURE
+    // =============================================
+    let isValidSignature = false;
+    let verificationMethod = '';
+
+    // Try ethers verification first
+    try {
+      isValidSignature = verifyWalletSignature(message, signature, normalizedAddress);
+      if (isValidSignature) verificationMethod = 'ethers';
+    } catch (error) {
+      console.warn('Ethers verification failed:', error.message);
+    }
+
+    // Fallback to MetaMask verification
+    if (!isValidSignature) {
+      try {
+        isValidSignature = verifyWalletSignatureMetaMask(message, signature, normalizedAddress);
+        if (isValidSignature) verificationMethod = 'metamask';
+      } catch (error) {
+        console.warn('MetaMask verification failed:', error.message);
+      }
+    }
 
     if (!isValidSignature) {
+      // Mark nonce as failed but don't use it
+      await Web3Log.create({
+        walletAddress: normalizedAddress,
+        walletType: walletType,
+        action: 'signature_failed',
+        status: 'failed',
+        ipAddress: getRealClientIP(req),
+        userAgent: req.headers['user-agent'] || 'Unknown',
+        metadata: {
+          error: 'Invalid signature',
+          verificationMethod: verificationMethod || 'none'
+        }
+      });
+
       return res.status(401).json({
         status: 'fail',
         message: 'Invalid signature. Please try again.'
       });
     }
 
-    // Mark nonce as used
+    // =============================================
+    // MARK NONCE AS USED
+    // =============================================
     nonceRecord.used = true;
+    nonceRecord.usedAt = new Date();
     await nonceRecord.save();
 
-    // Get device info
-    const deviceInfo = await getUserDeviceInfo(req);
-    const formattedDeviceInfo = {
-      type: getDeviceType(req),
-      os: {
-        name: deviceInfo.deviceDetails?.os?.name || 'Unknown',
-        version: deviceInfo.deviceDetails?.os?.version || 'Unknown'
-      },
-      browser: {
-        name: deviceInfo.deviceDetails?.browser?.name || 'Unknown',
-        version: deviceInfo.deviceDetails?.browser?.version || 'Unknown'
-      },
-      platform: deviceInfo.device || 'Unknown'
-    };
-    const formattedLocation = {
-      ip: deviceInfo.ip,
-      country: {
-        name: deviceInfo.locationDetails?.country || 'Unknown',
-        code: (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
-      },
-      region: {
-        name: deviceInfo.locationDetails?.region || 'Unknown',
-        code: deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown'
-      },
-      city: deviceInfo.locationDetails?.city || 'Unknown',
-      formatted: deviceInfo.location || 'Unknown'
-    };
+    const isSignup = nonceRecord.metadata?.isSignup || false;
+    const pageSource = nonceRecord.metadata?.pageSource || 'unknown';
 
     // =============================================
-    // CHECK IF WALLET IS ALREADY REGISTERED
+    // CHECK IF USER ALREADY EXISTS
     // =============================================
-    const existingWallet = await Web3Wallet.findOne({
-      walletAddress: normalizedAddress,
-      isVerified: true
-    }).populate('user');
+    let existingWeb3User = await Web3User.findOne({
+      'wallets.address': normalizedAddress
+    });
 
-    if (existingWallet) {
-      // WALLET EXISTS - LOGIN FLOW
-      const user = existingWallet.user;
+    // =============================================
+    // HANDLE: LOGIN ATTEMPT (isSignup = false)
+    // =============================================
+    if (!isSignup) {
+      if (!existingWeb3User) {
+        return res.status(404).json({
+          status: 'fail',
+          message: 'Wallet not registered. Please sign up first.',
+          code: 'WALLET_NOT_REGISTERED',
+          data: {
+            suggestedAction: 'signup'
+          }
+        });
+      }
+
+      // Check if user is active
+      const user = await User.findById(existingWeb3User.user);
+      if (!user || user.status !== 'active') {
+        return res.status(403).json({
+          status: 'fail',
+          message: 'Account is not active. Please contact support.'
+        });
+      }
+
+      // Update last login
+      existingWeb3User.lastLogin = new Date();
       
-      if (!user) {
-        // Wallet exists but user doesn't (shouldn't happen)
-        await Web3Wallet.deleteOne({ _id: existingWallet._id });
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Wallet record corrupted. Please try signing up again.'
+      // Update wallet last used
+      const wallet = existingWeb3User.wallets.find(w => w.address === normalizedAddress);
+      if (wallet) {
+        wallet.lastUsed = new Date();
+        wallet.isVerified = true;
+      }
+      
+      await existingWeb3User.save();
+
+      // Generate JWT token
+      const token = generateJWT(existingWeb3User.user, false);
+
+      // Check if email is verified for this user
+      const isEmailVerified = existingWeb3User.isEmailVerified || false;
+
+      // =============================================
+      // SEND LOGIN SUCCESS EMAIL (after verification)
+      // =============================================
+      const deviceInfo = await getUserDeviceInfo(req);
+      
+      try {
+        await sendAutomatedEmail(user, 'login_success', {
+          name: user.firstName || existingWeb3User.firstName || 'Web3 User',
+          device: deviceInfo.device || 'Unknown device',
+          location: deviceInfo.location || 'Unknown location',
+          ip: deviceInfo.ip || 'Unknown IP',
+          timestamp: new Date().toISOString()
         });
+        console.log(`📧 Login success email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send login success email:', emailError);
       }
 
-      if (user.status !== 'active') {
-        return res.status(401).json({
-          status: 'fail',
-          message: 'Your account has been suspended. Please contact support.'
+      // =============================================
+      // SEND ADMIN LOGIN NOTIFICATION
+      // =============================================
+      try {
+        const adminEmailHtml = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px;">
+              <h1 style="color: #FFFFFF; font-size: 24px; margin: 10px 0 0;">₿itHash</h1>
+            </div>
+            <div style="padding: 30px; background: #FFFFFF;">
+              <h2 style="color: #0B0E11; margin-bottom: 20px;">🔐 Web3 Login Alert</h2>
+              <p><strong>User:</strong> ${user.firstName || existingWeb3User.firstName} ${user.lastName || existingWeb3User.lastName}</p>
+              <p><strong>Email:</strong> ${existingWeb3User.email || 'Not provided'}</p>
+              <p><strong>Wallet:</strong> ${normalizedAddress}</p>
+              <p><strong>Wallet Type:</strong> ${walletType.toUpperCase()}</p>
+              <p><strong>Location:</strong> ${deviceInfo.location || 'Unknown'}</p>
+              <p><strong>IP:</strong> ${deviceInfo.ip || 'Unknown'}</p>
+              <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+              <p style="color: #10B981;">✅ Login successful via Web3</p>
+            </div>
+          </div>
+        `;
+        
+        await supportTransporter.sendMail({
+          from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+          to: 'thieretw@gmail.com',
+          subject: `🔐 Web3 Login: ${user.firstName || 'User'} logged in via ${walletType}`,
+          html: adminEmailHtml
         });
+        console.log(`✅ Admin web3 login notification sent`);
+      } catch (adminEmailError) {
+        console.error('Failed to send admin login notification:', adminEmailError);
       }
 
-      // Update last used
-      existingWallet.lastUsed = new Date();
-      await existingWallet.save();
-
-      // Update user's last web3 login
-      user.lastWeb3Login = new Date();
-      user.lastLogin = new Date();
-      await user.save();
-
-      // Generate OTP for login
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-      await OTP.create({
-        email: user.email,
-        otp,
-        type: 'login',
-        expiresAt,
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent']
-      });
-
-      // Send OTP email
-      await sendProfessionalEmail({
-        email: user.email,
-        template: 'otp',
-        data: {
-          name: user.firstName,
-          otp: otp,
-          action: 'Web3 login verification'
-        }
-      });
-
-      // Create temp token for OTP verification
-      const tempToken = generateJWT(user._id);
-
-      // Create web3 login session
-      await Web3LoginSession.create({
+      // Create Web3Log entry
+      await Web3Log.create({
+        user: existingWeb3User.user,
         walletAddress: normalizedAddress,
         walletType: walletType,
-        user: user._id,
-        step: 'signature_verified',
-        tempToken: tempToken,
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent'],
-        location: formattedLocation.formatted
-      });
-
-      // Log activity
-      await UserLog.create({
-        user: user._id,
-        username: user.email,
-        email: user.email,
-        userFullName: `${user.firstName} ${user.lastName}`,
-        action: 'login_attempt',
-        actionCategory: 'authentication',
+        action: 'login_success',
+        status: 'success',
         ipAddress: getRealClientIP(req),
         userAgent: req.headers['user-agent'] || 'Unknown',
-        deviceInfo: formattedDeviceInfo,
-        location: formattedLocation,
-        status: 'pending',
+        deviceInfo: {
+          type: getDeviceType(req),
+          os: getOSFromUserAgent(req.headers['user-agent']),
+          browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        },
         metadata: {
-          loginMethod: 'web3',
-          walletAddress: normalizedAddress,
-          walletType: walletType,
-          otpSent: true
+          pageSource: pageSource,
+          verificationMethod: verificationMethod,
+          isSignup: false
         }
       });
 
-      // SEND ADMIN LOGIN NOTIFICATION
-      const formattedTimestamp = new Date().toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        timeZoneName: 'short'
+      // Return success with token
+      return res.status(200).json({
+        status: 'success',
+        message: 'Login successful! Redirecting to dashboard...',
+        token: token,
+        data: {
+          user: {
+            id: existingWeb3User.user,
+            firstName: user.firstName || existingWeb3User.firstName,
+            lastName: user.lastName || existingWeb3User.lastName,
+            email: existingWeb3User.email,
+            isEmailVerified: isEmailVerified,
+            accountType: existingWeb3User.accountType || 'individual',
+            wallets: existingWeb3User.wallets.map(w => ({
+              address: w.address,
+              type: w.type,
+              isPrimary: w.isPrimary,
+              isVerified: w.isVerified
+            }))
+          }
+        }
       });
+    }
 
-      const brandHeader = `
-        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-        </div>
-      `;
+    // =============================================
+    // HANDLE: SIGNUP ATTEMPT (isSignup = true)
+    // =============================================
+    
+    // Check if wallet is already registered
+    if (existingWeb3User) {
+      // Get the associated user
+      const user = await User.findById(existingWeb3User.user);
+      
+      return res.status(409).json({
+        status: 'fail',
+        message: `Wallet already registered. Please login instead.`,
+        code: 'WALLET_ALREADY_REGISTERED',
+        data: {
+          user: {
+            firstName: user?.firstName || existingWeb3User.firstName,
+            lastName: user?.lastName || existingWeb3User.lastName,
+            email: existingWeb3User.email
+          },
+          suggestedAction: 'login'
+        }
+      });
+    }
 
-      const brandFooter = `
-        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-          </p>
-        </div>
-      `;
+    // =============================================
+    // VALIDATE REQUIRED FIELDS FOR SIGNUP
+    // =============================================
+    if (!email) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Email is required for signup'
+      });
+    }
 
-      const walletDisplayName = walletType === 'metamask' ? 'MetaMask' :
-                               walletType === 'trust' ? 'Trust Wallet' :
-                               walletType.charAt(0).toUpperCase() + walletType.slice(1);
+    if (!firstName || !lastName) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'First name and last name are required'
+      });
+    }
 
+    if (!city) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'City is required'
+      });
+    }
+
+    // Check if email is already in use
+    const existingUserWithEmail = await User.findOne({ email: email.toLowerCase() });
+    if (existingUserWithEmail) {
+      // Check if this email belongs to a web3 user
+      const existingWeb3WithEmail = await Web3User.findOne({ email: email.toLowerCase() });
+      
+      if (existingWeb3WithEmail) {
+        return res.status(409).json({
+          status: 'fail',
+          message: 'This email is already registered with a web3 wallet. Please login instead.',
+          code: 'EMAIL_ALREADY_REGISTERED',
+          data: {
+            suggestedAction: 'login'
+          }
+        });
+      }
+      
+      return res.status(409).json({
+        status: 'fail',
+        message: 'This email is already registered. Please login or use a different email.',
+        code: 'EMAIL_TAKEN'
+      });
+    }
+
+    // =============================================
+    // CREATE USER (Main User document)
+    // =============================================
+    const newUser = await User.create({
+      firstName: firstName,
+      lastName: lastName,
+      email: email.toLowerCase(),
+      city: city,
+      country: country || 'Unknown',
+      accountType: accountType,
+      authProvider: 'web3',
+      isVerified: false, // Will be verified via OTP
+      status: 'pending_verification',
+      referralCode: null, // Will be set by Web3User
+      signupSource: `web3_${walletType}`,
+      metadata: {
+        signupMethod: `web3_${walletType}`,
+        signupDate: new Date(),
+        ipAddress: getRealClientIP(req),
+        userAgent: req.headers['user-agent'],
+        walletAddress: normalizedAddress,
+        walletType: walletType
+      }
+    });
+
+    // =============================================
+    // CREATE WEB3 USER
+    // =============================================
+    const web3User = await Web3User.create({
+      user: newUser._id,
+      wallets: [{
+        address: normalizedAddress,
+        type: walletType,
+        isPrimary: true,
+        isVerified: true,
+        connectedAt: new Date(),
+        lastUsed: new Date(),
+        metadata: {
+          chainId: null, // Will be updated when available
+          networkName: null,
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          ipAddress: getRealClientIP(req),
+          location: 'Unknown'
+        }
+      }],
+      email: email.toLowerCase(),
+      isEmailVerified: false,
+      firstName: firstName,
+      lastName: lastName,
+      city: city,
+      country: country || 'Unknown',
+      accountType: accountType,
+      organizationName: organizationName || null,
+      role: role || null,
+      workEmail: workEmail || null,
+      signupSource: `web3_${walletType}`,
+      referralCode: generateReferralCode(),
+      referredBy: null,
+      status: 'pending_verification',
+      metadata: {
+        signupIP: getRealClientIP(req),
+        signupUserAgent: req.headers['user-agent'] || 'Unknown',
+        signupLocation: 'Unknown',
+        lastWalletAction: 'signup',
+        lastWalletActionAt: new Date()
+      }
+    });
+
+    // Handle referral code
+    if (referralCode) {
+      const referrer = await Web3User.findOne({ referralCode: referralCode });
+      if (referrer) {
+        web3User.referredBy = referrer.user;
+        await web3User.save();
+        
+        // Update referrer's referral stats
+        await User.findByIdAndUpdate(referrer.user, {
+          $inc: { 'referralStats.totalReferrals': 1 }
+        });
+      }
+    }
+
+    // =============================================
+    // GENERATE OTP FOR EMAIL VERIFICATION
+    // =============================================
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await OTP.create({
+      email: email.toLowerCase(),
+      otp: otp,
+      type: 'signup',
+      expiresAt: expiresAt,
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      metadata: {
+        web3Signup: true,
+        walletAddress: normalizedAddress,
+        walletType: walletType
+      }
+    });
+
+    // =============================================
+    // SEND OTP EMAIL
+    // =============================================
+    await sendProfessionalEmail({
+      email: email.toLowerCase(),
+      template: 'otp',
+      data: {
+        name: firstName,
+        otp: otp,
+        action: 'web3 account verification'
+      }
+    });
+
+    // =============================================
+    // SEND ADMIN SIGNUP NOTIFICATION
+    // =============================================
+    try {
       const adminEmailHtml = `
         <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-          ${brandHeader}
+          <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+            <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px;">
+            <h1 style="color: #FFFFFF; font-size: 24px; margin: 10px 0 0;">₿itHash</h1>
+            <p style="color: #B7BDC6;">New Web3 User Registration</p>
+          </div>
           <div style="padding: 30px; background: #FFFFFF;">
-            <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-              <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                  <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                </svg>
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
-                  <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-              </div>
-              <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WEB3 LOGIN INITIATED!</h2>
-              <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated Web3 login (awaiting OTP)</p>
+            <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+              <h2 style="color: #10B981; font-size: 20px; margin: 0;">🆕 NEW WEB3 USER!</h2>
+              <p style="color: #065F46; margin: 5px 0 0;">${firstName} ${lastName} joined via ${walletType.toUpperCase()}</p>
             </div>
             
             <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
               <table style="width: 100%; border-collapse: collapse;">
-                <tr style="border-bottom: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>User:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; font-size: 11px;">${normalizedAddress}</td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Wallet Provider:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;"><span style="background: #8B5CF6; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${walletDisplayName}</span></td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">LOGIN (Existing User)</span></td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Web3 + OTP</span></td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Time:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
-                </tr>
+                <tr><td style="padding: 8px 0;"><strong>Name:</strong></td><td style="padding: 8px 0; text-align: right;">${firstName} ${lastName}</td></tr>
+                <tr><td style="padding: 8px 0;"><strong>Email:</strong></td><td style="padding: 8px 0; text-align: right;">${email}</td></tr>
+                <tr><td style="padding: 8px 0;"><strong>Wallet Address:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 11px;">${normalizedAddress}</td></tr>
+                <tr><td style="padding: 8px 0;"><strong>Wallet Type:</strong></td><td style="padding: 8px 0; text-align: right;"><span style="background: ${getWalletBrandColor(walletType)}; color: white; padding: 2px 10px; border-radius: 20px;">${walletType.toUpperCase()}</span></td></tr>
+                <tr><td style="padding: 8px 0;"><strong>Account Type:</strong></td><td style="padding: 8px 0; text-align: right;">${accountType.toUpperCase()}</td></tr>
+                <tr><td style="padding: 8px 0;"><strong>City:</strong></td><td style="padding: 8px 0; text-align: right;">${city || 'N/A'}</td></tr>
+                ${organizationName ? `<tr><td style="padding: 8px 0;"><strong>Organization:</strong></td><td style="padding: 8px 0; text-align: right;">${organizationName}</td></tr>` : ''}
+                ${referralCode ? `<tr><td style="padding: 8px 0;"><strong>Referral Code:</strong></td><td style="padding: 8px 0; text-align: right;">${referralCode}</td></tr>` : ''}
+                <tr><td style="padding: 8px 0;"><strong>Registered At:</strong></td><td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td></tr>
               </table>
             </div>
             
-            <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-              <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
-              <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Using Web3 wallet for authentication</p>
-              <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">Login success email will be sent after OTP verification.</p>
+            <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px;">
+              <p style="color: #92400E; margin: 0;">ⓘ OTP sent to user's email for verification. User will complete signup after OTP verification.</p>
             </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Activity</a>
-            </div>
-            
-            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
           </div>
-          ${brandFooter}
         </div>
       `;
-
-      try {
-        await supportTransporter.sendMail({
-          from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-          to: 'thieretw@gmail.com',
-          subject: `🔐 WEB3 LOGIN: ${user.firstName} ${user.lastName} logged into BitHash Capital`,
-          html: adminEmailHtml
-        });
-        console.log(`✅ Admin Web3 login notification sent to thieretw@gmail.com for user: ${user.email}`);
-      } catch (adminEmailError) {
-        console.error(`❌ Failed to send admin Web3 login notification:`, adminEmailError.message);
-      }
-
-      res.status(200).json({
-        status: 'success',
-        message: 'Signature verified. OTP sent to your email for verification.',
-        tempToken,
-        needsOtp: true,
-        isNewUser: false,
-        data: {
-          user: {
-            id: user._id,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            email: user.email,
-            accountType: user.accountType
-          }
-        }
-      });
-
-    } else {
-      // =============================================
-      // WALLET DOES NOT EXIST - SIGNUP FLOW
-      // =============================================
       
-      // Check if the user is trying to signup but has provided basic info
-      const hasBasicInfo = firstName && lastName && email && city;
-
-      if (!hasBasicInfo) {
-        // First step: just verified signature, need basic info
-        // Create a signup session
-        const sessionExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
-        const tempToken = generateJWT({ walletAddress: normalizedAddress, purpose: 'web3_signup' });
-
-        // Store session
-        await Web3SignupSession.create({
-          walletAddress: normalizedAddress,
-          walletType: walletType,
-          step: 'signature_verified',
-          tempToken: tempToken,
-          expiresAt: sessionExpiresAt,
-          ipAddress: getRealClientIP(req),
-          userAgent: req.headers['user-agent'],
-          location: formattedLocation.formatted,
-          // Store basic fields if provided (partial)
-          email: email || '',
-          firstName: firstName || '',
-          lastName: lastName || '',
-          city: city || '',
-          accountType: accountType,
-          organizationName: organizationName || '',
-          role: role || '',
-          country: country || '',
-          workEmail: workEmail || '',
-          referralCode: referralCode
-        });
-
-        // Also store referral if provided
-        let referredByUser = null;
-        if (referralCode) {
-          let actualReferralCode = referralCode;
-          if (referralCode.includes('-')) {
-            const parts = referralCode.split('-');
-            if (parts.length >= 4) {
-              actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
-            }
-          }
-          referredByUser = await User.findOne({ referralCode: actualReferralCode });
-        }
-
-        // Return response asking for basic info
-        res.status(200).json({
-          status: 'success',
-          message: 'Signature verified. Please complete your profile information.',
-          tempToken,
-          needsBasicInfo: true,
-          isNewUser: true,
-          data: {
-            walletAddress: normalizedAddress,
-            walletType: walletType,
-            referralInfo: referredByUser ? {
-              referredBy: referredByUser._id,
-              referrerName: `${referredByUser.firstName} ${referredByUser.lastName}`,
-              referrerEmail: referredByUser.email
-            } : null
-          }
-        });
-
-      } else {
-        // =============================================
-        // SECOND STEP: BASIC INFO PROVIDED - CREATE USER
-        // =============================================
-        
-        // Check if email already exists
-        const existingUser = await User.findOne({ email: email });
-        if (existingUser) {
-          return res.status(409).json({
-            status: 'fail',
-            message: `Email ${email} is already registered. Please use a different email or log in.`
-          });
-        }
-
-        // Check if this wallet was used in a signup session
-        const existingSession = await Web3SignupSession.findOne({
-          walletAddress: normalizedAddress,
-          step: 'signature_verified',
-          expiresAt: { $gt: new Date() }
-        });
-
-        if (!existingSession) {
-          return res.status(400).json({
-            status: 'fail',
-            message: 'Session expired. Please restart the signup process.'
-          });
-        }
-
-        // Process referral
-        let referredByUser = null;
-        let referralSource = 'web3_signup';
-        
-        if (referralCode || existingSession.referralCode) {
-          const refCode = referralCode || existingSession.referralCode;
-          let actualReferralCode = refCode;
-          if (refCode.includes('-')) {
-            const parts = refCode.split('-');
-            if (parts.length >= 4) {
-              actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
-            }
-          }
-          referredByUser = await User.findOne({ referralCode: actualReferralCode });
-          if (referredByUser) {
-            referralSource = 'referral_link';
-          }
-        }
-
-        // Hash password (generate random password since web3 users don't need one)
-        const randomPassword = crypto.randomBytes(32).toString('hex');
-        const hashedPassword = await bcrypt.hash(randomPassword, 12);
-        const newReferralCode = generateReferralCode();
-
-        // Create user
-        const userData = {
-          firstName: firstName,
-          lastName: lastName,
-          email: email,
-          password: hashedPassword,
-          city: city || existingSession.city || '',
-          referralCode: newReferralCode,
-          referredBy: referredByUser ? referredByUser._id : undefined,
-          isVerified: false,
-          accountType: accountType || existingSession.accountType || 'individual',
-          authProvider: 'web3',
-          signupSource: referralSource,
-          organizationName: organizationName || existingSession.organizationName || null,
-          role: role || existingSession.role || null,
-          country: country || existingSession.country || null,
-          workEmail: workEmail || existingSession.workEmail || null,
-          web3SignupData: {
-            walletAddress: normalizedAddress,
-            walletType: walletType,
-            signedAt: new Date(),
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent']
-          },
-          metadata: {
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'],
-            signupDate: new Date(),
-            accountTypeSelected: accountType || existingSession.accountType || 'individual',
-            signupMethod: 'web3_wallet'
-          }
-        };
-
-        const newUser = await User.create(userData);
-
-        // Create Web3Wallet record
-        const web3Wallet = await Web3Wallet.create({
-          user: newUser._id,
-          walletAddress: normalizedAddress,
-          walletType: walletType,
-          walletProvider: walletType,
-          isVerified: true,
-          isPrimary: true,
-          linkedAt: new Date(),
-          ipAddress: getRealClientIP(req),
-          userAgent: req.headers['user-agent'],
-          location: formattedLocation.formatted,
-          linkingHistory: [{
-            action: 'linked',
-            timestamp: new Date(),
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent']
-          }]
-        });
-
-        // Update user with wallet reference
-        newUser.web3Wallets = [web3Wallet._id];
-        newUser.primaryWeb3Wallet = web3Wallet._id;
-        await newUser.save();
-
-        // Update session
-        existingSession.step = 'info_submitted';
-        existingSession.user = newUser._id;
-        await existingSession.save();
-
-        // Generate OTP for email verification
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-        await OTP.create({
-          email: email,
-          otp,
-          type: 'signup',
-          expiresAt,
-          ipAddress: getRealClientIP(req),
-          userAgent: req.headers['user-agent']
-        });
-
-        // Send OTP email
-        await sendProfessionalEmail({
-          email: email,
-          template: 'otp',
-          data: {
-            name: firstName,
-            otp: otp,
-            action: 'Web3 account verification'
-          }
-        });
-
-        // Generate temp token for OTP verification
-        const tempToken = generateJWT(newUser._id);
-
-        // Log activity
-        await UserLog.create({
-          user: newUser._id,
-          username: newUser.email,
-          email: newUser.email,
-          userFullName: `${newUser.firstName} ${newUser.lastName}`,
-          action: 'signup_attempt',
-          actionCategory: 'authentication',
-          ipAddress: getRealClientIP(req),
-          userAgent: req.headers['user-agent'] || 'Unknown',
-          deviceInfo: formattedDeviceInfo,
-          location: formattedLocation,
-          status: 'pending',
-          metadata: {
-            email: email,
-            signupMethod: 'web3',
-            walletAddress: normalizedAddress,
-            walletType: walletType,
-            referralCodeUsed: referralCode || null,
-            referredBy: referredByUser ? referredByUser.email : null,
-            accountType: accountType || existingSession.accountType || 'individual',
-            otpSent: true
-          }
-        });
-
-        // =============================================
-        // SEND ADMIN SIGNUP NOTIFICATION
-        // =============================================
-        const formattedTimestamp = new Date().toLocaleString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          timeZoneName: 'short'
-        });
-
-        const brandHeader = `
-          <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-            <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-            <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-            <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-          </div>
-        `;
-
-        const brandFooter = `
-          <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-              <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-            </p>
-          </div>
-        `;
-
-        const walletDisplayName = walletType === 'metamask' ? 'MetaMask' :
-                                 walletType === 'trust' ? 'Trust Wallet' :
-                                 walletType.charAt(0).toUpperCase() + walletType.slice(1);
-
-        const signupAdminEmailHtml = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                    <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                    <path d="M12 8V12M12 16H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
-                  </svg>
-                </div>
-                <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW WEB3 SIGNUP!</h2>
-                <p style="color: #065F46; font-size: 13px; margin: 0;">${newUser.firstName} ${newUser.lastName} just signed up using ${walletDisplayName}</p>
-              </div>
-              
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr style="border-bottom: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${newUser.firstName} ${newUser.lastName}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Email Address:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${newUser.email}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-size: 11px;">${normalizedAddress}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Wallet Provider:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #8B5CF6; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${walletDisplayName}</span></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: ${accountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${(accountType || 'individual').toUpperCase()}</span></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #8B5CF6; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Web3 (Wallet)</span></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>City:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${city || existingSession.city || 'N/A'}</td>
-                  </tr>
-                  ${organizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Organization:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${organizationName}</td>
-                  </tr>` : ''}
-                  ${referralCode ? `<tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Referral Code Used:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-family: monospace;">${referralCode}</td>
-                  </tr>` : ''}
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Signup Source:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #8B5CF6; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Web3 Wallet</span></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Signed Up At:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
-                  </tr>
-                </table>
-              </div>
-              
-              <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Web3 Signup Details</p>
-                <p style="color: #78350F; margin: 0; font-size: 14px;">User signed up using ${walletDisplayName}. No password required. OTP sent for email verification.</p>
-              </div>
-              
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="https://www.bithashcapital.live/admin/users/${newUser._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
-              </div>
-              
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-
-        try {
-          await supportTransporter.sendMail({
-            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-            to: 'thieretw@gmail.com',
-            subject: `🆕 NEW WEB3 SIGNUP: ${newUser.firstName} ${newUser.lastName} joined BitHash (${walletDisplayName})`,
-            html: signupAdminEmailHtml
-          });
-          console.log(`✅ Admin Web3 signup notification sent to thieretw@gmail.com for user: ${newUser.email}`);
-        } catch (adminEmailError) {
-          console.error(`❌ Failed to send admin Web3 signup notification:`, adminEmailError.message);
-        }
-
-        res.status(201).json({
-          status: 'success',
-          message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
-          tempToken,
-          needsOtp: true,
-          isNewUser: true,
-          data: {
-            user: {
-              id: newUser._id,
-              firstName: newUser.firstName,
-              lastName: newUser.lastName,
-              email: newUser.email,
-              accountType: newUser.accountType,
-              walletAddress: normalizedAddress,
-              walletType: walletType
-            }
-          }
-        });
-
-        // Log activity
-        await logActivity('web3_signup_completed', 'user', newUser._id, newUser._id, 'User', req, {
-          email: newUser.email,
-          walletAddress: normalizedAddress,
-          walletType: walletType,
-          accountType: accountType || existingSession.accountType || 'individual',
-          signupMethod: 'web3',
-          hasReferral: !!referralCode
-        });
-
-      }
+      await supportTransporter.sendMail({
+        from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+        to: 'thieretw@gmail.com',
+        subject: `🆕 NEW WEB3 SIGNUP: ${firstName} ${lastName} joined via ${walletType}`,
+        html: adminEmailHtml
+      });
+      console.log(`✅ Admin web3 signup notification sent`);
+    } catch (adminEmailError) {
+      console.error('Failed to send admin signup notification:', adminEmailError);
     }
 
-  } catch (err) {
-    console.error('Web3 verification error:', err);
+    // =============================================
+    // CREATE WEB3 LOG
+    // =============================================
+    await Web3Log.create({
+      user: newUser._id,
+      walletAddress: normalizedAddress,
+      walletType: walletType,
+      action: 'signup_success',
+      status: 'success',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      metadata: {
+        pageSource: pageSource,
+        verificationMethod: verificationMethod,
+        isSignup: true,
+        accountType: accountType,
+        referralCode: referralCode,
+        hasReferral: !!referralCode,
+        organizationName: organizationName
+      }
+    });
+
+    // Generate temporary token for OTP verification
+    const tempToken = generateJWT(newUser._id);
+
+    // =============================================
+    // RETURN SUCCESS WITH TEMP TOKEN
+    // =============================================
+    res.status(201).json({
+      status: 'success',
+      message: 'Wallet authenticated successfully! Please verify your email with the OTP sent to your inbox.',
+      tempToken: tempToken,
+      needsOtp: true,
+      isSignup: true,
+      data: {
+        user: {
+          id: newUser._id,
+          firstName: firstName,
+          lastName: lastName,
+          email: email.toLowerCase(),
+          accountType: accountType,
+          city: city,
+          organizationName: organizationName || null,
+          isEmailVerified: false,
+          wallets: [{
+            address: normalizedAddress,
+            type: walletType,
+            isPrimary: true,
+            isVerified: true
+          }]
+        },
+        referralCode: web3User.referralCode
+      }
+    });
+
+  } catch (error) {
+    console.error('Web3 verification error:', error);
     res.status(500).json({
       status: 'error',
-      message: err.message || 'An error occurred during Web3 authentication'
+      message: 'An error occurred during web3 authentication. Please try again.'
     });
   }
 });
 
 // =============================================
-// ENDPOINT 3: LINK WALLET TO EXISTING ACCOUNT (Dashboard)
+// ENDPOINT 3: WEB3 WALLET LINK (for dashboard)
+// POST /api/auth/web3/link-wallet
 // =============================================
-app.post('/api/auth/web3/link', protect, [
-  body('walletAddress').isEthereumAddress().withMessage('Invalid wallet address'),
-  body('signature').notEmpty().withMessage('Signature is required'),
-  body('message').notEmpty().withMessage('Message is required'),
-  body('walletType').isIn(['metamask', 'trust', 'walletconnect', 'coinbase', 'phantom', 'other']).withMessage('Invalid wallet type')
+app.post('/api/auth/web3/link-wallet', protect, [
+  body('walletAddress').trim().notEmpty().withMessage('Wallet address is required'),
+  body('signature').trim().notEmpty().withMessage('Signature is required'),
+  body('message').trim().notEmpty().withMessage('Message is required'),
+  body('walletType').optional().isIn(['metamask', 'trust', 'walletconnect', 'coinbase']).withMessage('Invalid wallet type')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({
       status: 'fail',
+      message: errors.array()[0]?.msg || 'Validation failed',
       errors: errors.array()
     });
   }
 
   try {
-    const { walletAddress, signature, message, walletType } = req.body;
-    const normalizedAddress = walletAddress.toLowerCase();
+    const {
+      walletAddress,
+      signature,
+      message,
+      walletType = 'metamask'
+    } = req.body;
+
     const userId = req.user._id;
 
-    // Check if wallet is already linked to ANY user
-    const existingWallet = await Web3Wallet.findOne({
-      walletAddress: normalizedAddress,
-      isVerified: true
-    }).populate('user');
+    // Validate wallet address
+    if (!ethers.isAddress(walletAddress)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid wallet address format'
+      });
+    }
 
-    if (existingWallet) {
-      if (existingWallet.user._id.toString() === userId.toString()) {
-        return res.status(409).json({
+    const normalizedAddress = walletAddress.toLowerCase();
+
+    // Check if wallet is already linked to ANY user
+    const existingWeb3User = await Web3User.findOne({
+      'wallets.address': normalizedAddress
+    });
+
+    if (existingWeb3User) {
+      // Check if it's linked to the current user
+      if (existingWeb3User.user.toString() === userId.toString()) {
+        return res.status(400).json({
           status: 'fail',
-          message: 'This wallet is already linked to your account.'
+          message: 'This wallet is already linked to your account'
         });
       } else {
         return res.status(409).json({
           status: 'fail',
-          message: 'This wallet is already linked to another account. Please use a different wallet.'
+          message: 'This wallet is already linked to another account'
         });
       }
     }
 
-    // Extract nonce from message
-    const nonceMatch = message.match(/Nonce:\s*([a-f0-9]{64})/i);
-    if (!nonceMatch) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid message format. Nonce not found.'
-      });
+    // Verify the signature
+    let isValidSignature = false;
+    try {
+      isValidSignature = verifyWalletSignature(message, signature, normalizedAddress);
+    } catch (error) {
+      console.warn('Signature verification failed:', error.message);
     }
-    const nonce = nonceMatch[1];
-
-    // Find and validate nonce
-    const nonceRecord = await Web3Nonce.findOne({
-      walletAddress: normalizedAddress,
-      nonce: nonce,
-      used: false,
-      expiresAt: { $gt: new Date() }
-    });
-
-    if (!nonceRecord) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid or expired nonce. Please request a new one.'
-      });
-    }
-
-    // Verify signature
-    const isValidSignature = verifyEthereumSignature(message, signature, normalizedAddress);
 
     if (!isValidSignature) {
-      nonceRecord.attempts += 1;
-      await nonceRecord.save();
+      try {
+        isValidSignature = verifyWalletSignatureMetaMask(message, signature, normalizedAddress);
+      } catch (error) {
+        console.warn('MetaMask verification failed:', error.message);
+      }
+    }
+
+    if (!isValidSignature) {
       return res.status(401).json({
         status: 'fail',
         message: 'Invalid signature. Please try again.'
       });
     }
 
-    // Mark nonce as used
-    nonceRecord.used = true;
-    await nonceRecord.save();
+    // Get or create Web3User for this user
+    let web3User = await Web3User.findOne({ user: userId });
 
-    // Get device info
-    const deviceInfo = await getUserDeviceInfo(req);
-
-    // Create Web3Wallet record
-    const web3Wallet = await Web3Wallet.create({
-      user: userId,
-      walletAddress: normalizedAddress,
-      walletType: walletType,
-      walletProvider: walletType,
-      isVerified: true,
-      isPrimary: false,
-      linkedAt: new Date(),
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'],
-      location: deviceInfo.location,
-      linkingHistory: [{
-        action: 'linked',
-        timestamp: new Date(),
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent']
-      }]
-    });
-
-    // Update user
-    const user = await User.findById(userId);
-    if (!user.web3Wallets) user.web3Wallets = [];
-    user.web3Wallets.push(web3Wallet._id);
-    if (!user.primaryWeb3Wallet) {
-      user.primaryWeb3Wallet = web3Wallet._id;
-      web3Wallet.isPrimary = true;
-      await web3Wallet.save();
-    }
-    user.walletLinkedAt = new Date();
-    await user.save();
-
-    // =============================================
-    // SEND BRANDED EMAIL - WALLET LINKED
-    // =============================================
-    const walletDisplayName = walletType === 'metamask' ? 'MetaMask' :
-                             walletType === 'trust' ? 'Trust Wallet' :
-                             walletType.charAt(0).toUpperCase() + walletType.slice(1);
-
-    const formattedTimestamp = new Date().toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      timeZoneName: 'short'
-    });
-
-    const brandHeader = `
-      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-      </div>
-    `;
-
-    const brandFooter = `
-      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-        </p>
-      </div>
-    `;
-
-    const walletIcon = walletType === 'metamask' ? 
-      'https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg' :
-      'https://cdn.jsdelivr.net/gh/trustwallet/assets@master/blockchains/smartchain/info/logo.png';
-
-    const emailHtml = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-        ${brandHeader}
-        <div style="padding: 30px; background: #FFFFFF;">
-          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-              <img src="${walletIcon}" width="32" height="32" style="border-radius: 50%;">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </div>
-            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WALLET LINKED!</h2>
-            <p style="color: #065F46; font-size: 13px; margin: 0;">Your ${walletDisplayName} wallet has been successfully linked</p>
-          </div>
-          
-          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-          <p style="color: #333333; line-height: 1.6;">Great news! You have successfully linked your <strong>${walletDisplayName}</strong> wallet to your BitHash Capital account.</p>
-          
-          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${normalizedAddress}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Wallet Provider:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><span style="background: #8B5CF6; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${walletDisplayName}</span></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Linked At:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
-              </tr>
-            </table>
-          </div>
-          
-          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ What This Means</p>
-            <p style="color: #78350F; margin: 0; font-size: 14px;">You can now use this wallet for deposits, withdrawals, and transactions. Your wallet is fully secured and verified.</p>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
-          </div>
-          
-          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
-        </div>
-        ${brandFooter}
-      </div>
-    `;
-
-    try {
-      await infoTransporter.sendMail({
-        from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-        to: user.email,
-        subject: `🔗 Wallet Linked - ${walletDisplayName} - ₿itHash Capital`,
-        html: emailHtml
+    if (!web3User) {
+      // Create Web3User for this user
+      const user = await User.findById(userId);
+      
+      web3User = await Web3User.create({
+        user: userId,
+        wallets: [],
+        email: user.email,
+        isEmailVerified: user.isVerified || false,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        city: user.city || '',
+        country: user.country || '',
+        accountType: user.accountType || 'individual',
+        referralCode: generateReferralCode(),
+        status: 'active',
+        metadata: {
+          signupIP: getRealClientIP(req),
+          signupUserAgent: req.headers['user-agent'] || 'Unknown'
+        }
       });
-      console.log(`📧 Wallet linking email sent to ${user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send wallet linking email:', emailError);
     }
 
-    // SEND ADMIN NOTIFICATION FOR WALLET LINK
+    // Add the new wallet
+    const newWallet = {
+      address: normalizedAddress,
+      type: walletType,
+      isPrimary: web3User.wallets.length === 0,
+      isVerified: true,
+      connectedAt: new Date(),
+      lastUsed: new Date(),
+      metadata: {
+        chainId: null,
+        networkName: null,
+        userAgent: req.headers['user-agent'] || 'Unknown',
+        ipAddress: getRealClientIP(req),
+        location: 'Unknown'
+      }
+    };
+
+    web3User.wallets.push(newWallet);
+    await web3User.save();
+
+    // =============================================
+    // SEND WALLET LINKED EMAIL TO USER
+    // =============================================
     try {
+      const user = await User.findById(userId);
+      
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'default',
+        data: {
+          name: user.firstName || 'User',
+          message: `Your ${walletType.toUpperCase()} wallet (${normalizedAddress.substring(0, 6)}...${normalizedAddress.substring(normalizedAddress.length - 4)}) has been successfully linked to your BitHash account.`,
+          details: `
+            <div style="background: #F5F5F5; padding: 15px; border-radius: 8px;">
+              <p><strong>Wallet Type:</strong> ${walletType.toUpperCase()}</p>
+              <p><strong>Address:</strong> ${normalizedAddress}</p>
+              <p><strong>Linked At:</strong> ${new Date().toLocaleString()}</p>
+            </div>
+          `,
+          buttonText: 'View Dashboard',
+          actionLink: 'https://www.bithashcapital.live/dashboard'
+        }
+      });
+      console.log(`📧 Wallet link email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send wallet link email:', emailError);
+    }
+
+    // =============================================
+    // SEND ADMIN WALLET LINK NOTIFICATION
+    // =============================================
+    try {
+      const user = await User.findById(userId);
+      
       const adminEmailHtml = `
         <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-          ${brandHeader}
+          <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+            <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px;">
+            <h1 style="color: #FFFFFF; font-size: 24px; margin: 10px 0 0;">₿itHash</h1>
+            <p style="color: #B7BDC6;">Wallet Linked</p>
+          </div>
           <div style="padding: 30px; background: #FFFFFF;">
             <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-              <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                <img src="${walletIcon}" width="32" height="32" style="border-radius: 50%;">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                  <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                </svg>
-              </div>
-              <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WALLET LINKED!</h2>
-              <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} linked a ${walletDisplayName} wallet</p>
+              <h2 style="color: #3B82F6; font-size: 20px; margin: 0;">🔗 Wallet Linked!</h2>
+              <p style="color: #1E40AF; margin: 5px 0 0;">${user.firstName} ${user.lastName} linked a new wallet</p>
             </div>
             
-            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-              <table style="width: 100%; border-collapse: collapse;">
-                <tr style="border-bottom: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>User:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; font-size: 11px;">${normalizedAddress}</td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Wallet Provider:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;"><span style="background: #8B5CF6; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${walletDisplayName}</span></td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${user.authProvider || 'email'}</span></td>
-                </tr>
-                <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Linked At:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
-                </tr>
-              </table>
+            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px;">
+              <p><strong>User:</strong> ${user.firstName} ${user.lastName} (${user.email})</p>
+              <p><strong>Wallet Type:</strong> ${walletType.toUpperCase()}</p>
+              <p><strong>Address:</strong> ${normalizedAddress}</p>
+              <p><strong>Linked At:</strong> ${new Date().toLocaleString()}</p>
             </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User</a>
-            </div>
-            
-            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
           </div>
-          ${brandFooter}
         </div>
       `;
-
+      
       await supportTransporter.sendMail({
         from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
         to: 'thieretw@gmail.com',
-        subject: `🔗 WALLET LINKED: ${user.firstName} ${user.lastName} linked ${walletDisplayName}`,
+        subject: `🔗 Wallet Linked: ${user.firstName} linked ${walletType} wallet`,
         html: adminEmailHtml
       });
-      console.log(`✅ Admin wallet link notification sent to thieretw@gmail.com`);
+      console.log(`✅ Admin wallet link notification sent`);
     } catch (adminEmailError) {
-      console.error(`❌ Failed to send admin wallet link notification:`, adminEmailError.message);
+      console.error('Failed to send admin wallet link notification:', adminEmailError);
     }
 
-    res.status(200).json({
+    // Create Web3Log entry
+    await Web3Log.create({
+      user: userId,
+      walletAddress: normalizedAddress,
+      walletType: walletType,
+      action: 'wallet_linked',
       status: 'success',
-      message: `Wallet linked successfully! You can now use ${walletDisplayName} for deposits and withdrawals.`,
-      data: {
-        wallet: {
-          id: web3Wallet._id,
-          address: normalizedAddress,
-          type: walletType,
-          provider: walletType,
-          isPrimary: web3Wallet.isPrimary,
-          linkedAt: web3Wallet.linkedAt
-        }
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      metadata: {
+        totalWallets: web3User.wallets.length,
+        isPrimary: web3User.wallets.length === 1
       }
     });
 
-  } catch (err) {
-    console.error('Wallet linking error:', err);
+    res.status(200).json({
+      status: 'success',
+      message: `Wallet linked successfully!`,
+      data: {
+        wallet: {
+          address: normalizedAddress,
+          type: walletType,
+          isPrimary: web3User.wallets.length === 1,
+          connectedAt: new Date()
+        },
+        totalWallets: web3User.wallets.length,
+        wallets: web3User.wallets.map(w => ({
+          address: w.address,
+          type: w.type,
+          isPrimary: w.isPrimary,
+          isVerified: w.isVerified,
+          connectedAt: w.connectedAt,
+          lastUsed: w.lastUsed
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('Wallet linking error:', error);
     res.status(500).json({
       status: 'error',
-      message: err.message || 'Failed to link wallet'
+      message: 'Failed to link wallet. Please try again.'
     });
   }
 });
 
 // =============================================
-// ENDPOINT 4: GET USER'S LINKED WALLETS
+// ENDPOINT 4: GET USER WALLETS
+// GET /api/auth/web3/wallets
 // =============================================
 app.get('/api/auth/web3/wallets', protect, async (req, res) => {
   try {
     const userId = req.user._id;
 
-    const wallets = await Web3Wallet.find({
-      user: userId,
-      isVerified: true
-    }).sort({ isPrimary: -1, linkedAt: -1 });
+    const web3User = await Web3User.findOne({ user: userId });
 
-    const formattedWallets = wallets.map(w => ({
-      id: w._id,
-      address: w.walletAddress,
-      type: w.walletType,
-      provider: w.walletProvider,
-      isPrimary: w.isPrimary,
-      linkedAt: w.linkedAt,
-      lastUsed: w.lastUsed,
-      totalTransactions: w.totalTransactions || 0,
-      totalVolumeUSD: w.totalVolumeUSD || 0
+    if (!web3User) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          wallets: [],
+          totalWallets: 0,
+          hasWallets: false
+        }
+      });
+    }
+
+    // Get wallet balances for each wallet
+    const walletsWithBalances = await Promise.all(web3User.wallets.map(async (wallet) => {
+      // Get balance from user's balances Map
+      const user = await User.findById(userId);
+      const mainBalance = user?.balances?.main?.get('usd') || 0;
+      const maturedBalance = user?.balances?.matured?.get('usd') || 0;
+      
+      return {
+        address: wallet.address,
+        type: wallet.type,
+        isPrimary: wallet.isPrimary,
+        isVerified: wallet.isVerified,
+        connectedAt: wallet.connectedAt,
+        lastUsed: wallet.lastUsed,
+        balance: {
+          main: mainBalance,
+          matured: maturedBalance,
+          total: mainBalance + maturedBalance
+        }
+      };
     }));
 
     res.status(200).json({
       status: 'success',
       data: {
-        wallets: formattedWallets,
-        total: formattedWallets.length
+        wallets: walletsWithBalances,
+        totalWallets: web3User.wallets.length,
+        hasWallets: web3User.wallets.length > 0,
+        primaryWallet: web3User.wallets.find(w => w.isPrimary) || null
       }
     });
 
-  } catch (err) {
-    console.error('Get wallets error:', err);
+  } catch (error) {
+    console.error('Get wallets error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch linked wallets'
+      message: 'Failed to fetch wallets'
     });
   }
 });
 
 // =============================================
-// ENDPOINT 5: UNLINK WALLET
+// ENDPOINT 5: REMOVE WALLET
+// DELETE /api/auth/web3/wallets/:address
 // =============================================
-app.delete('/api/auth/web3/wallets/:walletId', protect, async (req, res) => {
+app.delete('/api/auth/web3/wallets/:address', protect, async (req, res) => {
   try {
-    const { walletId } = req.params;
     const userId = req.user._id;
+    const walletAddress = req.params.address.toLowerCase();
 
-    const wallet = await Web3Wallet.findOne({
-      _id: walletId,
-      user: userId,
-      isVerified: true
-    });
+    const web3User = await Web3User.findOne({ user: userId });
 
-    if (!wallet) {
+    if (!web3User) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'No wallets found for this user'
+      });
+    }
+
+    // Check if wallet exists
+    const walletIndex = web3User.wallets.findIndex(w => w.address === walletAddress);
+    if (walletIndex === -1) {
       return res.status(404).json({
         status: 'fail',
         message: 'Wallet not found'
       });
     }
 
-    // Prevent unlinking the primary wallet if user has no other auth method
-    if (wallet.isPrimary) {
-      const user = await User.findById(userId);
-      const hasOtherAuth = user.googleId || user.password;
-      const otherWallets = await Web3Wallet.countDocuments({
-        user: userId,
-        isVerified: true,
-        _id: { $ne: walletId }
+    // Check if it's the only wallet
+    if (web3User.wallets.length === 1) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Cannot remove the only wallet. You need at least one wallet linked.'
       });
-
-      if (!hasOtherAuth && otherWallets === 0) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Cannot unlink your primary wallet. Please link another wallet or set up email/password authentication first.'
-        });
-      }
     }
 
-    // Soft delete
-    wallet.isVerified = false;
-    wallet.linkingHistory.push({
-      action: 'unlinked',
-      timestamp: new Date(),
+    // Check if it's the primary wallet
+    const isPrimary = web3User.wallets[walletIndex].isPrimary;
+
+    // Remove the wallet
+    web3User.wallets.splice(walletIndex, 1);
+
+    // If it was primary, set another wallet as primary
+    if (isPrimary && web3User.wallets.length > 0) {
+      web3User.wallets[0].isPrimary = true;
+    }
+
+    await web3User.save();
+
+    // Create Web3Log entry
+    await Web3Log.create({
+      user: userId,
+      walletAddress: walletAddress,
+      walletType: web3User.wallets.find(w => w.address === walletAddress)?.type || 'unknown',
+      action: 'wallet_unlinked',
+      status: 'success',
       ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent']
-    });
-    await wallet.save();
-
-    // If this was primary, set another wallet as primary
-    if (wallet.isPrimary) {
-      const anotherWallet = await Web3Wallet.findOne({
-        user: userId,
-        isVerified: true,
-        _id: { $ne: walletId }
-      });
-      if (anotherWallet) {
-        anotherWallet.isPrimary = true;
-        await anotherWallet.save();
-        await User.findByIdAndUpdate(userId, {
-          primaryWeb3Wallet: anotherWallet._id
-        });
-      } else {
-        await User.findByIdAndUpdate(userId, {
-          $unset: { primaryWeb3Wallet: 1 }
-        });
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      metadata: {
+        wasPrimary: isPrimary,
+        remainingWallets: web3User.wallets.length
       }
-    }
+    });
 
     res.status(200).json({
       status: 'success',
-      message: 'Wallet unlinked successfully'
+      message: 'Wallet removed successfully',
+      data: {
+        wallets: web3User.wallets.map(w => ({
+          address: w.address,
+          type: w.type,
+          isPrimary: w.isPrimary,
+          isVerified: w.isVerified,
+          connectedAt: w.connectedAt,
+          lastUsed: w.lastUsed
+        })),
+        remainingWallets: web3User.wallets.length
+      }
     });
 
-  } catch (err) {
-    console.error('Unlink wallet error:', err);
+  } catch (error) {
+    console.error('Remove wallet error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to unlink wallet'
+      message: 'Failed to remove wallet. Please try again.'
     });
   }
 });
 
 // =============================================
 // ENDPOINT 6: SET PRIMARY WALLET
+// PUT /api/auth/web3/wallets/:address/primary
 // =============================================
-app.put('/api/auth/web3/wallets/:walletId/primary', protect, async (req, res) => {
+app.put('/api/auth/web3/wallets/:address/primary', protect, async (req, res) => {
   try {
-    const { walletId } = req.params;
     const userId = req.user._id;
+    const walletAddress = req.params.address.toLowerCase();
 
-    const wallet = await Web3Wallet.findOne({
-      _id: walletId,
-      user: userId,
-      isVerified: true
+    const web3User = await Web3User.findOne({ user: userId });
+
+    if (!web3User) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'No wallets found for this user'
+      });
+    }
+
+    // Check if wallet exists
+    const walletExists = web3User.wallets.some(w => w.address === walletAddress);
+    if (!walletExists) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Wallet not found'
+      });
+    }
+
+    // Set all wallets to not primary
+    web3User.wallets.forEach(w => w.isPrimary = false);
+
+    // Set the selected wallet as primary
+    const wallet = web3User.wallets.find(w => w.address === walletAddress);
+    if (wallet) {
+      wallet.isPrimary = true;
+    }
+
+    await web3User.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Primary wallet updated successfully',
+      data: {
+        wallets: web3User.wallets.map(w => ({
+          address: w.address,
+          type: w.type,
+          isPrimary: w.isPrimary,
+          isVerified: w.isVerified,
+          connectedAt: w.connectedAt,
+          lastUsed: w.lastUsed
+        }))
+      }
     });
 
+  } catch (error) {
+    console.error('Set primary wallet error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to set primary wallet. Please try again.'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 7: GET WEB3 USER STATUS
+// GET /api/auth/web3/status
+// =============================================
+app.get('/api/auth/web3/status', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const web3User = await Web3User.findOne({ user: userId });
+
+    if (!web3User) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          hasWeb3: false,
+          isEmailVerified: false,
+          hasWallets: false,
+          status: 'not_setup'
+        }
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        hasWeb3: true,
+        isEmailVerified: web3User.isEmailVerified,
+        hasWallets: web3User.wallets.length > 0,
+        totalWallets: web3User.wallets.length,
+        status: web3User.status,
+        primaryWallet: web3User.wallets.find(w => w.isPrimary) || null,
+        wallets: web3User.wallets.map(w => ({
+          address: w.address,
+          type: w.type,
+          isPrimary: w.isPrimary,
+          isVerified: w.isVerified,
+          connectedAt: w.connectedAt,
+          lastUsed: w.lastUsed
+        })),
+        createdAt: web3User.createdAt,
+        updatedAt: web3User.updatedAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Get web3 status error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to get web3 status'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 8: WEB3 DEPOSIT ADDRESS
+// GET /api/auth/web3/deposit-address/:asset
+// =============================================
+app.get('/api/auth/web3/deposit-address/:asset', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const asset = req.params.asset.toUpperCase();
+
+    // Get user's primary wallet
+    const web3User = await Web3User.findOne({ user: userId });
+    if (!web3User) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'No web3 account found. Please link a wallet first.'
+      });
+    }
+
+    const primaryWallet = web3User.wallets.find(w => w.isPrimary) || web3User.wallets[0];
+    if (!primaryWallet) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'No wallet found. Please link a wallet first.'
+      });
+    }
+
+    // Generate or get deposit address for this asset
+    const depositAddressMap = {
+      'BTC': '13KMyC5gMMYs85i1vat1HX9saYcNrQ17ru',
+      'ETH': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'USDT': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'BNB': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'SOL': 'EETt21sq7G4BM6g5e5wuUBGPNJvpmfUxCK8Bs1T1NzJw',
+      'USDC': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'XRP': 'rexV2DWLYpzqoFd3DtVXmcFSseaoLmT7Z',
+      'DOGE': 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW',
+      'SHIB': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'LTC': 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg',
+      'TRX': 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t'
+    };
+
+    const networkMap = {
+      'BTC': 'Bitcoin',
+      'ETH': 'Ethereum (ERC20)',
+      'USDT': 'Ethereum (ERC20)',
+      'BNB': 'BSC (BEP20)',
+      'SOL': 'Solana',
+      'USDC': 'Ethereum (ERC20)',
+      'XRP': 'XRP Ledger',
+      'DOGE': 'Dogecoin',
+      'SHIB': 'Ethereum (ERC20)',
+      'LTC': 'Litecoin',
+      'TRX': 'TRON (TRC20)'
+    };
+
+    const address = depositAddressMap[asset];
+    if (!address) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Unsupported asset: ${asset}`
+      });
+    }
+
+    // Get current price
+    let currentPrice = 0;
+    try {
+      currentPrice = await getCryptoPrice(asset);
+    } catch (error) {
+      console.warn('Failed to get price for:', asset);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        asset: asset,
+        address: address,
+        network: networkMap[asset] || 'Blockchain',
+        walletType: primaryWallet.type,
+        walletAddress: primaryWallet.address,
+        currentPrice: currentPrice || 0,
+        minDeposit: 50
+      }
+    });
+
+  } catch (error) {
+    console.error('Get deposit address error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to get deposit address'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 9: WEB3 WITHDRAWAL
+// POST /api/auth/web3/withdraw
+// =============================================
+app.post('/api/auth/web3/withdraw', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const {
+      asset,
+      amount,
+      destinationAddress,
+      network,
+      walletType
+    } = req.body;
+
+    // Validate required fields
+    if (!asset || !amount || !destinationAddress) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Asset, amount, and destination address are required'
+      });
+    }
+
+    if (amount < 100) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Minimum withdrawal amount is $100'
+      });
+    }
+
+    // Get user and web3 user
+    const user = await User.findById(userId);
+    const web3User = await Web3User.findOne({ user: userId });
+
+    if (!web3User || web3User.wallets.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No web3 wallet linked. Please link a wallet first.'
+      });
+    }
+
+    const wallet = web3User.wallets.find(w => w.type === walletType) || web3User.wallets[0];
     if (!wallet) {
       return res.status(404).json({
         status: 'fail',
@@ -30798,42 +31743,515 @@ app.put('/api/auth/web3/wallets/:walletId/primary', protect, async (req, res) =>
       });
     }
 
-    // Remove primary from all other wallets
-    await Web3Wallet.updateMany(
-      { user: userId, isVerified: true },
-      { isPrimary: false }
-    );
+    // Check balance (implementation depends on your balance system)
+    const assetLower = asset.toLowerCase();
+    const mainBalance = user.balances?.main?.get(assetLower) || 0;
+    const maturedBalance = user.balances?.matured?.get(assetLower) || 0;
+    const totalBalance = mainBalance + maturedBalance;
 
-    // Set this wallet as primary
-    wallet.isPrimary = true;
-    await wallet.save();
+    // Get current price
+    const currentPrice = await getCryptoPrice(asset);
+    const amountInAsset = amount / currentPrice;
 
-    // Update user
-    await User.findByIdAndUpdate(userId, {
-      primaryWeb3Wallet: wallet._id
+    if (amountInAsset > totalBalance) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient balance. You have ${totalBalance} ${asset} available.`
+      });
+    }
+
+    // Create withdrawal transaction
+    const transaction = await Web3Transaction.create({
+      user: userId,
+      walletAddress: wallet.address,
+      walletType: wallet.type,
+      type: 'withdrawal',
+      status: 'pending',
+      amount: amount,
+      asset: asset.toUpperCase(),
+      assetAmount: amountInAsset,
+      usdValue: amount,
+      fromAddress: wallet.address,
+      toAddress: destinationAddress,
+      chainId: null,
+      networkName: network || 'Unknown',
+      gasFee: amount * 0.01, // 1% gas fee
+      reference: generateReference('W3W'),
+      metadata: {
+        withdrawalType: 'web3',
+        requestedAt: new Date(),
+        destinationAddress: destinationAddress,
+        network: network
+      }
     });
 
-    res.status(200).json({
+    // Deduct from balances
+    // Implementation depends on your balance system
+    // This should be done after admin approval in a real system
+
+    // Send email notification
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'withdrawal_request',
+        data: {
+          name: user.firstName || 'User',
+          amount: amountInAsset,
+          asset: asset.toUpperCase(),
+          usdValue: amount,
+          fee: amount * 0.01,
+          netAmount: amountInAsset * 0.99,
+          withdrawalAddress: destinationAddress,
+          requestId: transaction.reference,
+          timestamp: new Date().toISOString(),
+          network: network || 'Blockchain'
+        }
+      });
+      console.log(`📧 Withdrawal request email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal email:', emailError);
+    }
+
+    // Create Web3Log
+    await Web3Log.create({
+      user: userId,
+      walletAddress: wallet.address,
+      walletType: wallet.type,
+      action: 'withdrawal_initiated',
+      status: 'pending',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      metadata: {
+        asset: asset,
+        amount: amountInAsset,
+        usdValue: amount,
+        destinationAddress: destinationAddress,
+        network: network
+      }
+    });
+
+    res.status(201).json({
       status: 'success',
-      message: 'Primary wallet updated successfully',
+      message: 'Withdrawal request submitted successfully',
       data: {
-        wallet: {
-          id: wallet._id,
-          address: wallet.walletAddress,
-          type: wallet.walletType,
-          isPrimary: true
+        transaction: {
+          id: transaction._id,
+          reference: transaction.reference,
+          asset: asset.toUpperCase(),
+          amount: amountInAsset,
+          usdValue: amount,
+          destinationAddress: destinationAddress,
+          network: network || 'Blockchain',
+          status: 'pending',
+          createdAt: transaction.createdAt
         }
       }
     });
 
-  } catch (err) {
-    console.error('Set primary wallet error:', err);
+  } catch (error) {
+    console.error('Web3 withdrawal error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to set primary wallet'
+      message: 'Failed to process withdrawal. Please try again.'
     });
   }
 });
+
+// =============================================
+// ENDPOINT 10: GET WEB3 WALLET BALANCES
+// GET /api/auth/web3/balances/:walletAddress
+// =============================================
+app.get('/api/auth/web3/balances/:walletAddress', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const walletAddress = req.params.walletAddress.toLowerCase();
+
+    // Verify ownership
+    const web3User = await Web3User.findOne({ 
+      user: userId,
+      'wallets.address': walletAddress
+    });
+
+    if (!web3User) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Wallet not found or does not belong to user'
+      });
+    }
+
+    const user = await User.findById(userId);
+    const wallet = web3User.wallets.find(w => w.address === walletAddress);
+
+    // Get balances for all assets
+    const balances = {};
+    const mainBalances = user.balances?.main || new Map();
+    const maturedBalances = user.balances?.matured || new Map();
+
+    // Combine all asset keys
+    const allAssets = new Set();
+    for (const [asset] of mainBalances) allAssets.add(asset);
+    for (const [asset] of maturedBalances) allAssets.add(asset);
+
+    let totalUsdValue = 0;
+
+    for (const asset of allAssets) {
+      const mainAmount = mainBalances.get(asset) || 0;
+      const maturedAmount = maturedBalances.get(asset) || 0;
+      const totalAmount = mainAmount + maturedAmount;
+
+      if (totalAmount > 0) {
+        const price = await getCryptoPrice(asset.toUpperCase());
+        const usdValue = totalAmount * (price || 0);
+        totalUsdValue += usdValue;
+
+        balances[asset] = {
+          asset: asset.toUpperCase(),
+          mainBalance: mainAmount,
+          maturedBalance: maturedAmount,
+          totalBalance: totalAmount,
+          usdValue: usdValue,
+          price: price || 0
+        };
+      }
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        wallet: {
+          address: walletAddress,
+          type: wallet.type,
+          isPrimary: wallet.isPrimary,
+          isVerified: wallet.isVerified,
+          connectedAt: wallet.connectedAt,
+          lastUsed: wallet.lastUsed
+        },
+        balances: balances,
+        totalUsdValue: totalUsdValue,
+        totalAssets: Object.keys(balances).length
+      }
+    });
+
+  } catch (error) {
+    console.error('Get web3 balances error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch wallet balances'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 11: WEB3 TRANSACTION HISTORY
+// GET /api/auth/web3/transactions
+// =============================================
+app.get('/api/auth/web3/transactions', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { page = 1, limit = 20, type, walletAddress } = req.query;
+
+    const query = { user: userId };
+    if (type) query.type = type;
+    if (walletAddress) query.walletAddress = walletAddress.toLowerCase();
+
+    const transactions = await Web3Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit));
+
+    const total = await Web3Transaction.countDocuments(query);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: transactions,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / parseInt(limit)),
+          totalItems: total,
+          itemsPerPage: parseInt(limit)
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get web3 transactions error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch transaction history'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 12: WEB3 SETTINGS (Admin only)
+// GET /api/admin/web3/settings
+// =============================================
+app.get('/api/admin/web3/settings', adminProtect, async (req, res) => {
+  try {
+    let settings = await Web3Settings.findOne();
+
+    if (!settings) {
+      // Create default settings
+      settings = await Web3Settings.create({
+        enabled: true,
+        supportedWallets: ['metamask', 'trust', 'walletconnect', 'coinbase'],
+        defaultWalletType: 'metamask',
+        nonceLength: 16,
+        nonceExpiryMinutes: 5,
+        requireSignature: true,
+        sendEmailOnSignup: true,
+        sendEmailOnWalletLink: true,
+        maxFailedAttempts: 5,
+        lockoutDurationMinutes: 15,
+        minDepositAmount: 50,
+        maxDepositAmount: 100000,
+        minWithdrawalAmount: 100,
+        maxWithdrawalAmount: 50000,
+        withdrawalFeePercent: 0.5,
+        conversionFeePercent: 0.5,
+        supportedNetworks: [
+          { chainId: 1, name: 'Ethereum Mainnet', nativeCurrency: 'ETH', isActive: true },
+          { chainId: 56, name: 'BNB Smart Chain', nativeCurrency: 'BNB', isActive: true },
+          { chainId: 137, name: 'Polygon', nativeCurrency: 'MATIC', isActive: true },
+          { chainId: 43114, name: 'Avalanche C-Chain', nativeCurrency: 'AVAX', isActive: true }
+        ]
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        settings: settings
+      }
+    });
+
+  } catch (error) {
+    console.error('Get web3 settings error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch web3 settings'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 13: UPDATE WEB3 SETTINGS (Admin only)
+// PUT /api/admin/web3/settings
+// =============================================
+app.put('/api/admin/web3/settings', adminProtect, async (req, res) => {
+  try {
+    const updateData = req.body;
+    updateData.updatedBy = req.admin._id;
+    updateData.updatedAt = new Date();
+
+    const settings = await Web3Settings.findOneAndUpdate(
+      {},
+      { $set: updateData },
+      { new: true, upsert: true }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Web3 settings updated successfully',
+      data: {
+        settings: settings
+      }
+    });
+
+  } catch (error) {
+    console.error('Update web3 settings error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update web3 settings'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 14: WEB3 STATISTICS (Admin only)
+// GET /api/admin/web3/stats
+// =============================================
+app.get('/api/admin/web3/stats', adminProtect, async (req, res) => {
+  try {
+    const [
+      totalWeb3Users,
+      totalWallets,
+      walletTypeStats,
+      signupStats,
+      transactionStats,
+      recentSignups
+    ] = await Promise.all([
+      Web3User.countDocuments({}),
+      Web3User.aggregate([
+        { $project: { walletCount: { $size: '$wallets' } } },
+        { $group: { _id: null, total: { $sum: '$walletCount' } } }
+      ]),
+      Web3User.aggregate([
+        { $unwind: '$wallets' },
+        { $group: { _id: '$wallets.type', count: { $sum: 1 } } }
+      ]),
+      Web3User.aggregate([
+        { $group: { _id: '$signupSource', count: { $sum: 1 } } }
+      ]),
+      Web3Transaction.aggregate([
+        { $group: { _id: '$type', count: { $sum: 1 }, totalAmount: { $sum: '$usdValue' } } }
+      ]),
+      Web3User.find({})
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .populate('user', 'firstName lastName email')
+    ]);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        totalWeb3Users: totalWeb3Users,
+        totalWallets: totalWallets[0]?.total || 0,
+        walletTypeStats: walletTypeStats,
+        signupStats: signupStats,
+        transactionStats: transactionStats,
+        recentSignups: recentSignups.map(u => ({
+          email: u.email,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          walletType: u.wallets[0]?.type || 'unknown',
+          status: u.status,
+          createdAt: u.createdAt,
+          user: u.user
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('Get web3 stats error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch web3 statistics'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 15: CHECK WALLET STATUS (public)
+// GET /api/auth/web3/check/:address
+// =============================================
+app.get('/api/auth/web3/check/:address', async (req, res) => {
+  try {
+    const walletAddress = req.params.address.toLowerCase();
+
+    if (!ethers.isAddress(walletAddress)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid wallet address format'
+      });
+    }
+
+    const web3User = await Web3User.findOne({
+      'wallets.address': walletAddress
+    });
+
+    if (web3User) {
+      const user = await User.findById(web3User.user);
+      
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          isRegistered: true,
+          email: web3User.email,
+          firstName: web3User.firstName || user?.firstName,
+          lastName: web3User.lastName || user?.lastName,
+          isEmailVerified: web3User.isEmailVerified,
+          status: web3User.status,
+          walletType: web3User.wallets.find(w => w.address === walletAddress)?.type || 'unknown',
+          isPrimary: web3User.wallets.find(w => w.address === walletAddress)?.isPrimary || false
+        }
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        isRegistered: false
+      }
+    });
+
+  } catch (error) {
+    console.error('Check wallet error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to check wallet status'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 16: WEB3 WALLET DETECTION
+// POST /api/auth/web3/detect
+// =============================================
+app.post('/api/auth/web3/detect', async (req, res) => {
+  try {
+    const { walletType, isInstalled } = req.body;
+
+    // This endpoint helps frontend know if wallet is installed
+    // The actual detection happens on frontend via window.ethereum
+
+    const downloadUrl = getWalletDownloadUrl(walletType);
+    const logoUrl = getWalletLogoUrl(walletType);
+    const brandColor = getWalletBrandColor(walletType);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        walletType: walletType,
+        isInstalled: isInstalled || false,
+        downloadUrl: downloadUrl,
+        logoUrl: logoUrl,
+        brandColor: brandColor,
+        installMessage: `${walletType.charAt(0).toUpperCase() + walletType.slice(1)} not detected. Please install the extension to continue.`
+      }
+    });
+
+  } catch (error) {
+    console.error('Wallet detection error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to detect wallet'
+    });
+  }
+});
+
+// =============================================
+// EXPORT ALL WEB3 ENDPOINTS
+// =============================================
+
+console.log('✅ Web3 endpoints loaded successfully');
+console.log('   - Nonce generation endpoint: /api/auth/web3/nonce');
+console.log('   - Signature verification: /api/auth/web3/verify');
+console.log('   - Wallet linking: /api/auth/web3/link-wallet');
+console.log('   - Get wallets: /api/auth/web3/wallets');
+console.log('   - Remove wallet: /api/auth/web3/wallets/:address');
+console.log('   - Set primary wallet: /api/auth/web3/wallets/:address/primary');
+console.log('   - Web3 status: /api/auth/web3/status');
+console.log('   - Deposit address: /api/auth/web3/deposit-address/:asset');
+console.log('   - Withdrawal: /api/auth/web3/withdraw');
+console.log('   - Wallet balances: /api/auth/web3/balances/:walletAddress');
+console.log('   - Transaction history: /api/auth/web3/transactions');
+console.log('   - Check wallet: /api/auth/web3/check/:address');
+console.log('   - Wallet detection: /api/auth/web3/detect');
+console.log('   - Admin settings: /api/admin/web3/settings');
+console.log('   - Admin stats: /api/admin/web3/stats');
+
+
+
+
+
+
+
+
+
+
+
 
 
 
