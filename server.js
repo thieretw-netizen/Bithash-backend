@@ -30207,15 +30207,9 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
-
-
-
-
-
-
 // =============================================
 // WEB3 ENDPOINTS - COMPLETE INDEPENDENT WEB3 SYSTEM
-// These endpoints work with the existing Web3 schemas defined above
+// FIXED: All endpoints now have proper async/await syntax
 // =============================================
 
 // =============================================
@@ -31101,7 +31095,8 @@ app.post('/api/web3/login', async (req, res) => {
 // =============================================
 // 6. ENDPOINT: Send OTP for Web3
 // POST /api/web3/send-otp
-// =============================================app.post('/api/web3/send-otp', async (req, res) => {
+// =============================================
+app.post('/api/web3/send-otp', async (req, res) => {
   try {
     const { email } = req.body;
     const token = req.headers.authorization?.replace('Bearer ', '');
@@ -31802,7 +31797,7 @@ app.post('/api/web3/quick-deposit', protect, async (req, res) => {
     });
     
     // Create Web3 transaction record
-    const web3Tx = await Web3Transaction.create({
+    await Web3Transaction.create({
       user: userId,
       walletAddress: walletAddress,
       walletType: wallet.type,
@@ -31993,7 +31988,7 @@ app.post('/api/web3/quick-withdrawal', protect, async (req, res) => {
     });
     
     // Create Web3 transaction record
-    const web3Tx = await Web3Transaction.create({
+    await Web3Transaction.create({
       user: userId,
       walletAddress: walletAddress,
       walletType: wallet.type,
@@ -32055,6 +32050,11 @@ app.post('/api/web3/quick-withdrawal', protect, async (req, res) => {
 // =============================================
 // END OF WEB3 ENDPOINTS
 // =============================================
+
+
+
+
+
 
 
 
