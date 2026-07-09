@@ -30215,10 +30215,9 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
-
-
 // =============================================
 // WEB3 ENDPOINTS - COMPLETE INDEPENDENT WEB3 SYSTEM
+// These endpoints must be added to your server.js
 // =============================================
 
 // =============================================
@@ -32205,115 +32204,6 @@ function getNetworkName(asset) {
   };
   return networkMap[asset.toLowerCase()] || 'Blockchain';
 }
-
-// =============================================
-// ADD MISSING WALLET LINKED EMAIL TEMPLATE SUPPORT
-// =============================================
-// Add this template to sendProfessionalEmail function in server.js
-// Look for the switch statement in sendProfessionalEmail and add this case:
-
-// case 'wallet_linked':
-//   subject = '🔗 Wallet Linked - ₿itHash Capital';
-//   html = `
-//     <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-//       ${brandHeader}
-//       <div style="padding: 30px; background: #FFFFFF;">
-//         <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-//           <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">🔗 WALLET LINKED!</h2>
-//           <p style="color: #065F46; font-size: 13px; margin: 0;">Your Web3 wallet has been successfully linked</p>
-//         </div>
-//         <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name}</strong>,</p>
-//         <p style="color: #333333; line-height: 1.6;">Your <strong>${data.walletType}</strong> wallet has been successfully linked to your BitHash Capital account.</p>
-//         <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-//           <table style="width: 100%; border-collapse: collapse;">
-//             <tr style="border-bottom: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-//               <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.walletAddress}</td>
-//             </tr>
-//             <tr style="border-top: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
-//               <td style="padding: 8px 0; text-align: right;">${data.walletType}</td>
-//             </tr>
-//             <tr style="border-top: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Location:</strong></td>
-//               <td style="padding: 8px 0; text-align: right;">${data.location || 'Unknown'}</td>
-//             </tr>
-//             <tr style="border-top: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Device:</strong></td>
-//               <td style="padding: 8px 0; text-align: right;">${data.device || 'Unknown'}</td>
-//             </tr>
-//             <tr style="border-top: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-//               <td style="padding: 8px 0; text-align: right;">${data.ip || 'Unknown'}</td>
-//             </tr>
-//             <tr style="border-top: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Time:</strong></td>
-//               <td style="padding: 8px 0; text-align: right;">${data.timestamp ? new Date(data.timestamp).toLocaleString() : new Date().toLocaleString()}</td>
-//             </tr>
-//           </table>
-//         </div>
-//         <p style="color: #333333; line-height: 1.6;">You can now use this wallet for quick deposits and withdrawals from your dashboard.</p>
-//         <div style="text-align: center; margin: 30px 0;">
-//           <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
-//         </div>
-//         <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-//       </div>
-//       ${brandFooter}
-//     </div>
-//   `;
-//   break;
-
-// =============================================
-// ADD MISSING DEPOSIT REQUEST EMAIL TEMPLATE
-// =============================================
-// Add this template to sendProfessionalEmail function in server.js
-// case 'deposit_request':
-//   subject = '💰 Deposit Request Received - ₿itHash Capital';
-//   html = `
-//     <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-//       ${brandHeader}
-//       <div style="padding: 30px; background: #FFFFFF;">
-//         <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-//           <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT REQUEST RECEIVED!</h2>
-//           <p style="color: #92400E; font-size: 13px; margin: 0;">Your deposit request is being processed</p>
-//         </div>
-//         <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name}</strong>,</p>
-//         <p style="color: #333333; line-height: 1.6;">We have received your deposit request. Our team will review and process it shortly.</p>
-//         <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-//           <table style="width: 100%; border-collapse: collapse;">
-//             <tr style="border-bottom: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Asset:</strong></td>
-//               <td style="padding: 8px 0; text-align: right;">
-//                 <img src="${data.cryptoLogoUrl || ''}" width="20" height="20" style="border-radius: 50%; vertical-align: middle; margin-right: 5px;">
-//                 ${data.cryptoAsset}
-//               </td>
-//             </tr>
-//             <tr style="border-top: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Amount:</strong></td>
-//               <td style="padding: 8px 0; text-align: right;">${data.cryptoAmount || '0'} ${data.cryptoAsset} (≈ $${data.amount || '0'})</td>
-//             </tr>
-//             <tr style="border-top: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Method:</strong></td>
-//               <td style="padding: 8px 0; text-align: right;">${data.method || 'Crypto'}</td>
-//             </tr>
-//             <tr style="border-top: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Reference:</strong></td>
-//               <td style="padding: 8px 0; text-align: right;">${data.reference}</td>
-//             </tr>
-//             <tr style="border-top: 1px solid #E2E8F0;">
-//               <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
-//               <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.txHash || 'N/A'}</td>
-//             </tr>
-//           </table>
-//         </div>
-//         <div style="text-align: center; margin: 30px 0;">
-//           <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Deposit</a>
-//         </div>
-//       </div>
-//       ${brandFooter}
-//     </div>
-//   `;
-//   break;
 
 console.log('✅ Web3 endpoints ready to be pasted into server.js');
 console.log('📡 Total web3 endpoints: 12');
