@@ -16,7 +16,7 @@ const nodemailer = require('nodemailer');
 const { OAuth2Client } = require('google-auth-library');
 const Redis = require('ioredis');
 const moment = require('moment');
-
+const { ethers } = require('ethers');
 const cron = require('node-cron');
 const PDFDocument = require('pdfkit');
 const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
