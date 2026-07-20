@@ -30298,7 +30298,7 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 // =============================================
-// WEB3 AUTHENTICATION SYSTEM - COMPLETE FIXED IMPLEMENTATION
+// WEB3 AUTHENTICATION SYSTEM - COMPLETE ROBUST IMPLEMENTATION
 // =============================================
 
 // =============================================
@@ -30465,7 +30465,7 @@ app.post('/api/web3/verify', async (req, res) => {
             'wallets.address': normalizedAddress
         });
 
-        // Generate temp token for OTP flow - include ALL needed data
+        // Generate temp token for OTP flow
         const tempToken = jwt.sign(
             { 
                 walletAddress: normalizedAddress, 
@@ -30530,7 +30530,7 @@ app.post('/api/web3/verify', async (req, res) => {
 
         res.status(200).json({
             status: 'success',
-            message: isSignupRequest ? 'Signature verified. Please complete signup.' : 'Signature verified. OTP sent to your email.',
+            message: isSignupRequest ? 'Signature verified. Please complete signup.' : 'Signature verified.',
             data: {
                 tempToken: tempToken,
                 isNewUser: !web3User,
@@ -30622,7 +30622,7 @@ app.post('/api/web3/signup', async (req, res) => {
             });
         }
 
-        // Check if email already in use (in main User collection)
+        // Check if email already in use
         const existingUser = await User.findOne({ email: email });
         if (existingUser) {
             return res.status(400).json({
@@ -30719,7 +30719,7 @@ app.post('/api/web3/signup', async (req, res) => {
             $set: { web3UserId: web3User._id }
         });
 
-        // Generate temp token for OTP verification - include userId for send-otp
+        // Generate temp token for OTP verification
         const otpToken = jwt.sign(
             { 
                 userId: newUser._id, 
@@ -30730,8 +30730,28 @@ app.post('/api/web3/signup', async (req, res) => {
             { expiresIn: '10m' }
         );
 
-        // Send OTP email using the helper
-        await sendWeb3OtpEmail(email, newUser.firstName);
+        // Generate and send OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        await OTP.create({
+            email: email,
+            otp: otp,
+            type: 'signup',
+            expiresAt: expiresAt,
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown'
+        });
+
+        await sendProfessionalEmail({
+            email: email,
+            template: 'otp',
+            data: {
+                name: newUser.firstName,
+                otp: otp,
+                action: 'Web3 wallet verification'
+            }
+        });
 
         // Log web3 signup
         await Web3Log.create({
@@ -30753,6 +30773,8 @@ app.post('/api/web3/signup', async (req, res) => {
 
         // Send admin notification
         await sendAdminWeb3SignupNotification(newUser, web3User, req);
+
+        console.log(`✅ Web3 signup completed for ${email}`);
 
         res.status(201).json({
             status: 'success',
@@ -30781,7 +30803,7 @@ app.post('/api/web3/signup', async (req, res) => {
 });
 
 // =============================================
-// 4. WEB3 SEND OTP - Send OTP for verification (FIXED - uses valid OTP type)
+// 4. WEB3 SEND OTP - Send OTP for verification
 // =============================================
 app.post('/api/web3/send-otp', async (req, res) => {
     try {
@@ -30812,9 +30834,43 @@ app.post('/api/web3/send-otp', async (req, res) => {
             });
         }
 
+        // Find user
+        let user;
+        let web3User;
+
+        if (decoded.userId) {
+            user = await User.findById(decoded.userId);
+            if (user) {
+                web3User = await Web3User.findOne({ user: user._id });
+            }
+        } else if (decoded.walletAddress) {
+            web3User = await Web3User.findOne({
+                'wallets.address': decoded.walletAddress.toLowerCase()
+            });
+            if (web3User) {
+                user = await User.findById(web3User.user);
+            }
+        }
+
+        if (!user) {
+            user = await User.findOne({ email: email });
+            if (user) {
+                web3User = await Web3User.findOne({ user: user._id });
+            }
+        }
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
         // Check for recent OTP requests (rate limiting)
         const recentOtp = await OTP.findOne({
             email: email,
+            type: 'signup',
+            used: false,
             createdAt: { $gte: new Date(Date.now() - 60 * 1000) }
         });
 
@@ -30825,69 +30881,36 @@ app.post('/api/web3/send-otp', async (req, res) => {
             });
         }
 
-        // Find user - handle both userId and walletAddress in token
-        let user;
-        
-        if (decoded.userId) {
-            // Token has userId (from signup flow)
-            user = await User.findById(decoded.userId);
-        } else if (decoded.walletAddress) {
-            // Token has walletAddress (from verify flow)
-            const web3User = await Web3User.findOne({
-                'wallets.address': decoded.walletAddress.toLowerCase()
-            });
-            if (web3User) {
-                user = await User.findById(web3User.user);
-            }
-        }
-
-        // If still no user, try to find by email
-        if (!user) {
-            user = await User.findOne({ email: email });
-        }
-
-        // If still no user, check Web3User by email
-        if (!user) {
-            const web3User = await Web3User.findOne({ email: email });
-            if (web3User) {
-                user = await User.findById(web3User.user);
-            }
-        }
-
-        const userName = user?.firstName || 'Web3 User';
+        // Delete any existing OTPs for this email
+        await OTP.deleteMany({ 
+            email: email, 
+            type: 'signup',
+            used: false 
+        });
 
         // Generate OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-        // Delete any existing OTPs for this email
-        await OTP.deleteMany({ email: email, used: false });
-
-        // FIXED: Use 'signup' as the type since it's a valid enum value
-        // The OTP schema only allows: ['signup', 'login', 'password_reset', 'withdrawal']
         await OTP.create({
             email: email,
             otp: otp,
-            type: 'signup',  // ✅ FIXED: Using valid enum value
+            type: 'signup',
             expiresAt: expiresAt,
             ipAddress: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown'
         });
 
         // Send OTP email
-        const otpSent = await sendProfessionalEmail({
+        await sendProfessionalEmail({
             email: email,
             template: 'otp',
             data: {
-                name: userName,
+                name: user.firstName || 'Web3 User',
                 otp: otp,
                 action: 'Web3 wallet verification'
             }
         });
-
-        if (!otpSent) {
-            throw new Error('Failed to send OTP email');
-        }
 
         console.log(`📧 Web3 OTP sent to ${email}`);
 
@@ -30937,46 +30960,6 @@ app.post('/api/web3/verify-otp', async (req, res) => {
             });
         }
 
-        // Find the OTP record
-        const otpRecord = await OTP.findOne({
-            email: email,
-            otp: otp,
-            used: false,
-            expiresAt: { $gt: new Date() }
-        });
-
-        if (!otpRecord) {
-            // Check if OTP exists but expired
-            const expiredOtp = await OTP.findOne({
-                email: email,
-                otp: otp,
-                used: false,
-                expiresAt: { $lte: new Date() }
-            });
-
-            if (expiredOtp) {
-                return res.status(400).json({
-                    status: 'fail',
-                    message: 'OTP has expired. Please request a new one.'
-                });
-            }
-
-            // Increment attempts
-            await OTP.updateMany(
-                { email: email, otp: otp, used: false },
-                { $inc: { attempts: 1 } }
-            );
-
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid OTP. Please try again.'
-            });
-        }
-
-        // Mark OTP as used
-        otpRecord.used = true;
-        await otpRecord.save();
-
         // Find user
         let user;
         let web3User;
@@ -30995,7 +30978,6 @@ app.post('/api/web3/verify-otp', async (req, res) => {
             }
         }
 
-        // If still no user, try to find by email
         if (!user) {
             user = await User.findOne({ email: email });
             if (user) {
@@ -31009,6 +30991,42 @@ app.post('/api/web3/verify-otp', async (req, res) => {
                 message: 'User not found'
             });
         }
+
+        // Find the OTP record
+        const otpRecord = await OTP.findOne({
+            email: email,
+            otp: otp,
+            type: 'signup',
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!otpRecord) {
+            // Check if OTP exists but expired
+            const expiredOtp = await OTP.findOne({
+                email: email,
+                otp: otp,
+                type: 'signup',
+                used: false,
+                expiresAt: { $lte: new Date() }
+            });
+
+            if (expiredOtp) {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'OTP has expired. Please request a new one.'
+                });
+            }
+
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid OTP. Please try again.'
+            });
+        }
+
+        // Mark OTP as used
+        otpRecord.used = true;
+        await otpRecord.save();
 
         // Update user status
         user.isVerified = true;
@@ -31068,7 +31086,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
         console.error('Web3 OTP verification error:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to verify OTP'
+            message: err.message || 'Failed to verify OTP'
         });
     }
 });
@@ -31137,41 +31155,6 @@ app.get('/api/web3/check-user', async (req, res) => {
         });
     }
 });
-
-// =============================================
-// HELPER: Send Web3 OTP Email (FIXED - uses valid OTP type)
-// =============================================
-async function sendWeb3OtpEmail(email, name) {
-    try {
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        
-        // Store OTP in database - FIXED: Use 'signup' which is a valid enum value
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        await OTP.create({
-            email: email,
-            otp: otp,
-            type: 'signup',  // ✅ FIXED: Using valid enum value
-            expiresAt: expiresAt,
-            ipAddress: 'system',
-            userAgent: 'web3_system'
-        });
-
-        await sendProfessionalEmail({
-            email: email,
-            template: 'otp',
-            data: {
-                name: name || 'Web3 User',
-                otp: otp,
-                action: 'Web3 wallet verification'
-            }
-        });
-
-        return true;
-    } catch (err) {
-        console.error('Error sending Web3 OTP email:', err);
-        return false;
-    }
-}
 
 // =============================================
 // HELPER: Send Admin Web3 Signup Notification
@@ -31309,7 +31292,6 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
         console.error('Failed to send admin Web3 signup notification:', err);
     }
 }
-
 
 
 
