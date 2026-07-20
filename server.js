@@ -30268,8 +30268,8 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 // =============================================
-// WEB3 ENDPOINTS - COMPLETE INDEPENDENT SYSTEM
-// Using existing Web3OTP schema from server.js
+// WEB3 ENDPOINTS - USING EXISTING SCHEMAS
+// Using OTP schema (already exists in server.js)
 // =============================================
 
 // =============================================
@@ -30606,9 +30606,9 @@ app.post('/api/web3/signup', async (req, res) => {
       }
     });
 
-    // STEP 2: Create Web3User with the user reference (REQUIRED field)
+    // STEP 2: Create Web3User with the user reference
     const newWeb3User = await Web3User.create({
-      user: mainUser._id,  // REQUIRED - now properly set
+      user: mainUser._id,
       wallets: [{
         address: normalizedAddress,
         type: walletType || 'metamask',
@@ -30659,34 +30659,32 @@ app.post('/api/web3/signup', async (req, res) => {
       { expiresIn: '1h' }
     );
 
-    // Generate OTP using existing Web3OTP schema
+    // Use existing OTP schema with type 'web3_signup'
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    await Web3OTP.create({
-      web3UserId: newWeb3User._id,
+    await OTP.create({
       email: email,
       otp: otp,
-      type: 'signup',
+      type: 'web3_signup',
       expiresAt: expiresAt,
-      used: false,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email to user
+    // Send OTP email to user using existing sendEmail function
     await sendWeb3Email({
       email: email,
       template: 'web3_otp',
       data: {
         name: firstName,
         otp: otp,
-        action: 'account verification',
+        action: 'Web3 account verification',
         walletAddress: normalizedAddress.slice(0, 6) + '...' + normalizedAddress.slice(-4)
       }
     });
 
-    // Send admin notification
+    // Send admin notification using existing support email
     await sendWeb3AdminNotification({
       type: 'signup',
       user: {
@@ -30766,9 +30764,10 @@ app.post('/api/web3/send-otp', async (req, res) => {
       });
     }
 
-    // Rate limiting
-    const recentOtp = await Web3OTP.findOne({
+    // Rate limiting - check for recent OTP
+    const recentOtp = await OTP.findOne({
       email: email,
+      type: { $in: ['web3_signup', 'web3_login'] },
       createdAt: { $gte: new Date(Date.now() - 60 * 1000) },
       used: false
     });
@@ -30783,13 +30782,11 @@ app.post('/api/web3/send-otp', async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    await Web3OTP.create({
-      web3UserId: web3User._id,
+    await OTP.create({
       email: email,
       otp: otp,
-      type: web3User.isEmailVerified ? 'login' : 'signup',
+      type: web3User.isEmailVerified ? 'web3_login' : 'web3_signup',
       expiresAt: expiresAt,
-      used: false,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     });
@@ -30800,7 +30797,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
       data: {
         name: web3User.firstName || 'User',
         otp: otp,
-        action: web3User.isEmailVerified ? 'login verification' : 'account verification',
+        action: web3User.isEmailVerified ? 'Web3 login verification' : 'Web3 account verification',
         walletAddress: web3User.wallets[0]?.address.slice(0, 6) + '...' + web3User.wallets[0]?.address.slice(-4)
       }
     });
@@ -30859,17 +30856,19 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       });
     }
 
-    const otpRecord = await Web3OTP.findOne({
+    const otpRecord = await OTP.findOne({
       email: email,
       otp: otp,
+      type: { $in: ['web3_signup', 'web3_login'] },
       used: false,
       expiresAt: { $gt: new Date() }
     });
 
     if (!otpRecord) {
-      const expiredOtp = await Web3OTP.findOne({
+      const expiredOtp = await OTP.findOne({
         email: email,
         otp: otp,
+        type: { $in: ['web3_signup', 'web3_login'] },
         used: false,
         expiresAt: { $lte: new Date() }
       });
