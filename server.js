@@ -30295,10 +30295,8 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
-
-
 // =============================================
-// WEB3 AUTHENTICATION SYSTEM - COMPLETE IMPLEMENTATION
+// WEB3 AUTHENTICATION SYSTEM - COMPLETE FIXED IMPLEMENTATION
 // =============================================
 
 // =============================================
@@ -30315,7 +30313,6 @@ app.get('/api/web3/nonce', async (req, res) => {
             });
         }
 
-        // Normalize wallet address
         const normalizedAddress = walletAddress.toLowerCase();
 
         // Check if wallet already exists in Web3User
@@ -30354,7 +30351,7 @@ app.get('/api/web3/nonce', async (req, res) => {
         const message = `Sign this message to authenticate with BitHash Capital.\n\nNonce: ${nonce}\n\nWallet: ${normalizedAddress}\n\nTimestamp: ${new Date().toISOString()}`;
 
         // Store nonce in Web3Nonce collection
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
         await Web3Nonce.create({
             walletAddress: normalizedAddress,
@@ -30468,7 +30465,12 @@ app.post('/api/web3/verify', async (req, res) => {
 
         // Generate temp token for OTP flow
         const tempToken = jwt.sign(
-            { walletAddress: normalizedAddress, isSignup: isSignupRequest },
+            { 
+                walletAddress: normalizedAddress, 
+                isSignup: isSignupRequest,
+                email: web3User?.email || null,
+                userId: web3User?.user || null
+            },
             JWT_SECRET,
             { expiresIn: '10m' }
         );
@@ -30597,6 +30599,13 @@ app.post('/api/web3/signup', async (req, res) => {
             });
         }
 
+        if (!email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email is required'
+            });
+        }
+
         const normalizedAddress = walletAddress.toLowerCase();
 
         // Check if wallet already registered
@@ -30620,22 +30629,22 @@ app.post('/api/web3/signup', async (req, res) => {
             });
         }
 
-        // Create main User account
+        // Create main User account - FIXED: Use valid enum values
         const newUser = await User.create({
             firstName: firstName,
             lastName: lastName,
             email: email,
-            city: city,
-            country: country || null,
+            city: city || '',
+            country: country || '',
             isVerified: false,
-            status: 'pending_verification',
+            status: 'active', // Valid enum: 'active', 'suspended', 'banned'
             accountType: accountType || 'individual',
             authProvider: 'web3',
             organizationName: organizationName || null,
             role: role || null,
             workEmail: workEmail || null,
             referralCode: generateReferralCode(),
-            referredBy: null, // Will handle referral if provided
+            referredBy: null,
             metadata: {
                 signupMethod: 'web3',
                 signupDate: new Date(),
@@ -30669,14 +30678,14 @@ app.post('/api/web3/signup', async (req, res) => {
             email: email,
             firstName: firstName,
             lastName: lastName,
-            city: city,
-            country: country || null,
+            city: city || '',
+            country: country || '',
             accountType: accountType || 'individual',
             organizationName: organizationName || null,
             role: role || null,
             workEmail: workEmail || null,
             isEmailVerified: false,
-            status: 'pending_verification',
+            status: 'active', // Valid enum: 'active', 'suspended', 'banned', 'pending_verification'
             signupSource: `web3_${walletType || 'metamask'}`,
             referralCode: newUser.referralCode,
             signupCompletedAt: new Date(),
@@ -30697,7 +30706,6 @@ app.post('/api/web3/signup', async (req, res) => {
                 web3User.referredBy = referrer._id;
                 await web3User.save();
 
-                // Add to referral stats
                 await User.findByIdAndUpdate(referrer._id, {
                     $inc: { 'referralStats.totalReferrals': 1 }
                 });
@@ -30709,9 +30717,13 @@ app.post('/api/web3/signup', async (req, res) => {
             $set: { web3UserId: web3User._id }
         });
 
-        // Generate temp token for OTP verification
+        // Generate temp token for OTP verification - include userId for send-otp
         const otpToken = jwt.sign(
-            { userId: newUser._id, email: email },
+            { 
+                userId: newUser._id, 
+                email: email,
+                walletAddress: normalizedAddress 
+            },
             JWT_SECRET,
             { expiresIn: '10m' }
         );
@@ -30737,14 +30749,14 @@ app.post('/api/web3/signup', async (req, res) => {
             relatedEntityModel: 'Web3User'
         });
 
-        // ✅ SEND ADMIN NOTIFICATION FOR WEB3 SIGNUP
+        // Send admin notification
         await sendAdminWeb3SignupNotification(newUser, web3User, req);
 
         res.status(201).json({
             status: 'success',
             message: 'Account created successfully. Please verify your email with the OTP sent.',
+            tempToken: otpToken,
             data: {
-                tempToken: otpToken,
                 user: {
                     id: newUser._id,
                     firstName: newUser.firstName,
@@ -30767,7 +30779,7 @@ app.post('/api/web3/signup', async (req, res) => {
 });
 
 // =============================================
-// 4. WEB3 SEND OTP - Send OTP for verification
+// 4. WEB3 SEND OTP - Send OTP for verification (FIXED)
 // =============================================
 app.post('/api/web3/send-otp', async (req, res) => {
     try {
@@ -30811,14 +30823,31 @@ app.post('/api/web3/send-otp', async (req, res) => {
             });
         }
 
-        // Find user to get name
+        // Find user - handle both userId and walletAddress in token
         let user;
+        
         if (decoded.userId) {
+            // Token has userId (from signup flow)
             user = await User.findById(decoded.userId);
         } else if (decoded.walletAddress) {
+            // Token has walletAddress (from verify flow)
             const web3User = await Web3User.findOne({
                 'wallets.address': decoded.walletAddress.toLowerCase()
             });
+            if (web3User) {
+                user = await User.findById(web3User.user);
+            }
+        }
+
+        // If still no user, try to find by email
+        if (!user) {
+            user = await User.findOne({ email: email });
+        }
+
+        // If still no user, create a temporary user record for OTP
+        if (!user) {
+            // Check if there's a Web3User with this email
+            const web3User = await Web3User.findOne({ email: email });
             if (web3User) {
                 user = await User.findById(web3User.user);
             }
@@ -30844,7 +30873,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
         });
 
         // Send OTP email
-        await sendProfessionalEmail({
+        const otpSent = await sendProfessionalEmail({
             email: email,
             template: 'otp',
             data: {
@@ -30853,6 +30882,10 @@ app.post('/api/web3/send-otp', async (req, res) => {
                 action: 'Web3 wallet verification'
             }
         });
+
+        if (!otpSent) {
+            throw new Error('Failed to send OTP email');
+        }
 
         console.log(`📧 Web3 OTP sent to ${email}`);
 
@@ -30865,7 +30898,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
         console.error('Send Web3 OTP error:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to send OTP'
+            message: err.message || 'Failed to send OTP'
         });
     }
 });
@@ -30948,13 +30981,23 @@ app.post('/api/web3/verify-otp', async (req, res) => {
 
         if (decoded.userId) {
             user = await User.findById(decoded.userId);
-            web3User = await Web3User.findOne({ user: user._id });
+            if (user) {
+                web3User = await Web3User.findOne({ user: user._id });
+            }
         } else if (decoded.walletAddress) {
             web3User = await Web3User.findOne({
                 'wallets.address': decoded.walletAddress.toLowerCase()
             });
             if (web3User) {
                 user = await User.findById(web3User.user);
+            }
+        }
+
+        // If still no user, try to find by email
+        if (!user) {
+            user = await User.findOne({ email: email });
+            if (user) {
+                web3User = await Web3User.findOne({ user: user._id });
             }
         }
 
@@ -30975,7 +31018,9 @@ app.post('/api/web3/verify-otp', async (req, res) => {
         // Update Web3User
         if (web3User) {
             web3User.isEmailVerified = true;
-            web3User.status = 'active';
+            if (web3User.status === 'pending_verification') {
+                web3User.status = 'active';
+            }
             await web3User.save();
         }
 
@@ -30999,7 +31044,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
             relatedEntityModel: 'OTP'
         });
 
-        // ✅ SEND WELCOME EMAIL AFTER OTP VERIFICATION
+        // Send welcome email after OTP verification
         await sendAutomatedEmail(user, 'welcome', {
             name: user.firstName,
             email: user.email
@@ -31268,13 +31313,6 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
         console.error('Failed to send admin Web3 signup notification:', err);
     }
 }
-
-// =============================================
-// EXPOSE WEB3 SCHEMAS FOR OTHER MODULES
-// =============================================
-module.exports.Web3User = Web3User;
-module.exports.Web3Nonce = Web3Nonce;
-module.exports.Web3Log = Web3Log;
 
 
 
