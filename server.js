@@ -30289,81 +30289,117 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 // =============================================
 // WEB3 ENDPOINTS - COMPLETE IMPLEMENTATION
-// Place this AFTER your schema definitions and BEFORE the 404 handler
+// These endpoints match the HTML forms in signup.html and login.html
 // =============================================
 
 // =============================================
-// 1. GET /api/web3/nonce - Generate nonce for signing
+// ENDPOINT 1: GET /api/web3/check-user - Check if wallet is registered
 // =============================================
-app.get('/api/web3/nonce', async (req, res) => {
+app.get('/api/web3/check-user', async (req, res) => {
   try {
-    console.log('🔑 [NONCE] Request received:', req.query);
+    const { walletAddress } = req.query;
     
-    const { walletAddress, type = 'login', isSignup = 'false', accountType = 'individual', referralCode = null } = req.query;
-
-    if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+    if (!walletAddress) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Invalid wallet address format. Must be a valid Ethereum address starting with 0x.'
+        message: 'Wallet address is required'
       });
     }
 
-    const walletLower = walletAddress.toLowerCase();
-    const isSignupBool = isSignup === 'true';
-    const isLoginRequest = type === 'login' || !isSignupBool;
+    const normalizedAddress = walletAddress.toLowerCase();
+    
+    // Check in Web3User schema
+    const web3User = await Web3User.findOne({
+      'wallets.address': normalizedAddress
+    });
+    
+    // Also check in main User schema for users who may have linked wallets
+    const mainUser = await User.findOne({
+      'web3Auth.wallets': normalizedAddress
+    });
 
-    // Check if user exists
-    const web3User = await Web3User.findOne({ 'wallets.address': walletLower });
-    const regularUser = await User.findOne({ email: walletLower });
-    const userExists = !!(web3User || regularUser);
+    const exists = !!(web3User || mainUser);
+    const user = web3User || mainUser;
 
-    if (isSignupBool && userExists) {
-      return res.status(409).json({
-        status: 'fail',
-        message: 'This wallet is already registered. Please login instead.',
-        data: { action: 'login_suggested' }
-      });
-    }
-
-    if (isLoginRequest && !userExists) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Wallet not registered. Please sign up first.',
-        data: { action: 'signup_suggested' }
-      });
-    }
-
-    // Generate nonce
-    const nonce = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-    const message = `Sign this message to ${isSignupBool ? 'create your account' : 'login to your account'} on BitHash Capital.\n\nWallet: ${walletLower}\nNonce: ${nonce}\nTimestamp: ${new Date().toISOString()}\n\nBy signing, you confirm you are the owner of this wallet and agree to our Terms of Service.`;
-
-    await Web3Nonce.create({
-      walletAddress: walletLower,
-      nonce: nonce,
-      message: message,
-      type: isSignupBool ? 'signup' : 'login',
-      used: false,
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      expiresAt: expiresAt,
-      metadata: {
-        accountType: accountType,
-        referralCode: referralCode,
-        isSignup: isSignupBool,
-        pageSource: isSignupBool ? 'signup' : 'login'
+    res.status(200).json({
+      status: 'success',
+      data: {
+        exists: exists,
+        user: user ? {
+          id: user._id,
+          email: user.email || null,
+          firstName: user.firstName || null,
+          lastName: user.lastName || null,
+          accountType: user.accountType || 'individual'
+        } : null
       }
     });
 
-    // Cleanup old nonces
-    await Web3Nonce.deleteMany({
-      walletAddress: walletLower,
-      used: false,
-      expiresAt: { $lt: new Date() }
+  } catch (err) {
+    console.error('Check user error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to check user'
     });
+  }
+});
 
-    console.log(`✅ [NONCE] Generated for ${walletLower}`);
+// =============================================
+// ENDPOINT 2: GET /api/web3/nonce - Generate nonce for wallet authentication
+// =============================================
+app.get('/api/web3/nonce', async (req, res) => {
+  try {
+    const { walletAddress, type = 'login', isSignup = false, accountType = 'individual', referralCode = null } = req.query;
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Wallet address is required'
+      });
+    }
+
+    const normalizedAddress = walletAddress.toLowerCase();
+    const nonce = generateNonce();
+    const timestamp = Date.now();
+    
+    // Create the message to be signed - matches the structure expected by the frontend
+    const message = `Sign this message to authenticate with BitHash Capital.\n\nWallet: ${normalizedAddress}\nNonce: ${nonce}\nTimestamp: ${timestamp}\n\nThis signature verifies ownership of the wallet and will not cost any gas fees.`;
+    
+    // Store nonce in database with expiry (5 minutes)
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    
+    // Create or update nonce record
+    await Web3Nonce.findOneAndUpdate(
+      { walletAddress: normalizedAddress, used: false },
+      {
+        walletAddress: normalizedAddress,
+        nonce: nonce,
+        message: message,
+        type: type,
+        used: false,
+        expiresAt: expiresAt,
+        metadata: {
+          accountType: accountType,
+          referralCode: referralCode,
+          isSignup: isSignup === 'true' || isSignup === true,
+          pageSource: isSignup === 'true' || isSignup === true ? 'signup' : 'login'
+        }
+      },
+      { upsert: true, new: true }
+    );
+
+    // Log the nonce generation
+    await Web3Log.create({
+      walletAddress: normalizedAddress,
+      action: 'nonce_generated',
+      status: 'success',
+      metadata: {
+        type: type,
+        isSignup: isSignup === 'true' || isSignup === true,
+        accountType: accountType,
+        nonce: nonce
+      }
+    });
 
     res.status(200).json({
       status: 'success',
@@ -30371,384 +30407,459 @@ app.get('/api/web3/nonce', async (req, res) => {
         nonce: nonce,
         message: message,
         expiresAt: expiresAt,
-        walletAddress: walletLower
+        walletAddress: normalizedAddress
       }
     });
 
   } catch (err) {
-    console.error('❌ [NONCE] Error:', err);
+    console.error('Nonce generation error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to generate nonce',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      message: 'Failed to generate nonce'
     });
   }
 });
 
 // =============================================
-// WEB3 VERIFY ENDPOINT - ADD THIS TO server.js
+// ENDPOINT 3: POST /api/web3/verify - Verify wallet signature
 // =============================================
 app.post('/api/web3/verify', async (req, res) => {
-    try {
-        console.log('🔐 [VERIFY] Request received');
-        
-        const { 
-            walletAddress, 
-            signature, 
-            nonce, 
-            isSignup = false, 
-            accountType = 'individual', 
-            walletType = 'metamask', 
-            referralCode = null 
-        } = req.body;
+  try {
+    const { walletAddress, signature, nonce, isSignup = false, accountType = 'individual', walletType = 'metamask' } = req.body;
 
-        // Validate required fields
-        if (!walletAddress || !signature || !nonce) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Wallet address, signature, and nonce are required'
-            });
-        }
-
-        const walletLower = walletAddress.toLowerCase();
-        const isSignupBool = isSignup === 'true' || isSignup === true;
-
-        // Find the nonce record
-        const nonceRecord = await Web3Nonce.findOne({
-            walletAddress: walletLower,
-            nonce: nonce,
-            used: false,
-            expiresAt: { $gt: new Date() }
-        });
-
-        if (!nonceRecord) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid or expired nonce. Please request a new one.'
-            });
-        }
-
-        // Verify signature
-        let recoveredAddress;
-        try {
-            recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
-        } catch (verifyErr) {
-            console.error('❌ Signature verification error:', verifyErr);
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Signature verification failed. Invalid signature.'
-            });
-        }
-
-        if (recoveredAddress.toLowerCase() !== walletLower) {
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Signature verification failed. Address mismatch.'
-            });
-        }
-
-        // Mark nonce as used
-        nonceRecord.used = true;
-        nonceRecord.usedAt = new Date();
-        await nonceRecord.save();
-
-        // Check if user exists
-        const web3User = await Web3User.findOne({ 'wallets.address': walletLower });
-        const regularUser = await User.findOne({ email: walletLower });
-        const userExists = !!(web3User || regularUser);
-
-        if (isSignupBool && userExists) {
-            return res.status(409).json({
-                status: 'fail',
-                message: 'This wallet is already registered. Please login instead.',
-                data: { action: 'login_suggested' }
-            });
-        }
-
-        if (!isSignupBool && !userExists) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'Wallet not registered. Please sign up first.',
-                data: { action: 'signup_suggested' }
-            });
-        }
-
-        // ✅ CRITICAL: Generate tempToken ALWAYS
-        const tempToken = crypto.randomBytes(32).toString('hex');
-        const tempTokenExpiry = new Date(Date.now() + 15 * 60 * 1000);
-
-        let email = null;
-        let userId = null;
-        let firstName = null;
-        let lastName = null;
-
-        if (userExists && !isSignupBool) {
-            if (web3User) {
-                email = web3User.email;
-                userId = web3User.user;
-                firstName = web3User.firstName;
-                lastName = web3User.lastName;
-            } else if (regularUser) {
-                email = regularUser.email;
-                userId = regularUser._id;
-                firstName = regularUser.firstName;
-                lastName = regularUser.lastName;
-            }
-        }
-
-        // Create session
-        const session = await Web3Session.create({
-            user: userId,
-            walletAddress: walletLower,
-            walletType: walletType,
-            nonce: nonce,
-            signature: signature,
-            message: nonceRecord.message,
-            status: 'verified',
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            expiresAt: tempTokenExpiry,
-            verifiedAt: new Date(),
-            metadata: {
-                isSignup: isSignupBool,
-                accountType: accountType,
-                referralCode: referralCode
-            }
-        });
-
-        // Log activity
-        await Web3Log.create({
-            user: userId,
-            walletAddress: walletLower,
-            walletType: walletType,
-            action: isSignupBool ? 'signature_verified' : 'login_attempt',
-            status: 'success',
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            metadata: {
-                isSignup: isSignupBool,
-                accountType: accountType,
-                referralCode: referralCode
-            },
-            relatedEntity: session._id,
-            relatedEntityModel: 'Web3Session'
-        });
-
-        console.log(`✅ [VERIFY] Success for ${walletLower}`);
-
-        // ✅ CRITICAL: Response MUST include tempToken
-        res.status(200).json({
-            status: 'success',
-            data: {
-                tempToken: tempToken,
-                tempTokenExpiry: tempTokenExpiry,
-                isNewUser: !userExists && isSignupBool,
-                isSignup: isSignupBool,
-                email: email,
-                userId: userId,
-                firstName: firstName,
-                lastName: lastName,
-                sessionId: session._id,
-                needsOtp: true
-            }
-        });
-
-    } catch (err) {
-        console.error('❌ [VERIFY] Error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to verify signature',
-            error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
-        });
+    if (!walletAddress || !signature || !nonce) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Wallet address, signature, and nonce are required'
+      });
     }
+
+    const normalizedAddress = walletAddress.toLowerCase();
+
+    // Find the nonce record
+    const nonceRecord = await Web3Nonce.findOne({
+      walletAddress: normalizedAddress,
+      nonce: nonce,
+      used: false,
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!nonceRecord) {
+      await Web3Log.create({
+        walletAddress: normalizedAddress,
+        action: 'signature_failed',
+        status: 'failed',
+        metadata: {
+          error: 'Invalid or expired nonce',
+          nonce: nonce,
+          isSignup: isSignup
+        }
+      });
+
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid or expired nonce. Please request a new one.'
+      });
+    }
+
+    // Recover the address from the signature
+    let recoveredAddress;
+    try {
+      // Using ethers to recover the address
+      const recovered = ethers.verifyMessage(nonceRecord.message, signature);
+      recoveredAddress = recovered.toLowerCase();
+    } catch (verifyErr) {
+      await Web3Log.create({
+        walletAddress: normalizedAddress,
+        action: 'signature_failed',
+        status: 'failed',
+        metadata: {
+          error: 'Signature verification failed',
+          message: verifyErr.message
+        }
+      });
+
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Signature verification failed. Please try again.'
+      });
+    }
+
+    // Check if the recovered address matches the wallet address
+    if (recoveredAddress !== normalizedAddress) {
+      await Web3Log.create({
+        walletAddress: normalizedAddress,
+        action: 'signature_failed',
+        status: 'failed',
+        metadata: {
+          error: 'Address mismatch',
+          recoveredAddress: recoveredAddress,
+          expectedAddress: normalizedAddress
+        }
+      });
+
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Signature does not match the wallet address.'
+      });
+    }
+
+    // Mark nonce as used
+    nonceRecord.used = true;
+    nonceRecord.usedAt = new Date();
+    await nonceRecord.save();
+
+    // Generate temporary token for session
+    const tempToken = jwt.sign(
+      { 
+        walletAddress: normalizedAddress,
+        type: 'web3_temp',
+        isSignup: isSignup,
+        accountType: accountType
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    // Check if user exists
+    const existingUser = await Web3User.findOne({
+      'wallets.address': normalizedAddress
+    });
+
+    const existingMainUser = await User.findOne({
+      'web3Auth.wallets': normalizedAddress
+    });
+
+    const userExists = !!(existingUser || existingMainUser);
+
+    // Check if this is a login attempt for an existing user
+    const isLogin = !isSignup;
+
+    if (isLogin && !userExists) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'No account found for this wallet address. Please sign up first.',
+        data: {
+          action: 'signup_suggested'
+        }
+      });
+    }
+
+    if (isSignup && userExists) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'A user is already registered with this wallet address. Please login instead.',
+        data: {
+          action: 'login_suggested'
+        }
+      });
+    }
+
+    // Log successful verification
+    await Web3Log.create({
+      walletAddress: normalizedAddress,
+      action: 'signature_verified',
+      status: 'success',
+      metadata: {
+        isSignup: isSignup,
+        userExists: userExists,
+        accountType: accountType,
+        walletType: walletType
+      }
+    });
+
+    // Check if user needs OTP (existing user without email verification)
+    let needsOtp = false;
+    let userEmail = null;
+    let userId = null;
+
+    if (userExists) {
+      const user = existingUser || existingMainUser;
+      userEmail = user.email;
+      userId = user._id;
+      
+      // If user has email but not verified, they need OTP
+      if (user.email && !user.isEmailVerified) {
+        needsOtp = true;
+      }
+      // If user doesn't have email at all, they need to provide it
+      if (!user.email) {
+        needsOtp = true;
+      }
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        tempToken: tempToken,
+        isNewUser: !userExists && isSignup,
+        userExists: userExists,
+        needsOtp: needsOtp,
+        email: userEmail,
+        userId: userId,
+        walletAddress: normalizedAddress,
+        accountType: accountType
+      }
+    });
+
+  } catch (err) {
+    console.error('Verify error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to verify signature'
+    });
+  }
 });
+
 // =============================================
-// 3. POST /api/web3/signup - Create Web3 user account
+// ENDPOINT 4: POST /api/web3/signup - Complete Web3 signup
 // =============================================
 app.post('/api/web3/signup', async (req, res) => {
   try {
-    console.log('📝 [SIGNUP] Request received');
-
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    if (!token) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         status: 'fail',
-        message: 'Authorization token required'
+        message: 'Authentication required'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      if (decoded.type !== 'web3_temp') {
+        throw new Error('Invalid token type');
+      }
+    } catch (err) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Invalid or expired token'
       });
     }
 
     const {
-      firstName, lastName, email, city,
-      accountType, walletAddress, walletType,
-      organizationName, role, country, workEmail,
+      firstName,
+      lastName,
+      email,
+      city,
+      accountType,
+      walletAddress,
+      walletType,
+      organizationName,
+      role,
+      country,
+      workEmail,
       referralCode
     } = req.body;
 
-    // Validate required fields
-    if (!firstName || !lastName || !email || !city || !walletAddress) {
+    if (!firstName || !lastName || !email || !city) {
       return res.status(400).json({
         status: 'fail',
-        message: 'First name, last name, email, city, and wallet address are required'
+        message: 'First name, last name, email, and city are required'
       });
     }
 
-    if (!validator.isEmail(email)) {
+    if (!walletAddress) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Please provide a valid email address'
+        message: 'Wallet address is required'
       });
     }
 
-    const walletLower = walletAddress.toLowerCase();
+    const normalizedAddress = walletAddress.toLowerCase();
 
-    // Check if wallet is already registered
-    const existingWeb3User = await Web3User.findOne({ 'wallets.address': walletLower });
-    if (existingWeb3User) {
-      return res.status(409).json({
-        status: 'fail',
-        message: 'This wallet is already registered. Please login instead.'
-      });
-    }
+    // Check if user already exists
+    const existingUser = await Web3User.findOne({
+      'wallets.address': normalizedAddress
+    });
 
-    // Check if email is already in use
-    const existingUser = await User.findOne({ email: email });
     if (existingUser) {
       return res.status(409).json({
         status: 'fail',
-        message: 'This email is already registered. Please use a different email or login.'
+        message: 'A user is already registered with this wallet address. Please login instead.'
       });
     }
 
-    // Validate the temp token session
-    const session = await Web3Session.findOne({
-      walletAddress: walletLower,
-      status: 'verified',
-      expiresAt: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
-
-    if (!session) {
-      return res.status(401).json({
+    // Check if email is already used
+    const existingEmail = await Web3User.findOne({ email: email });
+    if (existingEmail) {
+      return res.status(400).json({
         status: 'fail',
-        message: 'Invalid or expired session. Please reconnect your wallet.'
+        message: 'This email is already registered. Please use a different email.'
+      });
+    }
+
+    // Check if email is used in main User schema
+    const existingMainEmail = await User.findOne({ email: email });
+    if (existingMainEmail) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'This email is already registered. Please use a different email.'
       });
     }
 
     // Generate referral code
-    const newReferralCode = `W3-${Date.now().toString(36).substring(4).toUpperCase()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const referralCodeGen = generateReferralCode();
 
-    // Create regular User record
-    const user = await User.create({
-      firstName: firstName,
-      lastName: lastName,
-      email: email,
-      city: city,
-      accountType: accountType || 'individual',
-      status: 'active',
-      isVerified: false,
-      referralCode: newReferralCode,
-      authProvider: 'web3',
-      balances: {
-        main: new Map([['usd', 0]]),
-        active: new Map([['usd', 0]]),
-        matured: new Map([['usd', 0]])
-      }
-    });
-
-    // Create Web3User record
-    const web3User = await Web3User.create({
-      user: user._id,
-      email: email,
-      firstName: firstName,
-      lastName: lastName,
-      city: city,
-      accountType: accountType || 'individual',
-      status: 'pending_verification',
-      isEmailVerified: false,
-      referralCode: newReferralCode,
-      signupSource: `web3_${walletType}`,
+    // Create the Web3 user
+    const newUser = await Web3User.create({
+      user: null, // Will link to main user later
       wallets: [{
-        address: walletLower,
+        address: normalizedAddress,
         type: walletType || 'metamask',
         isPrimary: true,
         isVerified: true,
         connectedAt: new Date(),
-        lastUsed: new Date()
+        lastUsed: new Date(),
+        metadata: {
+          chainId: 1,
+          networkName: 'Ethereum Mainnet'
+        }
       }],
+      email: email,
+      isEmailVerified: false,
+      firstName: firstName,
+      lastName: lastName,
+      city: city,
+      country: country || null,
+      accountType: accountType || 'individual',
+      organizationName: organizationName || null,
+      role: role || null,
+      workEmail: workEmail || null,
+      referralCode: referralCodeGen,
+      status: 'pending_verification',
+      signupSource: 'web3_metamask',
       metadata: {
-        signupIP: getRealClientIP(req),
-        signupUserAgent: req.headers['user-agent'] || 'Unknown',
-        signupLocation: 'Unknown'
+        signupIP: req.ip,
+        signupUserAgent: req.headers['user-agent'],
+        signupLocation: req.clientLocation?.location || 'Unknown'
       },
-      web3Auth: {
-        lastVerifiedAt: new Date()
+      preferences: {
+        notifications: { email: true, push: true },
+        theme: 'dark',
+        language: 'en',
+        currency: 'USD'
       }
     });
 
-    // Update session with user ID
-    session.user = user._id;
-    await session.save();
-
-    // If business account, add business fields
-    if (accountType === 'business') {
-      if (organizationName) web3User.organizationName = organizationName;
-      if (role) web3User.role = role;
-      if (country) web3User.country = country;
-      if (workEmail) web3User.workEmail = workEmail;
-      await web3User.save();
-    }
-
-    // Handle referral
+    // Handle referral if provided
     if (referralCode) {
-      let actualReferralCode = referralCode;
-      if (referralCode.includes('-')) {
-        const parts = referralCode.split('-');
-        if (parts.length >= 4) {
-          actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
-        }
-      }
-
-      const referringUser = await User.findOne({ referralCode: actualReferralCode });
-      if (referringUser) {
-        web3User.referredBy = referringUser._id;
-        await web3User.save();
-
-        await User.findByIdAndUpdate(referringUser._id, {
+      const referrer = await Web3User.findOne({ referralCode: referralCode });
+      if (referrer) {
+        newUser.referredBy = referrer._id;
+        await newUser.save();
+        
+        // Update referrer stats
+        await Web3User.findByIdAndUpdate(referrer._id, {
           $inc: { 'referralStats.totalReferrals': 1 }
         });
-
-        console.log(`🔗 Referral: ${email} referred by ${referringUser.email}`);
       }
     }
 
-    // Generate JWT token
-    const jwtToken = generateJWT(user._id);
+    // Also create a main User record for compatibility with the rest of the system
+    const mainUser = await User.create({
+      firstName: firstName,
+      lastName: lastName,
+      email: email,
+      city: city,
+      country: country || null,
+      isVerified: false,
+      status: 'active',
+      accountType: accountType || 'individual',
+      authProvider: 'web3',
+      referralCode: referralCodeGen,
+      web3Auth: {
+        wallets: [normalizedAddress],
+        connectedAt: new Date()
+      },
+      balances: {
+        main: new Map(),
+        active: new Map(),
+        matured: new Map()
+      },
+      metadata: {
+        signupMethod: 'web3',
+        signupDate: new Date(),
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      }
+    });
 
-    // Generate temp token for OTP
-    const tempToken = crypto.randomBytes(32).toString('hex');
+    // Link the two users
+    newUser.user = mainUser._id;
+    await newUser.save();
 
-    console.log(`✅ Web3 user created: ${email} (${accountType})`);
+    // Generate a temporary token for OTP verification
+    const tempToken = jwt.sign(
+      { 
+        id: mainUser._id,
+        web3UserId: newUser._id,
+        type: 'web3_signup_temp'
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    // Send OTP email
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await OTP.create({
+      email: email,
+      otp: otp,
+      type: 'signup',
+      expiresAt: expiresAt,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+
+    await sendProfessionalEmail({
+      email: email,
+      template: 'otp',
+      data: {
+        name: firstName,
+        otp: otp,
+        action: 'account verification'
+      }
+    });
+
+    // Log signup
+    await Web3Log.create({
+      user: mainUser._id,
+      walletAddress: normalizedAddress,
+      walletType: walletType || 'metamask',
+      action: 'signup_success',
+      status: 'success',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      metadata: {
+        accountType: accountType,
+        email: email,
+        hasReferral: !!referralCode
+      }
+    });
 
     res.status(201).json({
       status: 'success',
-      message: 'Web3 account created successfully. Please verify your email with the OTP sent to your inbox.',
-      token: jwtToken,
+      message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
       tempToken: tempToken,
       data: {
         user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          accountType: user.accountType,
-          walletAddress: walletLower,
-          walletType: walletType,
-          referralCode: newReferralCode
+          id: mainUser._id,
+          web3UserId: newUser._id,
+          firstName: firstName,
+          lastName: lastName,
+          email: email,
+          walletAddress: normalizedAddress,
+          accountType: accountType,
+          needsVerification: true
         }
       }
     });
 
   } catch (err) {
-    console.error('❌ [SIGNUP] Error:', err);
+    console.error('Web3 signup error:', err);
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to create account'
@@ -30757,46 +30868,52 @@ app.post('/api/web3/signup', async (req, res) => {
 });
 
 // =============================================
-// 4. POST /api/web3/send-otp - Send OTP to web3 user
+// ENDPOINT 5: POST /api/web3/send-otp - Send OTP for Web3 login
 // =============================================
 app.post('/api/web3/send-otp', async (req, res) => {
   try {
-    const { email } = req.body;
-    const token = req.headers.authorization?.replace('Bearer ', '');
-
-    if (!token) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         status: 'fail',
-        message: 'Authorization token required'
+        message: 'Authentication required'
       });
     }
 
-    if (!email || !validator.isEmail(email)) {
+    const token = authHeader.split(' ')[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Invalid or expired token'
+      });
+    }
+
+    const { email } = req.body;
+    if (!email) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Valid email address is required'
+        message: 'Email is required'
       });
     }
 
-    // Find the Web3User by email
-    const web3User = await Web3User.findOne({ email: email }).populate('user');
-    if (!web3User) {
+    // Get the user
+    let user = await User.findById(decoded.id);
+    if (!user) {
       return res.status(404).json({
         status: 'fail',
         message: 'User not found'
       });
     }
 
-    // Check for recent OTP
-    const recentOtp = await OTP.findOne({
-      email: email,
-      createdAt: { $gte: new Date(Date.now() - 60 * 1000) }
-    });
-
-    if (recentOtp) {
-      return res.status(429).json({
+    // Check if user is trying to verify a web3 account
+    const web3User = await Web3User.findOne({ user: user._id });
+    if (!web3User) {
+      return res.status(404).json({
         status: 'fail',
-        message: 'Please wait before requesting a new OTP'
+        message: 'Web3 user not found'
       });
     }
 
@@ -30804,31 +30921,35 @@ app.post('/api/web3/send-otp', async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Delete old OTPs
-    await OTP.deleteMany({ email: email, used: false });
-
-    // Create new OTP
     await OTP.create({
       email: email,
       otp: otp,
-      type: 'signup',
+      type: web3User.isEmailVerified ? 'login' : 'signup',
       expiresAt: expiresAt,
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown'
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
       data: {
-        name: web3User.firstName || 'Valued Customer',
+        name: user.firstName || 'User',
         otp: otp,
-        action: 'account verification'
+        action: web3User.isEmailVerified ? 'login verification' : 'account verification'
       }
     });
 
-    console.log(`📧 Web3 OTP sent to ${email}`);
+    await Web3Log.create({
+      user: user._id,
+      walletAddress: web3User.wallets[0]?.address,
+      action: 'otp_sent',
+      status: 'success',
+      metadata: {
+        email: email,
+        isVerification: !web3User.isEmailVerified
+      }
+    });
 
     res.status(200).json({
       status: 'success',
@@ -30836,7 +30957,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('❌ [SEND-OTP] Error:', err);
+    console.error('Send Web3 OTP error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to send OTP'
@@ -30845,20 +30966,30 @@ app.post('/api/web3/send-otp', async (req, res) => {
 });
 
 // =============================================
-// 5. POST /api/web3/verify-otp - Verify OTP for web3 user
+// ENDPOINT 6: POST /api/web3/verify-otp - Verify OTP for Web3
 // =============================================
 app.post('/api/web3/verify-otp', async (req, res) => {
   try {
-    const { email, otp } = req.body;
-    const token = req.headers.authorization?.replace('Bearer ', '');
-
-    if (!token) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         status: 'fail',
-        message: 'Authorization token required'
+        message: 'Authentication required'
       });
     }
 
+    const token = authHeader.split(' ')[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Invalid or expired token'
+      });
+    }
+
+    const { email, otp } = req.body;
     if (!email || !otp) {
       return res.status(400).json({
         status: 'fail',
@@ -30866,12 +30997,21 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       });
     }
 
-    // Find the Web3User
-    const web3User = await Web3User.findOne({ email: email }).populate('user');
-    if (!web3User) {
+    // Get the user
+    const user = await User.findById(decoded.id);
+    if (!user) {
       return res.status(404).json({
         status: 'fail',
         message: 'User not found'
+      });
+    }
+
+    // Get web3 user
+    const web3User = await Web3User.findOne({ user: user._id });
+    if (!web3User) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Web3 user not found'
       });
     }
 
@@ -30886,7 +31026,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
     if (!otpRecord) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Invalid or expired verification code. Please request a new one.'
+        message: 'Invalid or expired OTP'
       });
     }
 
@@ -30894,67 +31034,61 @@ app.post('/api/web3/verify-otp', async (req, res) => {
     otpRecord.used = true;
     await otpRecord.save();
 
-    // Update user verification status
-    web3User.isEmailVerified = true;
-    web3User.status = 'active';
-    web3User.signupCompletedAt = new Date();
-    await web3User.save();
-
-    // Update the regular User
-    if (web3User.user) {
-      await User.findByIdAndUpdate(web3User.user._id, {
-        isVerified: true,
-        status: 'active'
-      });
+    // Verify email if this is a signup
+    if (!web3User.isEmailVerified) {
+      web3User.isEmailVerified = true;
+      web3User.status = 'active';
+      await web3User.save();
+      
+      // Also update main user
+      user.isVerified = true;
+      await user.save();
     }
 
     // Generate final JWT token
-    const jwtToken = generateJWT(web3User.user._id);
+    const finalToken = jwt.sign(
+      { 
+        id: user._id,
+        web3UserId: web3User._id,
+        isAdmin: false
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '30d' }
+    );
 
-    // Send welcome email (only for web3 signup)
-    if (web3User.user) {
-      await sendAutomatedEmail(web3User.user, 'welcome', {
-        name: web3User.firstName
-      });
-    }
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
 
-    // Log activity
     await Web3Log.create({
-      user: web3User.user?._id,
+      user: user._id,
       walletAddress: web3User.wallets[0]?.address,
-      walletType: web3User.wallets[0]?.type,
-      action: 'signup_success',
+      action: 'otp_verified',
       status: 'success',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
       metadata: {
         email: email,
-        accountType: web3User.accountType
-      },
-      relatedEntity: web3User._id,
-      relatedEntityModel: 'Web3User'
+        isNewUser: !web3User.isEmailVerified
+      }
     });
-
-    console.log(`✅ Web3 OTP verified for ${email}`);
 
     res.status(200).json({
       status: 'success',
-      message: 'Email verified successfully! Welcome to BitHash Capital!',
-      token: jwtToken,
+      message: 'Verification successful! Redirecting to dashboard...',
+      token: finalToken,
       data: {
         user: {
-          id: web3User.user?._id,
-          firstName: web3User.firstName,
-          lastName: web3User.lastName,
-          email: web3User.email,
-          isVerified: true,
-          accountType: web3User.accountType
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          walletAddress: web3User.wallets[0]?.address,
+          accountType: web3User.accountType || 'individual'
         }
       }
     });
 
   } catch (err) {
-    console.error('❌ [VERIFY-OTP] Error:', err);
+    console.error('Web3 OTP verification error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to verify OTP'
@@ -30963,69 +31097,85 @@ app.post('/api/web3/verify-otp', async (req, res) => {
 });
 
 // =============================================
-// 6. GET /api/web3/check-user - Check if wallet is registered
+// ENDPOINT 7: GET /api/web3/wallet/balance - Get wallet balance
 // =============================================
-app.get('/api/web3/check-user', async (req, res) => {
+app.get('/api/web3/wallet/balance', protect, async (req, res) => {
   try {
-    const { walletAddress } = req.query;
-
-    if (!walletAddress) {
-      return res.status(400).json({
+    const userId = req.user._id;
+    const web3User = await Web3User.findOne({ user: userId });
+    
+    if (!web3User) {
+      return res.status(404).json({
         status: 'fail',
-        message: 'Wallet address is required'
+        message: 'Web3 user not found'
       });
     }
 
-    const walletLower = walletAddress.toLowerCase();
+    const balances = {
+      wallets: web3User.wallets.map(w => ({
+        address: w.address,
+        type: w.type,
+        isPrimary: w.isPrimary,
+        balance: w.balance || 0,
+        usdValue: w.usdValue || 0
+      })),
+      main: web3User.balances?.main || {},
+      active: web3User.balances?.active || {},
+      matured: web3User.balances?.matured || {}
+    };
 
-    // Check in Web3User
-    const web3User = await Web3User.findOne({ 'wallets.address': walletLower });
+    res.status(200).json({
+      status: 'success',
+      data: balances
+    });
 
-    // Also check in regular User (legacy)
-    const regularUser = await User.findOne({ email: walletLower });
+  } catch (err) {
+    console.error('Get Web3 balance error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch balance'
+    });
+  }
+});
 
-    const exists = !!(web3User || regularUser);
-
-    let userData = null;
-    if (web3User) {
-      userData = {
-        id: web3User.user,
-        firstName: web3User.firstName,
-        lastName: web3User.lastName,
-        email: web3User.email,
-        accountType: web3User.accountType,
-        isEmailVerified: web3User.isEmailVerified,
-        status: web3User.status,
-        walletAddress: web3User.wallets[0]?.address,
-        walletType: web3User.wallets[0]?.type
-      };
-    } else if (regularUser) {
-      userData = {
-        id: regularUser._id,
-        firstName: regularUser.firstName,
-        lastName: regularUser.lastName,
-        email: regularUser.email,
-        accountType: regularUser.accountType,
-        isEmailVerified: regularUser.isVerified,
-        status: regularUser.status,
-        walletAddress: walletLower,
-        walletType: 'legacy'
-      };
+// =============================================
+// ENDPOINT 8: GET /api/web3/user - Get Web3 user details
+// =============================================
+app.get('/api/web3/user', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const web3User = await Web3User.findOne({ user: userId });
+    
+    if (!web3User) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Web3 user not found'
+      });
     }
 
     res.status(200).json({
       status: 'success',
       data: {
-        exists: exists,
-        user: userData
+        user: {
+          id: web3User._id,
+          userId: web3User.user,
+          firstName: web3User.firstName,
+          lastName: web3User.lastName,
+          email: web3User.email,
+          isEmailVerified: web3User.isEmailVerified,
+          accountType: web3User.accountType,
+          wallets: web3User.wallets,
+          referralCode: web3User.referralCode,
+          status: web3User.status
+        }
       }
     });
 
   } catch (err) {
-    console.error('❌ [CHECK-USER] Error:', err);
+    console.error('Get Web3 user error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to check user'
+      message: 'Failed to fetch user details'
     });
   }
 });
