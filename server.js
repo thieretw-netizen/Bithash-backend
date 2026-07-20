@@ -30298,7 +30298,8 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 // =============================================
-// WEB3 AUTHENTICATION SYSTEM - COMPLETE ROBUST IMPLEMENTATION
+// WEB3 AUTHENTICATION SYSTEM - COMPLETE FIXED IMPLEMENTATION
+// MATCHES EXACT SERVER.JS SCHEMAS AND ENUMS
 // =============================================
 
 // =============================================
@@ -30465,18 +30466,6 @@ app.post('/api/web3/verify', async (req, res) => {
             'wallets.address': normalizedAddress
         });
 
-        // Generate temp token for OTP flow
-        const tempToken = jwt.sign(
-            { 
-                walletAddress: normalizedAddress, 
-                isSignup: isSignupRequest,
-                email: web3User?.email || null,
-                userId: web3User?.user || null
-            },
-            JWT_SECRET,
-            { expiresIn: '10m' }
-        );
-
         // If signup and user exists, return error
         if (isSignupRequest && web3User) {
             return res.status(409).json({
@@ -30509,6 +30498,18 @@ app.post('/api/web3/verify', async (req, res) => {
             userId = web3User.user;
             fullUser = await User.findById(userId).select('email firstName lastName');
         }
+
+        // Generate temp token for OTP flow
+        const tempToken = jwt.sign(
+            { 
+                walletAddress: normalizedAddress, 
+                isSignup: isSignupRequest,
+                email: userEmail || null,
+                userId: userId || null
+            },
+            JWT_SECRET,
+            { expiresIn: '10m' }
+        );
 
         // Log web3 verification
         await Web3Log.create({
@@ -30639,7 +30640,7 @@ app.post('/api/web3/signup', async (req, res) => {
             city: city || '',
             country: country || '',
             isVerified: false,
-            status: 'active',
+            status: 'active', // Valid enum: 'active', 'suspended', 'banned'
             accountType: accountType || 'individual',
             authProvider: 'web3',
             organizationName: organizationName || null,
@@ -30687,7 +30688,7 @@ app.post('/api/web3/signup', async (req, res) => {
             role: role || null,
             workEmail: workEmail || null,
             isEmailVerified: false,
-            status: 'active',
+            status: 'active', // Valid enum: 'active', 'suspended', 'banned', 'pending_verification'
             signupSource: `web3_${walletType || 'metamask'}`,
             referralCode: newUser.referralCode,
             signupCompletedAt: new Date(),
@@ -30730,24 +30731,33 @@ app.post('/api/web3/signup', async (req, res) => {
             { expiresIn: '10m' }
         );
 
-        // Generate and send OTP
+        // Generate and send OTP directly here - NOT through separate endpoint
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
+        // Delete any existing OTPs for this email
+        await OTP.deleteMany({ 
+            email: email, 
+            type: 'signup',
+            used: false 
+        });
+
+        // Create OTP - using 'signup' which is valid in OTPSchema
         await OTP.create({
             email: email,
             otp: otp,
-            type: 'signup',
+            type: 'signup', // Valid enum: 'signup', 'login', 'password_reset', 'withdrawal'
             expiresAt: expiresAt,
             ipAddress: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown'
         });
 
+        // Send OTP email using the existing sendProfessionalEmail function
         await sendProfessionalEmail({
             email: email,
             template: 'otp',
             data: {
-                name: newUser.firstName,
+                name: newUser.firstName || 'Web3 User',
                 otp: otp,
                 action: 'Web3 wallet verification'
             }
@@ -30803,7 +30813,7 @@ app.post('/api/web3/signup', async (req, res) => {
 });
 
 // =============================================
-// 4. WEB3 SEND OTP - Send OTP for verification
+// 4. WEB3 SEND OTP - Send OTP for verification (FIXED)
 // =============================================
 app.post('/api/web3/send-otp', async (req, res) => {
     try {
@@ -30866,7 +30876,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
             });
         }
 
-        // Check for recent OTP requests (rate limiting)
+        // Check for recent OTP requests (rate limiting) - ONLY check signup type
         const recentOtp = await OTP.findOne({
             email: email,
             type: 'signup',
@@ -30892,10 +30902,11 @@ app.post('/api/web3/send-otp', async (req, res) => {
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
+        // Create OTP - using 'signup' which is valid in OTPSchema
         await OTP.create({
             email: email,
             otp: otp,
-            type: 'signup',
+            type: 'signup', // Valid enum: 'signup', 'login', 'password_reset', 'withdrawal'
             expiresAt: expiresAt,
             ipAddress: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown'
@@ -30929,12 +30940,12 @@ app.post('/api/web3/send-otp', async (req, res) => {
 });
 
 // =============================================
-// 5. WEB3 VERIFY OTP - Verify OTP and complete authentication
+// 5. WEB3 VERIFY OTP - Verify OTP and complete authentication (FIXED)
 // =============================================
 app.post('/api/web3/verify-otp', async (req, res) => {
     try {
         const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        if (!authHeader || !authHeader.startsWith('Bearer '')) {
             return res.status(401).json({
                 status: 'fail',
                 message: 'Authorization required'
@@ -30992,11 +31003,11 @@ app.post('/api/web3/verify-otp', async (req, res) => {
             });
         }
 
-        // Find the OTP record
+        // Find the OTP record - using 'signup' type
         const otpRecord = await OTP.findOne({
             email: email,
             otp: otp,
-            type: 'signup',
+            type: 'signup', // Must match the type used when creating
             used: false,
             expiresAt: { $gt: new Date() }
         });
@@ -31018,9 +31029,23 @@ app.post('/api/web3/verify-otp', async (req, res) => {
                 });
             }
 
+            // Increment attempts
+            await OTP.updateMany(
+                { email: email, otp: otp, type: 'signup', used: false },
+                { $inc: { attempts: 1 } }
+            );
+
             return res.status(400).json({
                 status: 'fail',
                 message: 'Invalid OTP. Please try again.'
+            });
+        }
+
+        // Check if max attempts reached
+        if (otpRecord.attempts >= otpRecord.maxAttempts) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Too many failed attempts. Please request a new OTP.'
             });
         }
 
