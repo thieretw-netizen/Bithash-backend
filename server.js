@@ -30267,93 +30267,38 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
-// =============================================
-// FIXED PROTECT MIDDLEWARE - Handles Web3 users
-// =============================================
-const protect = async (req, res, next) => {
-  try {
-    let token;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    } else if (req.cookies.jwt) {
-      token = req.cookies.jwt;
-    }
+// Inside the existing protect middleware, after verifying the token, add this check:
 
-    if (!token) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'You are not logged in! Please log in to get access.'
-      });
-    }
-
-    const decoded = verifyJWT(token);
-    
-    // Check if this is a Web3 token
-    if (decoded.type === 'web3_auth' || decoded.type === 'web3_signup_temp') {
-      const web3User = await Web3User.findById(decoded.web3UserId);
-      
-      if (!web3User) {
-        return res.status(401).json({
-          status: 'fail',
-          message: 'The Web3 user belonging to this token no longer exists.'
-        });
-      }
-
-      if (web3User.status !== 'active') {
-        return res.status(401).json({
-          status: 'fail',
-          message: 'Your account has been suspended. Please contact support.'
-        });
-      }
-
-      if (web3User.user) {
-        const mainUser = await User.findById(web3User.user);
-        req.user = mainUser || web3User;
-      } else {
-        req.user = web3User;
-      }
-      
-      req.web3User = web3User;
-      req.isWeb3User = true;
-      
-      return next();
-    }
-
-    // Regular user authentication
-    const currentUser = await User.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
-
-    if (!currentUser) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'The user belonging to this token no longer exists.'
-      });
-    }
-
-    if (currentUser.passwordChangedAt && decoded.iat < currentUser.passwordChangedAt.getTime() / 1000) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'User recently changed password! Please log in again.'
-      });
-    }
-
-    if (currentUser.status !== 'active') {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Your account has been suspended. Please contact support.'
-      });
-    }
-
-    req.user = currentUser;
-    req.isWeb3User = false;
-    next();
-
-  } catch (err) {
+// Check if this is a Web3 token
+if (decoded.type === 'web3_auth' || decoded.type === 'web3_signup_temp') {
+  const web3User = await Web3User.findById(decoded.web3UserId);
+  
+  if (!web3User) {
     return res.status(401).json({
       status: 'fail',
-      message: err.message || 'Invalid token. Please log in again.'
+      message: 'The Web3 user belonging to this token no longer exists.'
     });
   }
-};
+
+  if (web3User.status !== 'active') {
+    return res.status(401).json({
+      status: 'fail',
+      message: 'Your account has been suspended. Please contact support.'
+    });
+  }
+
+  if (web3User.user) {
+    const mainUser = await User.findById(web3User.user);
+    req.user = mainUser || web3User;
+  } else {
+    req.user = web3User;
+  }
+  
+  req.web3User = web3User;
+  req.isWeb3User = true;
+  
+  return next();
+}
 
 
 
