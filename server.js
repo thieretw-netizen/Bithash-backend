@@ -30386,205 +30386,182 @@ app.get('/api/web3/nonce', async (req, res) => {
 });
 
 // =============================================
-// 2. POST /api/web3/verify - Verify signature - THIS IS THE MISSING ENDPOINT
+// WEB3 VERIFY ENDPOINT - ADD THIS TO server.js
 // =============================================
 app.post('/api/web3/verify', async (req, res) => {
-  try {
-    console.log('🔐 [VERIFY] Request received:', {
-      walletAddress: req.body.walletAddress,
-      hasSignature: !!req.body.signature,
-      hasNonce: !!req.body.nonce,
-      isSignup: req.body.isSignup
-    });
-
-    const { 
-      walletAddress, 
-      signature, 
-      nonce, 
-      isSignup = false, 
-      accountType = 'individual', 
-      walletType = 'metamask', 
-      referralCode = null 
-    } = req.body;
-
-    // Validate required fields
-    if (!walletAddress) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Wallet address is required'
-      });
-    }
-
-    if (!signature) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Signature is required'
-      });
-    }
-
-    if (!nonce) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Nonce is required'
-      });
-    }
-
-    const walletLower = walletAddress.toLowerCase();
-    const isSignupBool = isSignup === 'true' || isSignup === true;
-
-    // Find the nonce record
-    const nonceRecord = await Web3Nonce.findOne({
-      walletAddress: walletLower,
-      nonce: nonce,
-      used: false,
-      expiresAt: { $gt: new Date() }
-    });
-
-    if (!nonceRecord) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid or expired nonce. Please request a new one.'
-      });
-    }
-
-    // Verify signature using ethers
-    let recoveredAddress;
     try {
-      recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
-    } catch (verifyErr) {
-      console.error('❌ [VERIFY] Signature verification error:', verifyErr);
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Signature verification failed. Invalid signature format.'
-      });
+        console.log('🔐 [VERIFY] Request received');
+        
+        const { 
+            walletAddress, 
+            signature, 
+            nonce, 
+            isSignup = false, 
+            accountType = 'individual', 
+            walletType = 'metamask', 
+            referralCode = null 
+        } = req.body;
+
+        // Validate required fields
+        if (!walletAddress || !signature || !nonce) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Wallet address, signature, and nonce are required'
+            });
+        }
+
+        const walletLower = walletAddress.toLowerCase();
+        const isSignupBool = isSignup === 'true' || isSignup === true;
+
+        // Find the nonce record
+        const nonceRecord = await Web3Nonce.findOne({
+            walletAddress: walletLower,
+            nonce: nonce,
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!nonceRecord) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid or expired nonce. Please request a new one.'
+            });
+        }
+
+        // Verify signature
+        let recoveredAddress;
+        try {
+            recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
+        } catch (verifyErr) {
+            console.error('❌ Signature verification error:', verifyErr);
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Signature verification failed. Invalid signature.'
+            });
+        }
+
+        if (recoveredAddress.toLowerCase() !== walletLower) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Signature verification failed. Address mismatch.'
+            });
+        }
+
+        // Mark nonce as used
+        nonceRecord.used = true;
+        nonceRecord.usedAt = new Date();
+        await nonceRecord.save();
+
+        // Check if user exists
+        const web3User = await Web3User.findOne({ 'wallets.address': walletLower });
+        const regularUser = await User.findOne({ email: walletLower });
+        const userExists = !!(web3User || regularUser);
+
+        if (isSignupBool && userExists) {
+            return res.status(409).json({
+                status: 'fail',
+                message: 'This wallet is already registered. Please login instead.',
+                data: { action: 'login_suggested' }
+            });
+        }
+
+        if (!isSignupBool && !userExists) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Wallet not registered. Please sign up first.',
+                data: { action: 'signup_suggested' }
+            });
+        }
+
+        // ✅ CRITICAL: Generate tempToken ALWAYS
+        const tempToken = crypto.randomBytes(32).toString('hex');
+        const tempTokenExpiry = new Date(Date.now() + 15 * 60 * 1000);
+
+        let email = null;
+        let userId = null;
+        let firstName = null;
+        let lastName = null;
+
+        if (userExists && !isSignupBool) {
+            if (web3User) {
+                email = web3User.email;
+                userId = web3User.user;
+                firstName = web3User.firstName;
+                lastName = web3User.lastName;
+            } else if (regularUser) {
+                email = regularUser.email;
+                userId = regularUser._id;
+                firstName = regularUser.firstName;
+                lastName = regularUser.lastName;
+            }
+        }
+
+        // Create session
+        const session = await Web3Session.create({
+            user: userId,
+            walletAddress: walletLower,
+            walletType: walletType,
+            nonce: nonce,
+            signature: signature,
+            message: nonceRecord.message,
+            status: 'verified',
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            expiresAt: tempTokenExpiry,
+            verifiedAt: new Date(),
+            metadata: {
+                isSignup: isSignupBool,
+                accountType: accountType,
+                referralCode: referralCode
+            }
+        });
+
+        // Log activity
+        await Web3Log.create({
+            user: userId,
+            walletAddress: walletLower,
+            walletType: walletType,
+            action: isSignupBool ? 'signature_verified' : 'login_attempt',
+            status: 'success',
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                isSignup: isSignupBool,
+                accountType: accountType,
+                referralCode: referralCode
+            },
+            relatedEntity: session._id,
+            relatedEntityModel: 'Web3Session'
+        });
+
+        console.log(`✅ [VERIFY] Success for ${walletLower}`);
+
+        // ✅ CRITICAL: Response MUST include tempToken
+        res.status(200).json({
+            status: 'success',
+            data: {
+                tempToken: tempToken,
+                tempTokenExpiry: tempTokenExpiry,
+                isNewUser: !userExists && isSignupBool,
+                isSignup: isSignupBool,
+                email: email,
+                userId: userId,
+                firstName: firstName,
+                lastName: lastName,
+                sessionId: session._id,
+                needsOtp: true
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ [VERIFY] Error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to verify signature',
+            error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+        });
     }
-
-    if (recoveredAddress.toLowerCase() !== walletLower) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Signature verification failed. Address mismatch.'
-      });
-    }
-
-    // Mark nonce as used
-    nonceRecord.used = true;
-    nonceRecord.usedAt = new Date();
-    await nonceRecord.save();
-
-    // Check if user exists
-    const web3User = await Web3User.findOne({ 'wallets.address': walletLower });
-    const regularUser = await User.findOne({ email: walletLower });
-    const userExists = !!(web3User || regularUser);
-
-    if (isSignupBool && userExists) {
-      return res.status(409).json({
-        status: 'fail',
-        message: 'This wallet is already registered. Please login instead.',
-        data: { action: 'login_suggested' }
-      });
-    }
-
-    if (!isSignupBool && !userExists) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Wallet not registered. Please sign up first.',
-        data: { action: 'signup_suggested' }
-      });
-    }
-
-    // ✅ CRITICAL: Generate tempToken ALWAYS
-    const tempToken = crypto.randomBytes(32).toString('hex');
-    const tempTokenExpiry = new Date(Date.now() + 15 * 60 * 1000);
-
-    let email = null;
-    let userId = null;
-    let firstName = null;
-    let lastName = null;
-
-    // Fetch user info for login case
-    if (userExists && !isSignupBool) {
-      if (web3User) {
-        email = web3User.email;
-        userId = web3User.user;
-        firstName = web3User.firstName;
-        lastName = web3User.lastName;
-      } else if (regularUser) {
-        email = regularUser.email;
-        userId = regularUser._id;
-        firstName = regularUser.firstName;
-        lastName = regularUser.lastName;
-      }
-    }
-
-    // Create session
-    const session = await Web3Session.create({
-      user: userId,
-      walletAddress: walletLower,
-      walletType: walletType,
-      nonce: nonce,
-      signature: signature,
-      message: nonceRecord.message,
-      status: 'verified',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      expiresAt: tempTokenExpiry,
-      verifiedAt: new Date(),
-      metadata: {
-        isSignup: isSignupBool,
-        accountType: accountType,
-        referralCode: referralCode
-      }
-    });
-
-    // Log activity
-    await Web3Log.create({
-      user: userId,
-      walletAddress: walletLower,
-      walletType: walletType,
-      action: isSignupBool ? 'signature_verified' : 'login_attempt',
-      status: 'success',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      metadata: {
-        isSignup: isSignupBool,
-        accountType: accountType,
-        referralCode: referralCode
-      },
-      relatedEntity: session._id,
-      relatedEntityModel: 'Web3Session'
-    });
-
-    console.log(`✅ [VERIFY] Success for ${walletLower}`);
-
-    // ✅ CRITICAL: Response MUST include tempToken
-    res.status(200).json({
-      status: 'success',
-      data: {
-        tempToken: tempToken,
-        tempTokenExpiry: tempTokenExpiry,
-        isNewUser: !userExists && isSignupBool,
-        isSignup: isSignupBool,
-        email: email,
-        userId: userId,
-        firstName: firstName,
-        lastName: lastName,
-        sessionId: session._id,
-        needsOtp: true
-      }
-    });
-
-  } catch (err) {
-    console.error('❌ [VERIFY] UNHANDLED ERROR:', err);
-    console.error('❌ [VERIFY] Error stack:', err.stack);
-    
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to verify signature',
-      error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
-    });
-  }
 });
-
 // =============================================
 // 3. POST /api/web3/signup - Create Web3 user account
 // =============================================
