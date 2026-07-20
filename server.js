@@ -30295,6 +30295,8 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
+
+
 // =============================================
 // WEB3 AUTHENTICATION SYSTEM - COMPLETE FIXED IMPLEMENTATION
 // =============================================
@@ -30463,7 +30465,7 @@ app.post('/api/web3/verify', async (req, res) => {
             'wallets.address': normalizedAddress
         });
 
-        // Generate temp token for OTP flow
+        // Generate temp token for OTP flow - include ALL needed data
         const tempToken = jwt.sign(
             { 
                 walletAddress: normalizedAddress, 
@@ -30629,7 +30631,7 @@ app.post('/api/web3/signup', async (req, res) => {
             });
         }
 
-        // Create main User account - FIXED: Use valid enum values
+        // Create main User account
         const newUser = await User.create({
             firstName: firstName,
             lastName: lastName,
@@ -30637,7 +30639,7 @@ app.post('/api/web3/signup', async (req, res) => {
             city: city || '',
             country: country || '',
             isVerified: false,
-            status: 'active', // Valid enum: 'active', 'suspended', 'banned'
+            status: 'active',
             accountType: accountType || 'individual',
             authProvider: 'web3',
             organizationName: organizationName || null,
@@ -30685,7 +30687,7 @@ app.post('/api/web3/signup', async (req, res) => {
             role: role || null,
             workEmail: workEmail || null,
             isEmailVerified: false,
-            status: 'active', // Valid enum: 'active', 'suspended', 'banned', 'pending_verification'
+            status: 'active',
             signupSource: `web3_${walletType || 'metamask'}`,
             referralCode: newUser.referralCode,
             signupCompletedAt: new Date(),
@@ -30728,7 +30730,7 @@ app.post('/api/web3/signup', async (req, res) => {
             { expiresIn: '10m' }
         );
 
-        // Send OTP email
+        // Send OTP email using the helper
         await sendWeb3OtpEmail(email, newUser.firstName);
 
         // Log web3 signup
@@ -30779,7 +30781,7 @@ app.post('/api/web3/signup', async (req, res) => {
 });
 
 // =============================================
-// 4. WEB3 SEND OTP - Send OTP for verification (FIXED)
+// 4. WEB3 SEND OTP - Send OTP for verification (FIXED - uses valid OTP type)
 // =============================================
 app.post('/api/web3/send-otp', async (req, res) => {
     try {
@@ -30844,9 +30846,8 @@ app.post('/api/web3/send-otp', async (req, res) => {
             user = await User.findOne({ email: email });
         }
 
-        // If still no user, create a temporary user record for OTP
+        // If still no user, check Web3User by email
         if (!user) {
-            // Check if there's a Web3User with this email
             const web3User = await Web3User.findOne({ email: email });
             if (web3User) {
                 user = await User.findById(web3User.user);
@@ -30862,11 +30863,12 @@ app.post('/api/web3/send-otp', async (req, res) => {
         // Delete any existing OTPs for this email
         await OTP.deleteMany({ email: email, used: false });
 
-        // Create new OTP
+        // FIXED: Use 'signup' as the type since it's a valid enum value
+        // The OTP schema only allows: ['signup', 'login', 'password_reset', 'withdrawal']
         await OTP.create({
             email: email,
             otp: otp,
-            type: 'web3_verification',
+            type: 'signup',  // ✅ FIXED: Using valid enum value
             expiresAt: expiresAt,
             ipAddress: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown'
@@ -31010,17 +31012,11 @@ app.post('/api/web3/verify-otp', async (req, res) => {
 
         // Update user status
         user.isVerified = true;
-        if (user.status === 'pending_verification') {
-            user.status = 'active';
-        }
         await user.save();
 
         // Update Web3User
         if (web3User) {
             web3User.isEmailVerified = true;
-            if (web3User.status === 'pending_verification') {
-                web3User.status = 'active';
-            }
             await web3User.save();
         }
 
@@ -31143,18 +31139,18 @@ app.get('/api/web3/check-user', async (req, res) => {
 });
 
 // =============================================
-// HELPER: Send Web3 OTP Email
+// HELPER: Send Web3 OTP Email (FIXED - uses valid OTP type)
 // =============================================
 async function sendWeb3OtpEmail(email, name) {
     try {
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         
-        // Store OTP in database
+        // Store OTP in database - FIXED: Use 'signup' which is a valid enum value
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
         await OTP.create({
             email: email,
             otp: otp,
-            type: 'web3_verification',
+            type: 'signup',  // ✅ FIXED: Using valid enum value
             expiresAt: expiresAt,
             ipAddress: 'system',
             userAgent: 'web3_system'
@@ -31313,9 +31309,6 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
         console.error('Failed to send admin Web3 signup notification:', err);
     }
 }
-
-
-
 
 
 
