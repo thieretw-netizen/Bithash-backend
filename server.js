@@ -285,7 +285,7 @@ const UserSchema = new mongoose.Schema({
   passwordResetExpires: Date,
   googleId: { type: String, index: true },
   isVerified: { type: Boolean, default: false },
-  status: { type: String, enum: ['active', 'suspended', 'banned'], default: 'active', index: true },
+  status: { type: String, enum: ['active','pending_verification', 'suspended', 'banned'], default: 'active', index: true },
   kycStatus: {
     identity: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' },
     address: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' },
