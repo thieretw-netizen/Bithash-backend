@@ -30939,13 +30939,16 @@ app.post('/api/web3/send-otp', async (req, res) => {
     }
 });
 
+
+
+
 // =============================================
 // 5. WEB3 VERIFY OTP - Verify OTP and complete authentication (FIXED)
 // =============================================
 app.post('/api/web3/verify-otp', async (req, res) => {
     try {
         const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer '')) {
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return res.status(401).json({
                 status: 'fail',
                 message: 'Authorization required'
@@ -31007,7 +31010,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
         const otpRecord = await OTP.findOne({
             email: email,
             otp: otp,
-            type: 'signup', // Must match the type used when creating
+            type: 'signup',
             used: false,
             expiresAt: { $gt: new Date() }
         });
@@ -31115,6 +31118,13 @@ app.post('/api/web3/verify-otp', async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
+
 
 // =============================================
 // 6. WEB3 CHECK USER - Check if wallet exists
