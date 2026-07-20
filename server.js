@@ -30269,9 +30269,27 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// WEB3 ENDPOINTS - COMPLETE INDEPENDENT SYSTEM
-// Uses /api/web3/* namespace
+// WEB3 ENDPOINTS - COMPLETE IMPLEMENTATION
+// Place this AFTER your schema definitions and BEFORE the 404 handler
 // =============================================
 
 // =============================================
@@ -30283,7 +30301,6 @@ app.get('/api/web3/nonce', async (req, res) => {
     
     const { walletAddress, type = 'login', isSignup = 'false', accountType = 'individual', referralCode = null } = req.query;
 
-    // Input Validation
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       return res.status(400).json({
         status: 'fail',
@@ -30294,26 +30311,12 @@ app.get('/api/web3/nonce', async (req, res) => {
     const walletLower = walletAddress.toLowerCase();
     const isSignupBool = isSignup === 'true';
     const isLoginRequest = type === 'login' || !isSignupBool;
-    
-    console.log(`🔑 [NONCE] Wallet: ${walletLower}, IsSignup: ${isSignupBool}`);
 
-    // Check if user exists in both databases
-    let web3User = null;
-    let regularUser = null;
-    try {
-      web3User = await Web3User.findOne({ 'wallets.address': walletLower });
-      regularUser = await User.findOne({ email: walletLower });
-    } catch (dbError) {
-      console.error('❌ [NONCE] Database error:', dbError);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Database error while checking user'
-      });
-    }
-    
+    // Check if user exists
+    const web3User = await Web3User.findOne({ 'wallets.address': walletLower });
+    const regularUser = await User.findOne({ email: walletLower });
     const userExists = !!(web3User || regularUser);
 
-    // Route logic based on signup vs login
     if (isSignupBool && userExists) {
       return res.status(409).json({
         status: 'fail',
@@ -30334,10 +30337,8 @@ app.get('/api/web3/nonce', async (req, res) => {
     const nonce = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Create SIWE-style message
     const message = `Sign this message to ${isSignupBool ? 'create your account' : 'login to your account'} on BitHash Capital.\n\nWallet: ${walletLower}\nNonce: ${nonce}\nTimestamp: ${new Date().toISOString()}\n\nBy signing, you confirm you are the owner of this wallet and agree to our Terms of Service.`;
 
-    // Store nonce in database
     await Web3Nonce.create({
       walletAddress: walletLower,
       nonce: nonce,
@@ -30355,14 +30356,14 @@ app.get('/api/web3/nonce', async (req, res) => {
       }
     });
 
-    // Clean up old unused nonces for this wallet
+    // Cleanup old nonces
     await Web3Nonce.deleteMany({
       walletAddress: walletLower,
       used: false,
       expiresAt: { $lt: new Date() }
     });
 
-    console.log(`✅ [NONCE] Generated successfully for ${walletLower}`);
+    console.log(`✅ [NONCE] Generated for ${walletLower}`);
 
     res.status(200).json({
       status: 'success',
@@ -30385,13 +30386,15 @@ app.get('/api/web3/nonce', async (req, res) => {
 });
 
 // =============================================
-// 2. POST /api/web3/verify - Verify signature - FIXED VERSION
+// 2. POST /api/web3/verify - Verify signature - THIS IS THE MISSING ENDPOINT
 // =============================================
 app.post('/api/web3/verify', async (req, res) => {
   try {
     console.log('🔐 [VERIFY] Request received:', {
-      body: req.body,
-      headers: req.headers
+      walletAddress: req.body.walletAddress,
+      hasSignature: !!req.body.signature,
+      hasNonce: !!req.body.nonce,
+      isSignup: req.body.isSignup
     });
 
     const { 
@@ -30429,24 +30432,13 @@ app.post('/api/web3/verify', async (req, res) => {
     const walletLower = walletAddress.toLowerCase();
     const isSignupBool = isSignup === 'true' || isSignup === true;
 
-    console.log(`🔐 [VERIFY] Processing for wallet: ${walletLower}, IsSignup: ${isSignupBool}`);
-
     // Find the nonce record
-    let nonceRecord;
-    try {
-      nonceRecord = await Web3Nonce.findOne({
-        walletAddress: walletLower,
-        nonce: nonce,
-        used: false,
-        expiresAt: { $gt: new Date() }
-      });
-    } catch (dbError) {
-      console.error('❌ [VERIFY] Database error finding nonce:', dbError);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Database error while verifying nonce'
-      });
-    }
+    const nonceRecord = await Web3Nonce.findOne({
+      walletAddress: walletLower,
+      nonce: nonce,
+      used: false,
+      expiresAt: { $gt: new Date() }
+    });
 
     if (!nonceRecord) {
       return res.status(400).json({
@@ -30459,7 +30451,6 @@ app.post('/api/web3/verify', async (req, res) => {
     let recoveredAddress;
     try {
       recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
-      console.log(`🔐 [VERIFY] Recovered address: ${recoveredAddress}`);
     } catch (verifyErr) {
       console.error('❌ [VERIFY] Signature verification error:', verifyErr);
       return res.status(401).json({
@@ -30468,9 +30459,7 @@ app.post('/api/web3/verify', async (req, res) => {
       });
     }
 
-    // Check if recovered address matches
     if (recoveredAddress.toLowerCase() !== walletLower) {
-      console.warn(`⚠️ [VERIFY] Address mismatch: Expected ${walletLower}, Got ${recoveredAddress.toLowerCase()}`);
       return res.status(401).json({
         status: 'fail',
         message: 'Signature verification failed. Address mismatch.'
@@ -30482,25 +30471,11 @@ app.post('/api/web3/verify', async (req, res) => {
     nonceRecord.usedAt = new Date();
     await nonceRecord.save();
 
-    // Check if user exists in both databases
-    let web3User = null;
-    let regularUser = null;
-    try {
-      web3User = await Web3User.findOne({ 'wallets.address': walletLower });
-      regularUser = await User.findOne({ email: walletLower });
-    } catch (dbError) {
-      console.error('❌ [VERIFY] Database error finding user:', dbError);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Database error while checking user'
-      });
-    }
-    
+    // Check if user exists
+    const web3User = await Web3User.findOne({ 'wallets.address': walletLower });
+    const regularUser = await User.findOne({ email: walletLower });
     const userExists = !!(web3User || regularUser);
 
-    console.log(`🔐 [VERIFY] User exists: ${userExists}, IsSignup: ${isSignupBool}`);
-
-    // Route logic based on signup vs login
     if (isSignupBool && userExists) {
       return res.status(409).json({
         status: 'fail',
@@ -30517,7 +30492,7 @@ app.post('/api/web3/verify', async (req, res) => {
       });
     }
 
-    // --- CRITICAL FIX: Generate tempToken ALWAYS ---
+    // ✅ CRITICAL: Generate tempToken ALWAYS
     const tempToken = crypto.randomBytes(32).toString('hex');
     const tempTokenExpiry = new Date(Date.now() + 15 * 60 * 1000);
 
@@ -30541,63 +30516,48 @@ app.post('/api/web3/verify', async (req, res) => {
       }
     }
 
-    // Create a session record
-    let session;
-    try {
-      session = await Web3Session.create({
-        user: userId,
-        walletAddress: walletLower,
-        walletType: walletType,
-        nonce: nonce,
-        signature: signature,
-        message: nonceRecord.message,
-        status: 'verified',
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent'] || 'Unknown',
-        expiresAt: tempTokenExpiry,
-        verifiedAt: new Date(),
-        metadata: {
-          isSignup: isSignupBool,
-          accountType: accountType,
-          referralCode: referralCode
-        }
-      });
-      console.log(`✅ [VERIFY] Session created: ${session._id}`);
-    } catch (sessionError) {
-      console.error('❌ [VERIFY] Error creating session:', sessionError);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Failed to create session'
-      });
-    }
+    // Create session
+    const session = await Web3Session.create({
+      user: userId,
+      walletAddress: walletLower,
+      walletType: walletType,
+      nonce: nonce,
+      signature: signature,
+      message: nonceRecord.message,
+      status: 'verified',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      expiresAt: tempTokenExpiry,
+      verifiedAt: new Date(),
+      metadata: {
+        isSignup: isSignupBool,
+        accountType: accountType,
+        referralCode: referralCode
+      }
+    });
 
-    // Log the activity
-    try {
-      await Web3Log.create({
-        user: userId,
-        walletAddress: walletLower,
-        walletType: walletType,
-        action: isSignupBool ? 'signature_verified' : 'login_attempt',
-        status: 'success',
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent'] || 'Unknown',
-        metadata: {
-          isSignup: isSignupBool,
-          accountType: accountType,
-          referralCode: referralCode
-        },
-        relatedEntity: session._id,
-        relatedEntityModel: 'Web3Session'
-      });
-    } catch (logError) {
-      console.error('⚠️ [VERIFY] Error logging activity:', logError);
-      // Don't fail the request just because logging failed
-    }
+    // Log activity
+    await Web3Log.create({
+      user: userId,
+      walletAddress: walletLower,
+      walletType: walletType,
+      action: isSignupBool ? 'signature_verified' : 'login_attempt',
+      status: 'success',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      metadata: {
+        isSignup: isSignupBool,
+        accountType: accountType,
+        referralCode: referralCode
+      },
+      relatedEntity: session._id,
+      relatedEntityModel: 'Web3Session'
+    });
 
-    console.log(`✅ [VERIFY] Successfully verified for ${walletLower}`);
+    console.log(`✅ [VERIFY] Success for ${walletLower}`);
 
-    // --- CRITICAL FIX: Response ALWAYS includes tempToken ---
-    const responseData = {
+    // ✅ CRITICAL: Response MUST include tempToken
+    res.status(200).json({
       status: 'success',
       data: {
         tempToken: tempToken,
@@ -30611,22 +30571,12 @@ app.post('/api/web3/verify', async (req, res) => {
         sessionId: session._id,
         needsOtp: true
       }
-    };
-
-    console.log('✅ [VERIFY] Sending response:', {
-      tempToken: tempToken ? 'present' : 'MISSING',
-      email: email,
-      userId: userId,
-      isNewUser: !userExists && isSignupBool
     });
-
-    res.status(200).json(responseData);
 
   } catch (err) {
     console.error('❌ [VERIFY] UNHANDLED ERROR:', err);
     console.error('❌ [VERIFY] Error stack:', err.stack);
     
-    // Always return a proper error response
     res.status(500).json({
       status: 'error',
       message: 'Failed to verify signature',
@@ -30640,10 +30590,7 @@ app.post('/api/web3/verify', async (req, res) => {
 // =============================================
 app.post('/api/web3/signup', async (req, res) => {
   try {
-    console.log('📝 [SIGNUP] Request received:', {
-      body: req.body,
-      headers: req.headers
-    });
+    console.log('📝 [SIGNUP] Request received');
 
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
@@ -31105,24 +31052,6 @@ app.get('/api/web3/check-user', async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
