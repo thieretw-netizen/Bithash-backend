@@ -10810,7 +10810,8 @@ const completeMaturedInvestmentsCron = async () => {
             });
             
             const newMaturedBTCBalance = (user.balances.matured?.get('btc') || 0);
-            const newMaturedUSDBalance = (user.balances.matured?.get('usd') || 0);
+            // ✅ FIX: Calculate USD from BTC balance using current price
+            const newMaturedUSDBalance = newMaturedBTCBalance * currentBTCPrice;
             const formattedNewMaturedBTC = newMaturedBTCBalance.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
             const formattedNewMaturedUSD = newMaturedUSDBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
