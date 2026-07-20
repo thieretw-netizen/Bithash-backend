@@ -30505,7 +30505,7 @@ app.post('/api/web3/verify', async (req, res) => {
 });
 
 // =============================================
-// 4. POST /api/web3/signup - Complete Web3 signup
+// 4. POST /api/web3/signup - Complete Web3 signup (FIXED)
 // =============================================
 app.post('/api/web3/signup', async (req, res) => {
   try {
@@ -30583,8 +30583,32 @@ app.post('/api/web3/signup', async (req, res) => {
 
     const referralCodeGen = generateReferralCode();
 
+    // STEP 1: Create the main User record FIRST
+    const mainUser = await User.create({
+      firstName: firstName,
+      lastName: lastName,
+      email: email,
+      city: city,
+      country: country || null,
+      isVerified: false,
+      status: 'active',
+      accountType: accountType || 'individual',
+      authProvider: 'web3',
+      referralCode: referralCodeGen,
+      web3Auth: {
+        wallets: [normalizedAddress],
+        connectedAt: new Date()
+      },
+      balances: {
+        main: new Map(),
+        active: new Map(),
+        matured: new Map()
+      }
+    });
+
+    // STEP 2: Create Web3User with the user reference (REQUIRED field)
     const newWeb3User = await Web3User.create({
-      user: null,
+      user: mainUser._id,  // REQUIRED - now properly set
       wallets: [{
         address: normalizedAddress,
         type: walletType || 'metamask',
@@ -30627,6 +30651,7 @@ app.post('/api/web3/signup', async (req, res) => {
 
     const tempToken = jwt.sign(
       { 
+        userId: mainUser._id,
         web3UserId: newWeb3User._id,
         type: 'web3_signup_temp'
       },
@@ -30649,7 +30674,7 @@ app.post('/api/web3/signup', async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email to user using sendWeb3Email
+    // Send OTP email to user
     await sendWeb3Email({
       email: email,
       template: 'web3_otp',
@@ -30661,7 +30686,7 @@ app.post('/api/web3/signup', async (req, res) => {
       }
     });
 
-    // Send admin notification using sendWeb3AdminNotification
+    // Send admin notification
     await sendWeb3AdminNotification({
       type: 'signup',
       user: {
@@ -30680,6 +30705,7 @@ app.post('/api/web3/signup', async (req, res) => {
       tempToken: tempToken,
       data: {
         user: {
+          userId: mainUser._id,
           web3UserId: newWeb3User._id,
           firstName: firstName,
           lastName: lastName,
@@ -30872,8 +30898,18 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       isNewUser = true;
     }
 
+    // Also update the main User if it exists
+    if (web3User.user) {
+      const mainUser = await User.findById(web3User.user);
+      if (mainUser) {
+        mainUser.isVerified = true;
+        await mainUser.save();
+      }
+    }
+
     const finalToken = jwt.sign(
       { 
+        userId: web3User.user,
         web3UserId: web3User._id,
         walletAddress: web3User.wallets[0]?.address,
         isAdmin: false,
@@ -30928,6 +30964,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       token: finalToken,
       data: {
         user: {
+          userId: web3User.user,
           web3UserId: web3User._id,
           firstName: web3User.firstName,
           lastName: web3User.lastName,
@@ -30993,16 +31030,6 @@ async function sendWeb3AdminNotification(data) {
           ${brandHeader}
           <div style="padding: 30px; background: #FFFFFF;">
             <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-              <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                  <path d="M12 8V12M12 16H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#F7A600" stroke-width="2" fill="none"/>
-                  <circle cx="12" cy="9" r="2.5" stroke="#F7A600" stroke-width="2" fill="none"/>
-                </svg>
-              </div>
               <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW WEB3 USER REGISTERED</h2>
               <p style="color: #065F46; font-size: 13px; margin: 0;">${data.user.name} just joined BitHash Capital via Web3 wallet</p>
             </div>
@@ -31061,16 +31088,6 @@ async function sendWeb3AdminNotification(data) {
           ${brandHeader}
           <div style="padding: 30px; background: #FFFFFF;">
             <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-              <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                  <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#10B981" stroke-width="2" fill="none"/>
-                  <circle cx="12" cy="9" r="2.5" stroke="#10B981" stroke-width="2" fill="none"/>
-                </svg>
-              </div>
               <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WEB3 USER VERIFIED</h2>
               <p style="color: #065F46; font-size: 13px; margin: 0;">${data.user.name} has completed email verification</p>
             </div>
@@ -31269,7 +31286,6 @@ async function sendWeb3Email({ email, template, data }) {
     return false;
   }
 }
-
 
 
 
