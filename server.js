@@ -30268,7 +30268,8 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 // =============================================
-// WEB3 ENDPOINTS - USING EXISTING PATTERNS
+// WEB3 ENDPOINTS - COMPLETE REWRITE
+// MATCHING EXISTING DATABASE SCHEMAS AND SYSTEM PATTERNS
 // =============================================
 
 // =============================================
@@ -30582,7 +30583,7 @@ app.post('/api/web3/signup', async (req, res) => {
 
     const referralCodeGen = generateReferralCode();
 
-    // STEP 1: Create the main User record FIRST
+    // Create main User record FIRST
     const mainUser = await User.create({
       firstName: firstName,
       lastName: lastName,
@@ -30605,7 +30606,7 @@ app.post('/api/web3/signup', async (req, res) => {
       }
     });
 
-    // STEP 2: Create Web3User with the user reference
+    // Create Web3User with user reference
     const newWeb3User = await Web3User.create({
       user: mainUser._id,
       wallets: [{
@@ -30658,20 +30659,20 @@ app.post('/api/web3/signup', async (req, res) => {
       { expiresIn: '1h' }
     );
 
-    // Use existing OTP schema with type 'web3_signup'
+    // Create OTP using valid enum value: 'signup'
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     await OTP.create({
       email: email,
       otp: otp,
-      type: 'web3_signup',
+      type: 'signup',
       expiresAt: expiresAt,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email using sendProfessionalEmail (which already works)
+    // Send OTP email to user using sendProfessionalEmail
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -30682,14 +30683,45 @@ app.post('/api/web3/signup', async (req, res) => {
       }
     });
 
-    // Send admin notification using sendProfessionalEmail with support template
-    await sendProfessionalEmail({
-      email: 'thieretw@gmail.com',
-      template: 'admin_notification',
-      useSupportEmail: true,
-      data: {
-        subject: `NEW WEB3 SIGNUP: ${firstName} ${lastName} joined BitHash Capital`,
-        message: `
+    // Send admin notification using supportTransporter
+    const adminBrandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="BitHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">BitHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+    `;
+
+    const adminBrandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+
+    const adminTimestamp = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+
+    const adminEmailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${adminBrandHeader}
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW WEB3 USER REGISTERED</h2>
+            <p style="color: #065F46; font-size: 13px; margin: 0;">${firstName} ${lastName} joined BitHash Capital via Web3 wallet</p>
+          </div>
+          
           <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
             <table style="width: 100%; border-collapse: collapse;">
               <tr style="border-bottom: 1px solid #E2E8F0;">
@@ -30706,19 +30738,34 @@ app.post('/api/web3/signup', async (req, res) => {
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${(accountType || 'individual').toUpperCase()}</td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: ${accountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${(accountType || 'individual').toUpperCase()}</span></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
                 <td style="padding: 8px 0; text-align: right; font-family: monospace;">${req.ip || 'Unknown'}</td>
               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Registered At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${adminTimestamp}</td>
+              </tr>
             </table>
           </div>
+          
           <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
             <p style="color: #92400E; margin: 0; font-size: 14px;">The user has been sent an OTP for email verification. Once verified, they will have full access to the platform.</p>
           </div>
-        `
-      }
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${adminTimestamp}</p>
+        </div>
+        ${adminBrandFooter}
+      </div>
+    `;
+
+    await supportTransporter.sendMail({
+      from: `BitHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+      to: 'thieretw@gmail.com',
+      subject: `NEW WEB3 SIGNUP: ${firstName} ${lastName} joined BitHash Capital`,
+      html: adminEmailHtml
     });
 
     return res.status(201).json({
@@ -30749,7 +30796,7 @@ app.post('/api/web3/signup', async (req, res) => {
 });
 
 // =============================================
-// 5. POST /api/web3/send-otp - Send OTP for Web3 (FIXED)
+// 5. POST /api/web3/send-otp - Send OTP for Web3
 // =============================================
 app.post('/api/web3/send-otp', async (req, res) => {
   try {
@@ -30780,7 +30827,6 @@ app.post('/api/web3/send-otp', async (req, res) => {
       });
     }
 
-    // Find the Web3 user by email
     const web3User = await Web3User.findOne({ email: email });
     if (!web3User) {
       return res.status(404).json({
@@ -30789,10 +30835,9 @@ app.post('/api/web3/send-otp', async (req, res) => {
       });
     }
 
-    // Rate limiting - check for recent OTP
     const recentOtp = await OTP.findOne({
       email: email,
-      type: { $in: ['web3_signup', 'web3_login'] },
+      type: 'login',
       createdAt: { $gte: new Date(Date.now() - 60 * 1000) },
       used: false
     });
@@ -30810,24 +30855,22 @@ app.post('/api/web3/send-otp', async (req, res) => {
     await OTP.create({
       email: email,
       otp: otp,
-      type: web3User.isEmailVerified ? 'web3_login' : 'web3_signup',
+      type: 'login',
       expiresAt: expiresAt,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email using sendProfessionalEmail (which already works)
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
       data: {
         name: web3User.firstName || 'User',
         otp: otp,
-        action: web3User.isEmailVerified ? 'Web3 login verification' : 'Web3 account verification'
+        action: 'Web3 login verification'
       }
     });
 
-    console.log(`Web3 OTP sent to ${email}`);
     return res.status(200).json({
       status: 'success',
       message: 'OTP sent successfully to your email'
@@ -30882,11 +30925,10 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       });
     }
 
-    // Verify OTP
     const otpRecord = await OTP.findOne({
       email: email,
       otp: otp,
-      type: { $in: ['web3_signup', 'web3_login'] },
+      type: { $in: ['login', 'signup'] },
       used: false,
       expiresAt: { $gt: new Date() }
     });
@@ -30895,7 +30937,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       const expiredOtp = await OTP.findOne({
         email: email,
         otp: otp,
-        type: { $in: ['web3_signup', 'web3_login'] },
+        type: { $in: ['login', 'signup'] },
         used: false,
         expiresAt: { $lte: new Date() }
       });
@@ -30924,7 +30966,6 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       isNewUser = true;
     }
 
-    // Also update the main User if it exists
     if (web3User.user) {
       const mainUser = await User.findById(web3User.user);
       if (mainUser) {
@@ -30948,28 +30989,53 @@ app.post('/api/web3/verify-otp', async (req, res) => {
     web3User.lastLogin = new Date();
     await web3User.save();
 
-    // Send welcome email for new users
     if (isNewUser) {
       await sendProfessionalEmail({
         email: email,
         template: 'welcome',
         data: {
-          name: web3User.firstName || 'User',
-          walletAddress: web3User.wallets && web3User.wallets[0]?.address ? 
-            web3User.wallets[0].address.slice(0, 6) + '...' + web3User.wallets[0].address.slice(-4) : 
-            'Connected',
-          accountType: web3User.accountType || 'individual'
+          name: web3User.firstName || 'User'
         }
       });
 
-      // Send admin notification
-      await sendProfessionalEmail({
-        email: 'thieretw@gmail.com',
-        template: 'admin_notification',
-        useSupportEmail: true,
-        data: {
-          subject: `WEB3 USER VERIFIED: ${web3User.firstName || 'User'} completed verification`,
-          message: `
+      const adminBrandHeader = `
+        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="BitHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">BitHash</h1>
+          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+        </div>
+      `;
+
+      const adminBrandFooter = `
+        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+          </p>
+        </div>
+      `;
+
+      const adminTimestamp = new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZoneName: 'short'
+      });
+
+      const adminEmailHtml = `
+        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+          ${adminBrandHeader}
+          <div style="padding: 30px; background: #FFFFFF;">
+            <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+              <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WEB3 USER VERIFIED</h2>
+              <p style="color: #065F46; font-size: 13px; margin: 0;">${web3User.firstName || 'User'} ${web3User.lastName || ''} completed email verification</p>
+            </div>
+            
             <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
               <table style="width: 100%; border-collapse: collapse;">
                 <tr style="border-bottom: 1px solid #E2E8F0;">
@@ -30986,30 +31052,39 @@ app.post('/api/web3/verify-otp', async (req, res) => {
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${(web3User.accountType || 'individual').toUpperCase()}</td>
+                  <td style="padding: 8px 0; text-align: right;"><span style="background: ${web3User.accountType === 'business' ? '#8B5CF6' : '#10B981'}; color: #FFFFFF; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${(web3User.accountType || 'individual').toUpperCase()}</span></td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Status:</strong></td>
                   <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: #FFFFFF; padding: 2px 10px; border-radius: 20px; font-size: 12px;">VERIFIED</span></td>
                 </tr>
+                <tr style="border-top: 1px solid #E2E8F0;">
+                  <td style="padding: 8px 0;"><strong>Verified At:</strong></td>
+                  <td style="padding: 8px 0; text-align: right;">${adminTimestamp}</td>
+                </tr>
               </table>
             </div>
-          `
-        }
+            
+            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${adminTimestamp}</p>
+          </div>
+          ${adminBrandFooter}
+        </div>
+      `;
+
+      await supportTransporter.sendMail({
+        from: `BitHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+        to: 'thieretw@gmail.com',
+        subject: `WEB3 USER VERIFIED: ${web3User.firstName || 'User'} ${web3User.lastName || ''} completed verification`,
+        html: adminEmailHtml
       });
     }
 
-    // Send login success email for existing users
     if (!isNewUser && web3User.isEmailVerified) {
       await sendProfessionalEmail({
         email: email,
         template: 'login_success',
         data: {
-          name: web3User.firstName || 'User',
-          walletAddress: web3User.wallets && web3User.wallets[0]?.address ? 
-            web3User.wallets[0].address.slice(0, 6) + '...' + web3User.wallets[0].address.slice(-4) : 
-            'Connected',
-          loginTime: new Date().toLocaleString()
+          name: web3User.firstName || 'User'
         }
       });
     }
@@ -31040,7 +31115,6 @@ app.post('/api/web3/verify-otp', async (req, res) => {
     });
   }
 });
-
 
 
 
