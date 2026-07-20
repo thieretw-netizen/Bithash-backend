@@ -30267,22 +30267,12 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
 // =============================================
-// WEB3 ENDPOINTS - EXACTLY WHAT THE HTML REQUESTS
+// WEB3 ENDPOINTS - EXACTLY MATCHING HTML REQUESTS
 // =============================================
 
 // =============================================
-// 1. GET /api/web3/check-user - Check if wallet is registered
+// 1. GET /api/web3/check-user - Check if wallet exists
 // =============================================
 app.get('/api/web3/check-user', async (req, res) => {
   try {
@@ -30297,18 +30287,19 @@ app.get('/api/web3/check-user', async (req, res) => {
 
     const normalizedAddress = walletAddress.toLowerCase();
     
-    // Check in Web3User schema
+    // Check in Web3User schema (your existing schema)
     const web3User = await Web3User.findOne({
       'wallets.address': normalizedAddress
     });
     
-    // Also check in main User schema
+    // Also check in main User schema for users who may have linked wallets
     const mainUser = await User.findOne({
       'web3Auth.wallets': normalizedAddress
     });
 
     const exists = !!(web3User || mainUser);
 
+    // EXACT response format expected by HTML
     res.status(200).json({
       status: 'success',
       data: {
@@ -30326,11 +30317,17 @@ app.get('/api/web3/check-user', async (req, res) => {
 });
 
 // =============================================
-// 2. GET /api/web3/nonce - Generate nonce for wallet authentication
+// 2. GET /api/web3/nonce - Generate nonce
 // =============================================
 app.get('/api/web3/nonce', async (req, res) => {
   try {
-    const { walletAddress, type = 'login', isSignup = false, accountType = 'individual', referralCode = null } = req.query;
+    const { 
+      walletAddress, 
+      type = 'login', 
+      isSignup = false, 
+      accountType = 'individual', 
+      referralCode = null 
+    } = req.query;
 
     if (!walletAddress) {
       return res.status(400).json({
@@ -30343,12 +30340,12 @@ app.get('/api/web3/nonce', async (req, res) => {
     const nonce = generateNonce();
     const timestamp = Date.now();
     
-    // Create the message to be signed
+    // Message format expected by frontend
     const message = `Sign this message to authenticate with BitHash Capital.\n\nWallet: ${normalizedAddress}\nNonce: ${nonce}\nTimestamp: ${timestamp}\n\nThis signature verifies ownership of the wallet and will not cost any gas fees.`;
     
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     
-    // Store nonce in database
+    // Store in your existing Web3Nonce schema
     await Web3Nonce.findOneAndUpdate(
       { walletAddress: normalizedAddress, used: false },
       {
@@ -30367,6 +30364,7 @@ app.get('/api/web3/nonce', async (req, res) => {
       { upsert: true, new: true }
     );
 
+    // EXACT response format expected by HTML
     res.status(200).json({
       status: 'success',
       data: {
@@ -30386,11 +30384,19 @@ app.get('/api/web3/nonce', async (req, res) => {
 });
 
 // =============================================
-// 3. POST /api/web3/verify - Verify wallet signature
+// 3. POST /api/web3/verify - Verify signature
 // =============================================
 app.post('/api/web3/verify', async (req, res) => {
   try {
-    const { walletAddress, signature, nonce, isSignup = false, accountType = 'individual', walletType = 'metamask' } = req.body;
+    const { 
+      walletAddress, 
+      signature, 
+      nonce, 
+      isSignup = false, 
+      accountType = 'individual', 
+      walletType = 'metamask',
+      referralCode = null
+    } = req.body;
 
     if (!walletAddress || !signature || !nonce) {
       return res.status(400).json({
@@ -30401,7 +30407,7 @@ app.post('/api/web3/verify', async (req, res) => {
 
     const normalizedAddress = walletAddress.toLowerCase();
 
-    // Find the nonce record
+    // Find the nonce record from your Web3Nonce schema
     const nonceRecord = await Web3Nonce.findOne({
       walletAddress: normalizedAddress,
       nonce: nonce,
@@ -30416,7 +30422,7 @@ app.post('/api/web3/verify', async (req, res) => {
       });
     }
 
-    // Recover the address from the signature
+    // Recover the address from the signature using ethers
     let recoveredAddress;
     try {
       const recovered = ethers.verifyMessage(nonceRecord.message, signature);
@@ -30452,53 +30458,35 @@ app.post('/api/web3/verify', async (req, res) => {
       { expiresIn: '15m' }
     );
 
-    // Check if user exists
-    const existingUser = await Web3User.findOne({
+    // Check if user exists in Web3User schema
+    const existingWeb3User = await Web3User.findOne({
       'wallets.address': normalizedAddress
     });
 
+    // Check in main User schema
     const existingMainUser = await User.findOne({
       'web3Auth.wallets': normalizedAddress
     });
 
-    const userExists = !!(existingUser || existingMainUser);
-
-    // If login attempt and user doesn't exist
-    if (!isSignup && !userExists) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'No account found for this wallet address. Please sign up first.',
-        data: {
-          action: 'signup_suggested'
-        }
-      });
-    }
-
-    // If signup attempt and user already exists
-    if (isSignup && userExists) {
-      return res.status(409).json({
-        status: 'fail',
-        message: 'A user is already registered with this wallet address. Please login instead.',
-        data: {
-          action: 'login_suggested'
-        }
-      });
-    }
-
-    let needsOtp = false;
+    const userExists = !!(existingWeb3User || existingMainUser);
     let userEmail = null;
     let userId = null;
+    let needsOtp = false;
 
     if (userExists) {
-      const user = existingUser || existingMainUser;
+      const user = existingWeb3User || existingMainUser;
       userEmail = user.email;
       userId = user._id;
       
-      if (!user.email || !user.isEmailVerified) {
-        needsOtp = true;
+      // Check if email is verified
+      if (existingWeb3User) {
+        needsOtp = !existingWeb3User.isEmailVerified;
+      } else if (existingMainUser) {
+        needsOtp = !existingMainUser.isVerified;
       }
     }
 
+    // EXACT response format expected by HTML
     res.status(200).json({
       status: 'success',
       data: {
@@ -30549,6 +30537,7 @@ app.post('/api/web3/signup', async (req, res) => {
       });
     }
 
+    // All fields from the HTML form
     const {
       firstName,
       lastName,
@@ -30564,6 +30553,7 @@ app.post('/api/web3/signup', async (req, res) => {
       referralCode
     } = req.body;
 
+    // Validation matching HTML requirements
     if (!firstName || !lastName || !email || !city) {
       return res.status(400).json({
         status: 'fail',
@@ -30573,48 +30563,53 @@ app.post('/api/web3/signup', async (req, res) => {
 
     const normalizedAddress = walletAddress.toLowerCase();
 
-    // Check if user already exists
-    const existingUser = await Web3User.findOne({
+    // Check if user already exists in Web3User schema
+    const existingWeb3User = await Web3User.findOne({
       'wallets.address': normalizedAddress
     });
 
-    if (existingUser) {
+    if (existingWeb3User) {
       return res.status(409).json({
         status: 'fail',
         message: 'A user is already registered with this wallet address.'
       });
     }
 
-    // Check if email is already used
-    const existingEmail = await Web3User.findOne({ email: email });
-    if (existingEmail) {
+    // Check if email is already used in Web3User
+    const existingEmailWeb3 = await Web3User.findOne({ email: email });
+    if (existingEmailWeb3) {
       return res.status(400).json({
         status: 'fail',
         message: 'This email is already registered.'
       });
     }
 
-    const existingMainEmail = await User.findOne({ email: email });
-    if (existingMainEmail) {
+    // Check if email is used in main User schema
+    const existingEmailMain = await User.findOne({ email: email });
+    if (existingEmailMain) {
       return res.status(400).json({
         status: 'fail',
         message: 'This email is already registered.'
       });
     }
 
-    // Generate referral code
+    // Generate referral code using your existing function
     const referralCodeGen = generateReferralCode();
 
-    // Create Web3 user
+    // Create Web3User using your existing Web3User schema
     const newWeb3User = await Web3User.create({
-      user: null,
+      user: null, // Will link to main user later
       wallets: [{
         address: normalizedAddress,
         type: walletType || 'metamask',
         isPrimary: true,
         isVerified: true,
         connectedAt: new Date(),
-        lastUsed: new Date()
+        lastUsed: new Date(),
+        metadata: {
+          chainId: 1,
+          networkName: 'Ethereum Mainnet'
+        }
       }],
       email: email,
       isEmailVerified: false,
@@ -30631,11 +30626,12 @@ app.post('/api/web3/signup', async (req, res) => {
       signupSource: 'web3_metamask',
       metadata: {
         signupIP: req.ip,
-        signupUserAgent: req.headers['user-agent']
+        signupUserAgent: req.headers['user-agent'],
+        signupLocation: req.clientLocation?.location || 'Unknown'
       }
     });
 
-    // Handle referral
+    // Handle referral if provided
     if (referralCode) {
       const referrer = await Web3User.findOne({ referralCode: referralCode });
       if (referrer) {
@@ -30644,7 +30640,7 @@ app.post('/api/web3/signup', async (req, res) => {
       }
     }
 
-    // Create main User
+    // Create main User record for system compatibility
     const mainUser = await User.create({
       firstName: firstName,
       lastName: lastName,
@@ -30659,19 +30655,14 @@ app.post('/api/web3/signup', async (req, res) => {
       web3Auth: {
         wallets: [normalizedAddress],
         connectedAt: new Date()
-      },
-      balances: {
-        main: new Map(),
-        active: new Map(),
-        matured: new Map()
       }
     });
 
-    // Link users
+    // Link the two users
     newWeb3User.user = mainUser._id;
     await newWeb3User.save();
 
-    // Generate temp token for OTP
+    // Generate temp token for OTP verification
     const tempToken = jwt.sign(
       { 
         id: mainUser._id,
@@ -30682,7 +30673,7 @@ app.post('/api/web3/signup', async (req, res) => {
       { expiresIn: '1h' }
     );
 
-    // Send OTP
+    // Send OTP using your existing OTP schema
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -30695,6 +30686,7 @@ app.post('/api/web3/signup', async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
+    // Send email using your existing sendProfessionalEmail function
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -30705,6 +30697,7 @@ app.post('/api/web3/signup', async (req, res) => {
       }
     });
 
+    // EXACT response format expected by HTML
     res.status(201).json({
       status: 'success',
       message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
@@ -30733,7 +30726,7 @@ app.post('/api/web3/signup', async (req, res) => {
 });
 
 // =============================================
-// 5. POST /api/web3/send-otp - Send OTP for Web3
+// 5. POST /api/web3/send-otp - Send OTP
 // =============================================
 app.post('/api/web3/send-otp', async (req, res) => {
   try {
@@ -30764,6 +30757,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
       });
     }
 
+    // Find the user
     let user = await User.findById(decoded.id);
     if (!user) {
       return res.status(404).json({
@@ -30780,6 +30774,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
       });
     }
 
+    // Generate OTP using your existing OTP schema
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -30792,6 +30787,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
+    // Send email
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -30817,7 +30813,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
 });
 
 // =============================================
-// 6. POST /api/web3/verify-otp - Verify OTP for Web3
+// 6. POST /api/web3/verify-otp - Verify OTP
 // =============================================
 app.post('/api/web3/verify-otp', async (req, res) => {
   try {
@@ -30848,6 +30844,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       });
     }
 
+    // Find the user
     const user = await User.findById(decoded.id);
     if (!user) {
       return res.status(404).json({
@@ -30864,6 +30861,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       });
     }
 
+    // Verify OTP using your existing OTP schema
     const otpRecord = await OTP.findOne({
       email: email,
       otp: otp,
@@ -30878,18 +30876,22 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       });
     }
 
+    // Mark OTP as used
     otpRecord.used = true;
     await otpRecord.save();
 
+    // Verify email if this is a signup
     if (!web3User.isEmailVerified) {
       web3User.isEmailVerified = true;
       web3User.status = 'active';
       await web3User.save();
       
+      // Also update main user
       user.isVerified = true;
       await user.save();
     }
 
+    // Generate final JWT token
     const finalToken = jwt.sign(
       { 
         id: user._id,
@@ -30900,9 +30902,11 @@ app.post('/api/web3/verify-otp', async (req, res) => {
       { expiresIn: '30d' }
     );
 
+    // Update last login
     user.lastLogin = new Date();
     await user.save();
 
+    // EXACT response format expected by HTML
     res.status(200).json({
       status: 'success',
       message: 'Verification successful! Redirecting to dashboard...',
@@ -30927,6 +30931,15 @@ app.post('/api/web3/verify-otp', async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
 
 
 
