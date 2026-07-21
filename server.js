@@ -291,6 +291,35 @@ const UserSchema = new mongoose.Schema({
     address: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' },
     facial: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' }
   },
+
+// Add to your existing UserSchema in server.js
+web3Wallet: {
+    address: { 
+        type: String, 
+        lowercase: true, 
+        index: true,
+        sparse: true 
+    },
+    type: { 
+        type: String, 
+        enum: ['metamask', 'trust', 'phantom', 'rainbow', 'walletconnect', 'coinbase'] 
+    },
+    network: { 
+        type: String,
+        default: '0x1'
+    },
+    linkedAt: { 
+        type: Date 
+    },
+    isVerified: { 
+        type: Boolean, 
+        default: false 
+    },
+    lastBalanceCheck: { 
+        type: Date 
+    }
+}
+	
   kycDocuments: {
     identityFront: { type: String },
     identityBack: { type: String },
@@ -31317,21 +31346,10 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
 }
 
 
-
-
-
-// =============================================
-// WEB3 ENDPOINTS - PRODUCTION GRADE
-// REAL BLOCKCHAIN DATA - NO FAKE DATA
-// RENDER.COM COMPATIBLE - USING ENV VARIABLES
-// =============================================
-
 // =============================================
 // 1. BLOCKCHAIN PROVIDER CONFIGURATION
 // =============================================
 
-const { ethers } = require('ethers');
-const axios = require('axios');
 
 // Initialize providers with RENDER environment variables
 const providers = {
