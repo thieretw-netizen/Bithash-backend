@@ -259,8 +259,18 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s';
 const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083;
 
 const UserSchema = new mongoose.Schema({
-  firstName: { type: String, required: [true, 'First name is required'], trim: true, maxlength: [50, 'First name cannot be longer than 50 characters'] },
-  lastName: { type: String, required: [true, 'Last name is required'], trim: true, maxlength: [50, 'Last name cannot be longer than 50 characters'] },
+  firstName: { 
+    type: String, 
+    required: [true, 'First name is required'], 
+    trim: true, 
+    maxlength: [50, 'First name cannot be longer than 50 characters'] 
+  },
+  lastName: { 
+    type: String, 
+    required: [true, 'Last name is required'], 
+    trim: true, 
+    maxlength: [50, 'Last name cannot be longer than 50 characters'] 
+  },
   email: { 
     type: String, 
     required: [true, 'Email is required'], 
@@ -269,9 +279,19 @@ const UserSchema = new mongoose.Schema({
     validate: [validator.isEmail, 'Please provide a valid email'],
     index: true
   },
-  phone: { type: String, trim: true, validate: [validator.isMobilePhone, 'Please provide a valid phone number'] },
-  country: { type: String, trim: true },
-  city: { type: String, trim: true },
+  phone: { 
+    type: String, 
+    trim: true, 
+    validate: [validator.isMobilePhone, 'Please provide a valid phone number'] 
+  },
+  country: { 
+    type: String, 
+    trim: true 
+  },
+  city: { 
+    type: String, 
+    trim: true 
+  },
   address: {
     street: { type: String, trim: true },
     city: { type: String, trim: true },
@@ -279,47 +299,132 @@ const UserSchema = new mongoose.Schema({
     postalCode: { type: String, trim: true },
     country: { type: String, trim: true }
   },
-  password: { type: String, select: false, minlength: [8, 'Password must be at least 8 characters'] },
+  password: { 
+    type: String, 
+    select: false, 
+    minlength: [8, 'Password must be at least 8 characters'] 
+  },
   passwordChangedAt: Date,
   passwordResetToken: String,
   passwordResetExpires: Date,
-  googleId: { type: String, index: true },
-  isVerified: { type: Boolean, default: false },
-  status: { type: String, enum: ['active','pending_verification', 'suspended', 'banned'], default: 'active', index: true },
-  kycStatus: {
-    identity: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' },
-    address: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' },
-    facial: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' }
+  googleId: { 
+    type: String, 
+    index: true 
   },
-
-// Add to your existing UserSchema in server.js
-web3Wallet: {
+  isVerified: { 
+    type: Boolean, 
+    default: false 
+  },
+  status: { 
+    type: String, 
+    enum: ['active', 'pending_verification', 'suspended', 'banned'], 
+    default: 'active', 
+    index: true 
+  },
+  accountType: {
+    type: String,
+    enum: ['individual', 'business'],
+    default: 'individual'
+  },
+  authProvider: {
+    type: String,
+    enum: ['email', 'google', 'web3', 'apple', 'facebook'],
+    default: 'email'
+  },
+  
+  // =============================================
+  // WEB3 WALLET - PROPERLY INTEGRATED
+  // =============================================
+  web3Wallet: {
     address: { 
-        type: String, 
-        lowercase: true, 
-        index: true,
-        sparse: true 
+      type: String, 
+      lowercase: true, 
+      index: true,
+      sparse: true,
+      trim: true
     },
     type: { 
-        type: String, 
-        enum: ['metamask', 'trust', 'phantom', 'rainbow', 'walletconnect', 'coinbase'] 
+      type: String, 
+      enum: ['metamask', 'trust', 'phantom', 'rainbow', 'walletconnect', 'coinbase'],
+      default: 'metamask'
     },
     network: { 
-        type: String,
-        default: '0x1'
+      type: String,
+      default: '0x1'
+    },
+    chainId: {
+      type: Number,
+      default: 1
+    },
+    networkName: {
+      type: String,
+      default: 'Ethereum Mainnet'
     },
     linkedAt: { 
-        type: Date 
+      type: Date 
     },
     isVerified: { 
-        type: Boolean, 
-        default: false 
+      type: Boolean, 
+      default: false 
     },
     lastBalanceCheck: { 
-        type: Date 
+      type: Date 
+    },
+    metadata: {
+      userAgent: String,
+      ipAddress: String,
+      location: String,
+      signMessage: String
     }
-}
-	
+  },
+
+  // =============================================
+  // WEB3 SESSIONS (for tracking active sessions)
+  // =============================================
+  web3Sessions: [{
+    address: { 
+      type: String, 
+      lowercase: true 
+    },
+    type: {
+      type: String,
+      enum: ['metamask', 'trust', 'phantom', 'rainbow', 'walletconnect', 'coinbase']
+    },
+    network: String,
+    connectedAt: { 
+      type: Date, 
+      default: Date.now 
+    },
+    lastActive: { 
+      type: Date, 
+      default: Date.now 
+    },
+    isActive: {
+      type: Boolean,
+      default: true
+    },
+    ipAddress: String,
+    userAgent: String,
+    location: String
+  }],
+
+  kycStatus: {
+    identity: { 
+      type: String, 
+      enum: ['pending', 'verified', 'rejected', 'not-submitted'], 
+      default: 'not-submitted' 
+    },
+    address: { 
+      type: String, 
+      enum: ['pending', 'verified', 'rejected', 'not-submitted'], 
+      default: 'not-submitted' 
+    },
+    facial: { 
+      type: String, 
+      enum: ['pending', 'verified', 'rejected', 'not-submitted'], 
+      default: 'not-submitted' 
+    }
+  },
   kycDocuments: {
     identityFront: { type: String },
     identityBack: { type: String },
@@ -330,8 +435,16 @@ web3Wallet: {
     enabled: { type: Boolean, default: false },
     secret: { type: String, select: false }
   },
-  referralCode: { type: String, unique: true, index: true },
-  referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+  referralCode: { 
+    type: String, 
+    unique: true, 
+    index: true 
+  },
+  referredBy: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    index: true 
+  },
   apiKeys: [{
     name: { type: String, required: true },
     key: { type: String, required: true, select: false },
@@ -353,14 +466,16 @@ web3Wallet: {
     isRead: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now }
   }],
-	
   preferences: {
     notifications: {
       email: { type: Boolean, default: true },
       sms: { type: Boolean, default: false },
       push: { type: Boolean, default: true }
     },
-    theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
+    language: { type: String, default: 'en' },
+    currency: { type: String, default: 'USD' },
+    displayAsset: { type: String, default: 'btc' }
   },
   location: {
     lastKnown: {
@@ -391,7 +506,11 @@ web3Wallet: {
     }]
   },
   cookiePreferences: {
-    consent: { type: String, enum: ['all', 'essential', 'functional', 'analytics', 'custom', 'reject'], default: 'essential' },
+    consent: { 
+      type: String, 
+      enum: ['all', 'essential', 'functional', 'analytics', 'custom', 'reject'], 
+      default: 'essential' 
+    },
     settings: {
       essential: { type: Boolean, default: true },
       functional: { type: Boolean, default: false },
@@ -424,18 +543,11 @@ web3Wallet: {
       of: Number,
       default: new Map()
     }
-  }
-}, { 
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
-});
-
-UserSchema.virtual('fullName').get(function() {
-  return `${this.firstName} ${this.lastName}`;
-});
-
-UserSchema.add({
+  },
+  
+  // =============================================
+  // REFERRAL STATS
+  // =============================================
   referralStats: {
     totalReferrals: { type: Number, default: 0 },
     totalEarnings: { type: Number, default: 0 },
@@ -450,24 +562,195 @@ UserSchema.add({
     level: Number,
     date: { type: Date, default: Date.now },
     status: { type: String, enum: ['pending', 'available', 'withdrawn'], default: 'pending' }
-  }]
-});
-
-UserSchema.add({
+  }],
+  
+  // =============================================
+  // DOWNLINE STATS
+  // =============================================
   downlineStats: {
     totalDownlines: { type: Number, default: 0 },
     activeDownlines: { type: Number, default: 0 },
     totalCommissionEarned: { type: Number, default: 0 },
     thisMonthCommission: { type: Number, default: 0 }
   }
+
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
+// =============================================
+// VIRTUALS
+// =============================================
+UserSchema.virtual('fullName').get(function() {
+  return `${this.firstName} ${this.lastName}`;
+});
+
+UserSchema.virtual('hasWeb3Wallet').get(function() {
+  return !!(this.web3Wallet && this.web3Wallet.address);
+});
+
+UserSchema.virtual('isWeb3User').get(function() {
+  return this.authProvider === 'web3';
+});
+
+UserSchema.virtual('walletDisplay').get(function() {
+  if (!this.web3Wallet || !this.web3Wallet.address) return null;
+  const address = this.web3Wallet.address;
+  return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+});
+
+// =============================================
+// INDEXES
+// =============================================
 UserSchema.index({ email: 1 });
 UserSchema.index({ status: 1 });
 UserSchema.index({ 'kycStatus.identity': 1, 'kycStatus.address': 1, 'kycStatus.facial': 1 });
 UserSchema.index({ referredBy: 1 });
 UserSchema.index({ createdAt: -1 });
+UserSchema.index({ 'web3Wallet.address': 1 });
+UserSchema.index({ authProvider: 1 });
+UserSchema.index({ accountType: 1 });
 
+// =============================================
+// PRE-SAVE HOOKS
+// =============================================
+UserSchema.pre('save', function(next) {
+  // Generate referral code if not exists
+  if (!this.referralCode) {
+    this.referralCode = generateReferralCode();
+  }
+  next();
+});
+
+// =============================================
+// METHODS
+// =============================================
+
+// Add web3 wallet method
+UserSchema.methods.linkWeb3Wallet = function(address, type, network, metadata = {}) {
+  this.web3Wallet = {
+    address: address.toLowerCase(),
+    type: type || 'metamask',
+    network: network || '0x1',
+    chainId: parseInt(network) || 1,
+    networkName: this.getNetworkName(network),
+    linkedAt: new Date(),
+    isVerified: true,
+    lastBalanceCheck: new Date(),
+    metadata: {
+      userAgent: metadata.userAgent || '',
+      ipAddress: metadata.ipAddress || '',
+      location: metadata.location || '',
+      signMessage: metadata.signMessage || ''
+    }
+  };
+
+  // Add to web3 sessions
+  if (!this.web3Sessions) this.web3Sessions = [];
+  this.web3Sessions.push({
+    address: address.toLowerCase(),
+    type: type || 'metamask',
+    network: network || '0x1',
+    connectedAt: new Date(),
+    lastActive: new Date(),
+    isActive: true,
+    ipAddress: metadata.ipAddress || '',
+    userAgent: metadata.userAgent || '',
+    location: metadata.location || ''
+  });
+
+  // Update auth provider
+  this.authProvider = 'web3';
+
+  return this;
+};
+
+// Unlink web3 wallet method
+UserSchema.methods.unlinkWeb3Wallet = function() {
+  const address = this.web3Wallet?.address;
+  
+  // Remove web3 wallet
+  this.web3Wallet = undefined;
+  
+  // Deactivate web3 sessions
+  if (this.web3Sessions) {
+    this.web3Sessions = this.web3Sessions.map(session => {
+      if (session.address === address) {
+        session.isActive = false;
+      }
+      return session;
+    });
+  }
+
+  // Reset auth provider if no other providers
+  if (!this.googleId && this.authProvider === 'web3') {
+    this.authProvider = 'email';
+  }
+
+  return this;
+};
+
+// Get network name from chain ID
+UserSchema.methods.getNetworkName = function(chainId) {
+  const networks = {
+    '0x1': 'Ethereum Mainnet',
+    '0x38': 'BNB Smart Chain',
+    '0x89': 'Polygon Mainnet',
+    '0xa4b1': 'Arbitrum One',
+    '0x2105': 'Base',
+    '0xfa': 'Fantom Opera',
+    '0xa': 'Optimism',
+    '0xa86a': 'Avalanche C-Chain'
+  };
+  return networks[chainId] || 'Unknown Network';
+};
+
+// Check if wallet is active
+UserSchema.methods.isWalletActive = function() {
+  if (!this.web3Sessions) return false;
+  const activeSession = this.web3Sessions.find(
+    session => session.address === this.web3Wallet?.address && session.isActive
+  );
+  return !!activeSession;
+};
+
+// Update last balance check
+UserSchema.methods.updateWalletBalanceCheck = function() {
+  if (this.web3Wallet) {
+    this.web3Wallet.lastBalanceCheck = new Date();
+  }
+  return this;
+};
+
+// =============================================
+// STATIC METHODS
+// =============================================
+
+// Find user by web3 wallet address
+UserSchema.statics.findByWeb3Wallet = function(address) {
+  return this.findOne({ 'web3Wallet.address': address.toLowerCase() });
+};
+
+// Find users with active web3 wallets
+UserSchema.statics.findActiveWeb3Users = function() {
+  return this.find({ 
+    'web3Wallet.address': { $exists: true, $ne: null },
+    status: 'active'
+  });
+};
+
+// Count web3 users
+UserSchema.statics.countWeb3Users = function() {
+  return this.countDocuments({
+    'web3Wallet.address': { $exists: true, $ne: null }
+  });
+};
+
+// =============================================
+// COMPILE MODEL
+// =============================================
 const User = mongoose.model('User', UserSchema);
 
 const TranslationSchema = new mongoose.Schema({
