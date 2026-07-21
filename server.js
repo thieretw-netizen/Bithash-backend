@@ -32568,11 +32568,6 @@ async function sendAdminDepositNotification(user, transaction, deposit, req) {
 
 
 
-
-
-
-
-
 // =============================================
 // ERROR HANDLING MIDDLEWARE
 // =============================================
@@ -32833,7 +32828,6 @@ const setupMarketWebSocket = (server) => {
 
   const broadcastRealPrices = async () => {
     try {
-      // Fetch REAL prices from CoinGecko - NO fake fallbacks
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
       
@@ -32882,7 +32876,6 @@ const setupMarketWebSocket = (server) => {
         
         console.log(`📡 Broadcasted REAL prices for ${updates.length} assets to ${clients.size} clients`);
       } else if (clients.size > 0) {
-        // Send error (NO fake data)
         const errorMessage = JSON.stringify({
           type: 'error',
           message: 'Unable to fetch real-time prices. Please refresh.',
@@ -32898,7 +32891,6 @@ const setupMarketWebSocket = (server) => {
     } catch (error) {
       console.error('WebSocket price broadcast error:', error);
       
-      // Send error to clients instead of fake data
       const errorMessage = JSON.stringify({
         type: 'error',
         message: error.code === 'ECONNABORTED' ? 'Price service timeout. Please try again.' : 'Unable to fetch real-time prices.',
@@ -32917,7 +32909,6 @@ const setupMarketWebSocket = (server) => {
     clients.add(ws);
     console.log(`Market WebSocket client connected. Total: ${clients.size}`);
 
-    // Send REAL initial data (NO fake fallbacks)
     try {
       const realAssets = await fetchMarketData();
       if (realAssets && realAssets.length > 0) {
@@ -32972,7 +32963,6 @@ async function buildRealAssetData(user, userId) {
   const maturedHoldings = new Map();
   const priceErrors = [];
   
-  // Collect from MAIN wallet (exclude stored USD)
   if (user.balances && user.balances.main) {
     for (const [asset, balance] of user.balances.main.entries()) {
       if (balance > 0 && asset !== 'usd') {
@@ -32981,7 +32971,6 @@ async function buildRealAssetData(user, userId) {
     }
   }
   
-  // Collect from MATURED wallet (exclude stored USD)
   if (user.balances && user.balances.matured) {
     for (const [asset, balance] of user.balances.matured.entries()) {
       if (balance > 0 && asset !== 'usd') {
@@ -32990,10 +32979,8 @@ async function buildRealAssetData(user, userId) {
     }
   }
   
-  // Get all unique assets from both wallets
   const allAssets = new Set([...mainHoldings.keys(), ...maturedHoldings.keys()]);
   
-  // Get REAL buy transactions from database
   const buyTransactions = await Transaction.find({
     user: userId,
     type: 'buy',
@@ -33006,7 +32993,6 @@ async function buildRealAssetData(user, userId) {
     const totalBalance = mainBalance + maturedBalance;
     
     if (totalBalance > 0) {
-      // Fetch REAL current price (NO fake fallback)
       const price = await getCryptoPrice(asset.toUpperCase());
       
       if (!price || price <= 0) {
@@ -33018,7 +33004,6 @@ async function buildRealAssetData(user, userId) {
       const maturedValue = maturedBalance * price;
       const currentValue = totalBalance * price;
       
-      // Calculate REAL average buy price from actual transactions
       const assetBuys = buyTransactions.filter(tx => {
         const txAsset = (tx.asset || tx.buyDetails?.asset || '').toLowerCase();
         return txAsset === asset;
@@ -33073,7 +33058,6 @@ async function calculateRealWalletBalances(user) {
   const mainBreakdown = [];
   const maturedBreakdown = [];
   
-  // Calculate MAIN wallet from REAL crypto balances only
   if (user.balances && user.balances.main) {
     for (const [asset, balance] of user.balances.main.entries()) {
       if (balance > 0 && asset !== 'usd') {
@@ -33089,7 +33073,6 @@ async function calculateRealWalletBalances(user) {
     }
   }
   
-  // Calculate ACTIVE wallet (FIXED values - stored directly, no price calculation)
   if (user.balances && user.balances.active) {
     for (const [asset, balance] of user.balances.active.entries()) {
       if (balance > 0) {
@@ -33102,7 +33085,6 @@ async function calculateRealWalletBalances(user) {
     }
   }
   
-  // Calculate MATURED wallet from REAL crypto balances only
   if (user.balances && user.balances.matured) {
     for (const [asset, balance] of user.balances.matured.entries()) {
       if (balance > 0 && asset !== 'usd') {
@@ -33122,7 +33104,7 @@ async function calculateRealWalletBalances(user) {
 }
 
 // =============================================
-// SOCKET.IO CONNECTION HANDLER - REAL DATA ONLY WITH PER-WALLET BREAKDOWN
+// SOCKET.IO CONNECTION HANDLER - REAL DATA ONLY
 // =============================================
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
@@ -33140,10 +33122,8 @@ io.on('connection', async (socket) => {
         
         const user = await User.findById(userId).select('balances');
         if (user) {
-          // Calculate REAL balances with breakdown
           const { mainUSD, activeUSD, maturedUSD, priceErrors, mainBreakdown, maturedBreakdown } = await calculateRealWalletBalances(user);
           
-          // If any price fetch failed, send error (NO fake data)
           if (priceErrors.length > 0) {
             socket.emit('error', {
               type: 'price_fetch_failed',
@@ -33154,7 +33134,6 @@ io.on('connection', async (socket) => {
             return;
           }
           
-          // Send REAL balance update with per-wallet breakdown
           socket.emit('balance_update', {
             main: mainUSD,
             active: activeUSD,
@@ -33170,14 +33149,12 @@ io.on('connection', async (socket) => {
           console.log(`   MAIN breakdown: ${mainBreakdown.map(a => `${a.balance} ${a.asset.toUpperCase()}`).join(', ')}`);
           console.log(`   MATURED breakdown: ${maturedBreakdown.map(a => `${a.balance} ${a.asset.toUpperCase()}`).join(', ')}`);
           
-          // Build and send REAL asset data with per-wallet breakdown
           const assetData = await buildRealAssetData(user, userId);
           if (assetData.length > 0 || priceErrors.length === 0) {
             socket.emit('asset_balances_update', assetData);
           }
         }
         
-        // Send user preferences
         const userPref = await UserPreference.findOne({ user: userId });
         if (userPref) {
           socket.emit('preferences_update', {
@@ -33193,7 +33170,6 @@ io.on('connection', async (socket) => {
     }
   }
   
-  // Send investor stats
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
   console.log(`📡 Sent stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
@@ -33219,7 +33195,6 @@ io.on('connection', async (socket) => {
     }
   });
   
-  // Handle refresh_pnl with real data
   socket.on('refresh_pnl', async () => {
     if (userId) {
       const user = await User.findById(userId).select('balances');
@@ -33233,7 +33208,6 @@ io.on('connection', async (socket) => {
             if (currentPrice && currentPrice > 0) {
               totalMainValue += balance * currentPrice;
               
-              // Get 24h change from API
               let change24h = 0;
               try {
                 const assetUpper = asset.toUpperCase();
@@ -33265,6 +33239,57 @@ io.on('connection', async (socket) => {
         timestamp: Date.now()
       });
     }
+  });
+
+  // =============================================
+  // WEB3 WALLET BALANCES - REAL BLOCKCHAIN DATA
+  // =============================================
+  socket.on('subscribe_wallet_balances', async (walletAddress) => {
+    if (!walletAddress) {
+      socket.emit('wallet_error', { message: 'Wallet address is required' });
+      return;
+    }
+
+    const token = socket.handshake.auth.token;
+    if (token) {
+      try {
+        const decoded = verifyJWT(token);
+        const user = await User.findById(decoded.id);
+        if (!user || !user.web3Wallet || user.web3Wallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
+          socket.emit('wallet_error', { message: 'Unauthorized wallet address' });
+          return;
+        }
+      } catch (err) {
+        socket.emit('wallet_error', { message: 'Authentication required' });
+        return;
+      }
+    }
+
+    socket.join(`wallet_${walletAddress.toLowerCase()}`);
+    console.log(`Client subscribed to wallet: ${walletAddress}`);
+
+    const interval = setInterval(async () => {
+      try {
+        const balances = await fetchWalletBalancesFromBlockchain(walletAddress, '0x1');
+        socket.emit('wallet_balance_update', {
+          walletAddress: walletAddress,
+          balances: balances,
+          timestamp: Date.now()
+        });
+      } catch (err) {
+        console.error('Error fetching wallet balances:', err);
+        socket.emit('wallet_error', { message: 'Failed to fetch balances' });
+      }
+    }, 30000);
+
+    socket.on('disconnect', () => {
+      clearInterval(interval);
+    });
+
+    socket.on('unsubscribe_wallet', () => {
+      clearInterval(interval);
+      socket.leave(`wallet_${walletAddress.toLowerCase()}`);
+    });
   });
 
   socket.on('disconnect', () => {
@@ -33306,7 +33331,6 @@ const startRealTimeBalanceBroadcaster = () => {
   
   balanceBroadcastInterval = setInterval(async () => {
     try {
-      // Get all users with active socket connections
       const rooms = io.sockets.adapter.rooms;
       const userRooms = [];
       
@@ -33319,7 +33343,6 @@ const startRealTimeBalanceBroadcaster = () => {
       
       if (userRooms.length === 0) return;
       
-      // Fetch and broadcast updated balances for each connected user
       for (const userId of userRooms) {
         try {
           const user = await User.findById(userId).select('balances');
@@ -33339,7 +33362,6 @@ const startRealTimeBalanceBroadcaster = () => {
               timestamp: Date.now()
             });
             
-            // Also send asset balances update
             const assetData = await buildRealAssetData(user, userId);
             if (assetData.length > 0) {
               io.to(`user_${userId}`).emit('asset_balances_update', assetData);
@@ -33388,7 +33410,6 @@ const startRealTimePriceBroadcaster = () => {
         io.emit('price_update', priceUpdates);
         console.log(`📊 Broadcasted real-time price updates for ${Object.keys(priceUpdates).length} assets`);
         
-        // Store current prices globally
         for (const [asset, data] of Object.entries(priceUpdates)) {
           if (!currentPrices[asset]) currentPrices[asset] = {};
           currentPrices[asset].usd = data.price;
@@ -33491,7 +33512,6 @@ const processMaturedInvestments = async () => {
           netAmount: totalReturn - investment.amount
         });
         
-        // Emit real-time update with per-wallet breakdown
         const { mainUSD, activeUSD, maturedUSD, mainBreakdown, maturedBreakdown } = await calculateRealWalletBalances(user);
         
         io.to(`user_${user._id}`).emit('balance_update', {
@@ -33516,57 +33536,6 @@ const processMaturedInvestments = async () => {
   }
 };
 
-
-// Add this INSIDE your existing io.on('connection') handler
-socket.on('subscribe_wallet_balances', async (walletAddress) => {
-    if (!walletAddress) {
-        socket.emit('wallet_error', { message: 'Wallet address is required' });
-        return;
-    }
-
-    const token = socket.handshake.auth.token;
-    if (token) {
-        try {
-            const decoded = verifyJWT(token);
-            const user = await User.findById(decoded.id);
-            if (!user || !user.web3Wallet || user.web3Wallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
-                socket.emit('wallet_error', { message: 'Unauthorized wallet address' });
-                return;
-            }
-        } catch (err) {
-            socket.emit('wallet_error', { message: 'Authentication required' });
-            return;
-        }
-    }
-
-    socket.join(`wallet_${walletAddress.toLowerCase()}`);
-    console.log(`Client subscribed to wallet: ${walletAddress}`);
-
-    const interval = setInterval(async () => {
-        try {
-            const balances = await fetchWalletBalancesFromBlockchain(walletAddress, '0x1');
-            socket.emit('wallet_balance_update', {
-                walletAddress: walletAddress,
-                balances: balances,
-                timestamp: Date.now()
-            });
-        } catch (err) {
-            console.error('Error fetching wallet balances:', err);
-            socket.emit('wallet_error', { message: 'Failed to fetch balances' });
-        }
-    }, 30000);
-
-    socket.on('disconnect', () => {
-        clearInterval(interval);
-    });
-
-    socket.on('unsubscribe_wallet', () => {
-        clearInterval(interval);
-        socket.leave(`wallet_${walletAddress.toLowerCase()}`);
-    });
-});
-
-
 // =============================================
 // START ALL REAL-TIME SERVICES
 // =============================================
@@ -33584,7 +33553,7 @@ startRealTimeBalanceBroadcaster();
 // Start real-time price broadcaster
 startRealTimePriceBroadcaster();
 
-startPnLCronJob(io);  // ✅ ADD THIS LINE
+startPnLCronJob(io);
 
 // =============================================
 // GRACEFUL SHUTDOWN
