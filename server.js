@@ -31629,26 +31629,16 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
 }
 
 
-// =============================================
-// 1. BLOCKCHAIN PROVIDER CONFIGURATION
-// =============================================
 
 
-// Initialize providers with RENDER environment variables
-const providers = {
-    ethereum: new ethers.JsonRpcProvider(process.env.ETHEREUM_RPC_URL),
-    bsc: new ethers.JsonRpcProvider(process.env.BSC_RPC_URL),
-    polygon: new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL),
-    arbitrum: new ethers.JsonRpcProvider(process.env.ARBITRUM_RPC_URL),
-    avalanche: new ethers.JsonRpcProvider(process.env.AVALANCHE_RPC_URL),
-    fantom: new ethers.JsonRpcProvider(process.env.FANTOM_RPC_URL),
-    optimism: new ethers.JsonRpcProvider(process.env.OPTIMISM_RPC_URL),
-    base: new ethers.JsonRpcProvider(process.env.BASE_RPC_URL),
-    solana: process.env.SOLANA_RPC_URL
-};
 
 // =============================================
-// 2. TOKEN CONTRACT ADDRESSES - REAL MAINNET
+// WEB3 ENDPOINTS - ONLY MISSING ENDPOINTS
+// NO DUPLICATION - READY TO PASTE
+// =============================================
+
+// =============================================
+// 1. TOKEN ADDRESSES CONFIGURATION
 // =============================================
 
 const TOKEN_ADDRESSES = {
@@ -31659,67 +31649,24 @@ const TOKEN_ADDRESSES = {
         LINK: '0x514910771AF9Ca656af840dff83E8264EcF986CA',
         UNI: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',
         SHIB: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE',
-        MATIC: '0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0',
-        AAVE: '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9',
-        CRV: '0xD533a949740bb3306d119CC777fa900bA034cd52',
-        MKR: '0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2'
+        MATIC: '0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0'
     },
     bsc: {
         USDT: '0x55d398326f99059fF775485246999027B3197955',
         USDC: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
         BUSD: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56',
-        WBNB: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
-        CAKE: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82',
-        XRP: '0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE',
-        DOGE: '0xbA2aE424d960c26247Dd6c32edC70B295c744C43'
+        WBNB: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'
     },
     polygon: {
         USDT: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
         USDC: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
         WMATIC: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
-        WBTC: '0x1bfd67037b42cf73acF2047067bd4F2C47D9BfD6',
-        LINK: '0x53E0bca35eC356BD5ddDFebbD1Fc0fD03FaBad39'
-    },
-    arbitrum: {
-        USDT: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
-        USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-        WBTC: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
-        LINK: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4',
-        UNI: '0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0'
-    },
-    avalanche: {
-        USDT: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7',
-        USDC: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
-        WAVAX: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7',
-        WBTC: '0x50b7545627a5162F82A992c33b87aDc75187B218',
-        LINK: '0x5947BB275c521040051D82396192181b413227A3'
+        WBTC: '0x1bfd67037b42cf73acF2047067bd4F2C47D9BfD6'
     }
 };
 
 // =============================================
-// 3. DEPOSIT ADDRESSES - REAL WALLETS
-// =============================================
-
-const DEPOSIT_ADDRESSES = {
-    'btc': '13KMyC5gMMYs85i1vat1HX9saYcNrQ17ru',
-    'eth': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-    'usdt': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-    'bnb': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-    'sol': 'EETt21sq7G4BM6g5e5wuUBGPNJvpmfUxCK8Bs1T1NzJw',
-    'usdc': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-    'xrp': 'rexV2DWLYpzqoFd3DtVXmcFSseaoLmT7Z',
-    'doge': 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW',
-    'shib': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-    'ltc': 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg',
-    'trx': 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t',
-    'link': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-    'uni': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-    'matic': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-    'wbtc': '0x4e39dBAC4647B9C462F143De8657494874c1400F'
-};
-
-// =============================================
-// 4. NETWORK MAPPING
+// 2. NETWORK MAPPING
 // =============================================
 
 const NETWORK_MAP = {
@@ -31744,26 +31691,30 @@ const NETWORK_NAMES = {
     '0xa86a': 'Avalanche C-Chain'
 };
 
-const ASSET_NETWORK_MAP = {
-    'btc': { network: 'Bitcoin', deposit: '13KMyC5gMMYs85i1vat1HX9saYcNrQ17ru' },
-    'eth': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
-    'usdt': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
-    'usdc': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
-    'bnb': { network: 'BNB Smart Chain', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
-    'sol': { network: 'Solana', deposit: 'EETt21sq7G4BM6g5e5wuUBGPNJvpmfUxCK8Bs1T1NzJw' },
-    'xrp': { network: 'XRP Ledger', deposit: 'rexV2DWLYpzqoFd3DtVXmcFSseaoLmT7Z' },
-    'doge': { network: 'Dogecoin', deposit: 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW' },
-    'shib': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
-    'ltc': { network: 'Litecoin', deposit: 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg' },
-    'trx': { network: 'TRON', deposit: 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t' },
-    'link': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
-    'uni': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
-    'matic': { network: 'Polygon', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
-    'wbtc': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' }
+// =============================================
+// 3. DEPOSIT ADDRESSES - Using existing addresses from server.js
+// =============================================
+
+const DEPOSIT_ADDRESSES = {
+    'btc': '13KMyC5gMMYs85i1vat1HX9saYcNrQ17ru',
+    'eth': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'usdt': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'bnb': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'sol': 'EETt21sq7G4BM6g5e5wuUBGPNJvpmfUxCK8Bs1T1NzJw',
+    'usdc': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'xrp': 'rexV2DWLYpzqoFd3DtVXmcFSseaoLmT7Z',
+    'doge': 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW',
+    'shib': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'ltc': 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg',
+    'trx': 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t',
+    'link': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'uni': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'matic': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'wbtc': '0x4e39dBAC4647B9C462F143De8657494874c1400F'
 };
 
 // =============================================
-// 5. WALLET LINK ENDPOINT
+// 4. WALLET LINK ENDPOINT
 // =============================================
 app.post('/api/users/link-wallet', protect, async (req, res) => {
     try {
@@ -31807,7 +31758,6 @@ app.post('/api/users/link-wallet', protect, async (req, res) => {
             });
         }
 
-        // Update user with web3Wallet
         user.web3Wallet = {
             address: normalizedAddress,
             type: walletType,
@@ -31818,34 +31768,6 @@ app.post('/api/users/link-wallet', protect, async (req, res) => {
         };
 
         await user.save();
-
-        // Create or update Web3User
-        let web3User = await Web3User.findOne({ user: userId });
-        if (!web3User) {
-            web3User = new Web3User({
-                user: userId,
-                wallets: [{
-                    address: normalizedAddress,
-                    type: walletType,
-                    isPrimary: true,
-                    isVerified: true,
-                    connectedAt: new Date(),
-                    lastUsed: new Date(),
-                    metadata: {
-                        chainId: parseInt(network) || 1,
-                        networkName: NETWORK_NAMES[network] || 'Unknown Network',
-                        userAgent: req.headers['user-agent'],
-                        ipAddress: getRealClientIP(req)
-                    }
-                }],
-                email: user.email,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                status: 'active',
-                isEmailVerified: user.isVerified || false
-            });
-            await web3User.save();
-        }
 
         await logActivity(
             'wallet_linked',
@@ -31884,7 +31806,7 @@ app.post('/api/users/link-wallet', protect, async (req, res) => {
 });
 
 // =============================================
-// 6. UNLINK WALLET ENDPOINT
+// 5. UNLINK WALLET ENDPOINT
 // =============================================
 app.delete('/api/users/unlink-wallet', protect, async (req, res) => {
     try {
@@ -31909,11 +31831,6 @@ app.delete('/api/users/unlink-wallet', protect, async (req, res) => {
 
         user.web3Wallet = undefined;
         await user.save();
-
-        await Web3User.findOneAndUpdate(
-            { user: userId },
-            { $pull: { wallets: { address: walletAddress } } }
-        );
 
         await logActivity(
             'wallet_unlinked',
@@ -31940,7 +31857,7 @@ app.delete('/api/users/unlink-wallet', protect, async (req, res) => {
 });
 
 // =============================================
-// 7. GET WALLET STATUS
+// 6. GET WALLET STATUS
 // =============================================
 app.get('/api/users/wallet-status', protect, async (req, res) => {
     try {
@@ -31979,6 +31896,52 @@ app.get('/api/users/wallet-status', protect, async (req, res) => {
 });
 
 // =============================================
+// 7. GET DEPOSIT ADDRESS
+// =============================================
+app.get('/api/deposit/address/:asset', protect, async (req, res) => {
+    try {
+        const { asset } = req.params;
+        const assetLower = asset.toLowerCase();
+
+        let depositAddress = DEPOSIT_ADDRESSES[assetLower];
+        let networkName = 'Ethereum';
+
+        if (!depositAddress) {
+            const erc20Tokens = ['eth', 'usdt', 'usdc', 'shib', 'link', 'uni', 'wbtc', 'matic'];
+            if (erc20Tokens.includes(assetLower)) {
+                depositAddress = DEPOSIT_ADDRESSES['eth'];
+                networkName = 'Ethereum (ERC20)';
+            } else {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: `Unsupported asset: ${asset}`
+                });
+            }
+        }
+
+        const price = await getCryptoPrice(asset);
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                address: depositAddress,
+                network: networkName,
+                asset: assetLower,
+                price: price || 0,
+                minDeposit: 50
+            }
+        });
+
+    } catch (err) {
+        console.error('Get deposit address error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to get deposit address'
+        });
+    }
+});
+
+// =============================================
 // 8. WEB3 DEPOSIT - TRIGGERS BLOCKCHAIN TRANSACTION
 // =============================================
 app.post('/api/deposit/web3', protect, async (req, res) => {
@@ -32008,7 +31971,6 @@ app.post('/api/deposit/web3', protect, async (req, res) => {
             });
         }
 
-        // Get current price using existing getCryptoPrice function
         const currentPrice = await getCryptoPrice(asset);
         if (!currentPrice || currentPrice <= 0) {
             return res.status(503).json({
@@ -32020,10 +31982,9 @@ app.post('/api/deposit/web3', protect, async (req, res) => {
         const usdValue = amount * currentPrice;
         const assetLower = asset.toLowerCase();
 
-        // Get deposit address - if asset not found, use ETH address for ERC20 tokens
         let depositAddress = DEPOSIT_ADDRESSES[assetLower];
         if (!depositAddress) {
-            const erc20Tokens = ['eth', 'usdt', 'usdc', 'shib', 'link', 'uni', 'wbtc', 'matic', 'aave', 'crv', 'mkr'];
+            const erc20Tokens = ['eth', 'usdt', 'usdc', 'shib', 'link', 'uni', 'wbtc', 'matic'];
             if (erc20Tokens.includes(assetLower)) {
                 depositAddress = DEPOSIT_ADDRESSES['eth'];
             } else {
@@ -32034,11 +31995,9 @@ app.post('/api/deposit/web3', protect, async (req, res) => {
             }
         }
 
-        const networkName = ASSET_NETWORK_MAP[assetLower]?.network || 'Ethereum';
-
+        const networkName = 'Ethereum';
         const reference = `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
-        // Create transaction record
         const transaction = await Transaction.create({
             user: userId,
             type: 'deposit',
@@ -32066,7 +32025,6 @@ app.post('/api/deposit/web3', protect, async (req, res) => {
             exchangeRateAtTime: currentPrice
         });
 
-        // Create deposit asset record
         await DepositAsset.create({
             user: userId,
             asset: assetLower,
@@ -32084,49 +32042,33 @@ app.post('/api/deposit/web3', protect, async (req, res) => {
             }
         });
 
-        // Build transaction data for wallet signing
         let txData = {
             to: depositAddress,
             value: '0x0',
             data: '0x'
         };
 
-        // For ETH and BNB (native tokens), set value
-        if (assetLower === 'eth' || assetLower === 'bnb') {
-            const amountInWei = ethers.parseEther(amount.toString());
-            txData.value = amountInWei.toString();
-        } else if (assetLower === 'matic') {
+        if (assetLower === 'eth' || assetLower === 'bnb' || assetLower === 'matic') {
             const amountInWei = ethers.parseEther(amount.toString());
             txData.value = amountInWei.toString();
         } else if (assetLower === 'sol') {
-            // Solana transactions are handled differently
             txData = {
                 to: depositAddress,
                 value: (amount * 1e9).toString(),
                 type: 'solana'
             };
         } else {
-            // For ERC20/BEP20 tokens, encode transfer function
-            const tokenABI = [
-                'function transfer(address to, uint256 amount) public returns (bool)'
-            ];
-            
+            const tokenABI = ['function transfer(address to, uint256 amount) public returns (bool)'];
             let provider;
             if (assetLower === 'bnb') {
-                provider = providers.bsc;
+                provider = new ethers.JsonRpcProvider(process.env.BSC_RPC_URL);
             } else if (assetLower === 'matic') {
-                provider = providers.polygon;
+                provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
             } else {
-                provider = providers.ethereum;
+                provider = new ethers.JsonRpcProvider(process.env.ETHEREUM_RPC_URL);
             }
 
-            const tokenContract = new ethers.Contract(
-                depositAddress,
-                tokenABI,
-                provider
-            );
-
-            // Get token decimals
+            const tokenContract = new ethers.Contract(depositAddress, tokenABI, provider);
             let decimals = 18;
             try {
                 const tokenInfo = await getTokenInfo(assetLower);
@@ -32140,7 +32082,6 @@ app.post('/api/deposit/web3', protect, async (req, res) => {
                 depositAddress,
                 amountWithDecimals
             ]);
-
             txData.data = transferData;
         }
 
@@ -32234,7 +32175,6 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
             });
         }
 
-        // Update deposit with transaction hash
         deposit.metadata.txHash = txHash;
         deposit.metadata.confirmedAt = new Date();
         await deposit.save();
@@ -32243,7 +32183,6 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
         transaction.details.confirmedAt = new Date();
         await transaction.save();
 
-        // Send admin notification
         await sendAdminDepositNotification(user, transaction, deposit, req);
 
         await logActivity(
@@ -32282,54 +32221,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
 });
 
 // =============================================
-// 10. GET DEPOSIT ADDRESS
-// =============================================
-app.get('/api/deposit/address/:asset', protect, async (req, res) => {
-    try {
-        const { asset } = req.params;
-        const assetLower = asset.toLowerCase();
-
-        let depositAddress = DEPOSIT_ADDRESSES[assetLower];
-        let networkName = ASSET_NETWORK_MAP[assetLower]?.network || 'Ethereum';
-
-        // If asset not found but is ERC20, use ETH address
-        if (!depositAddress) {
-            const erc20Tokens = ['eth', 'usdt', 'usdc', 'shib', 'link', 'uni', 'wbtc', 'matic', 'aave', 'crv', 'mkr'];
-            if (erc20Tokens.includes(assetLower)) {
-                depositAddress = DEPOSIT_ADDRESSES['eth'];
-                networkName = 'Ethereum (ERC20)';
-            } else {
-                return res.status(400).json({
-                    status: 'fail',
-                    message: `Unsupported asset: ${asset}`
-                });
-            }
-        }
-
-        const price = await getCryptoPrice(asset);
-
-        res.status(200).json({
-            status: 'success',
-            data: {
-                address: depositAddress,
-                network: networkName,
-                asset: assetLower,
-                price: price || 0,
-                minDeposit: 50
-            }
-        });
-
-    } catch (err) {
-        console.error('Get deposit address error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to get deposit address'
-        });
-    }
-});
-
-// =============================================
-// 11. GET WALLET BALANCES - REAL BLOCKCHAIN DATA
+// 10. GET WALLET BALANCES - REAL BLOCKCHAIN DATA
 // =============================================
 app.get('/api/web3/wallet-balances', protect, async (req, res) => {
     try {
@@ -32346,10 +32238,8 @@ app.get('/api/web3/wallet-balances', protect, async (req, res) => {
         const walletAddress = user.web3Wallet.address;
         const network = user.web3Wallet.network || '0x1';
 
-        // Fetch real balances from blockchain
         const balances = await fetchWalletBalancesFromBlockchain(walletAddress, network);
 
-        // Store balances in database for history
         if (balances && Object.keys(balances).length > 0) {
             await Web3BalanceHistory.create({
                 user: userId,
@@ -32383,26 +32273,22 @@ app.get('/api/web3/wallet-balances', protect, async (req, res) => {
 });
 
 // =============================================
-// 12. FETCH WALLET BALANCES FROM BLOCKCHAIN
+// 11. FETCH WALLET BALANCES FROM BLOCKCHAIN
 // =============================================
 async function fetchWalletBalancesFromBlockchain(walletAddress, network) {
     const balances = {};
     const chainId = parseInt(network) || 1;
 
     try {
-        let networkName = 'ethereum';
-        networkName = NETWORK_MAP[network] || 'ethereum';
-
+        let networkName = NETWORK_MAP[network] || 'ethereum';
         const provider = providers[networkName];
         if (!provider) {
             throw new Error(`No provider configured for network: ${networkName}`);
         }
 
-        // Get native currency balance
         const nativeBalance = await provider.getBalance(walletAddress);
-        const nativeDecimals = getNativeDecimals(networkName);
         const nativeSymbol = getNativeSymbol(networkName);
-        const nativeBalanceFormatted = ethers.formatUnits(nativeBalance, nativeDecimals);
+        const nativeBalanceFormatted = ethers.formatEther(nativeBalance);
 
         if (parseFloat(nativeBalanceFormatted) > 0) {
             const price = await getCryptoPrice(nativeSymbol);
@@ -32410,17 +32296,15 @@ async function fetchWalletBalancesFromBlockchain(walletAddress, network) {
                 balance: parseFloat(nativeBalanceFormatted),
                 usdValue: parseFloat(nativeBalanceFormatted) * (price || 0),
                 price: price || 0,
-                decimals: nativeDecimals,
+                decimals: 18,
                 isNative: true
             };
         }
 
-        // Get ERC20/BEP20 token balances
         const tokenAddresses = TOKEN_ADDRESSES[networkName] || {};
         const erc20ABI = [
             'function balanceOf(address owner) view returns (uint256)',
-            'function decimals() view returns (uint8)',
-            'function symbol() view returns (string)'
+            'function decimals() view returns (uint8)'
         ];
 
         for (const [symbol, tokenAddress] of Object.entries(tokenAddresses)) {
@@ -32451,12 +32335,6 @@ async function fetchWalletBalancesFromBlockchain(walletAddress, network) {
             }
         }
 
-        // Solana
-        if (networkName === 'solana') {
-            const solanaBalances = await fetchSolanaBalances(walletAddress);
-            Object.assign(balances, solanaBalances);
-        }
-
         return balances;
 
     } catch (err) {
@@ -32466,109 +32344,8 @@ async function fetchWalletBalancesFromBlockchain(walletAddress, network) {
 }
 
 // =============================================
-// 13. FETCH SOLANA BALANCES
+// 12. HELPER FUNCTIONS
 // =============================================
-async function fetchSolanaBalances(walletAddress) {
-    try {
-        const response = await axios.post(process.env.SOLANA_RPC_URL, {
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'getTokenAccountsByOwner',
-            params: [
-                walletAddress,
-                {
-                    programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
-                },
-                {
-                    encoding: 'jsonParsed'
-                }
-            ]
-        });
-
-        const balances = {};
-        const solPrice = await getCryptoPrice('SOL');
-
-        // Get native SOL balance
-        const solResponse = await axios.post(process.env.SOLANA_RPC_URL, {
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'getBalance',
-            params: [walletAddress]
-        });
-
-        if (solResponse.data?.result?.value) {
-            const solBalance = solResponse.data.result.value / 1e9;
-            if (solBalance > 0) {
-                balances['SOL'] = {
-                    balance: solBalance,
-                    usdValue: solBalance * (solPrice || 0),
-                    price: solPrice || 0,
-                    decimals: 9,
-                    isNative: true
-                };
-            }
-        }
-
-        // Get SPL tokens
-        if (response.data?.result?.value) {
-            const tokenAccounts = response.data.result.value;
-            
-            const tokenMap = {
-                'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
-                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BEwLV1': 'USDT',
-                'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'MSOL',
-                'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': 'JUP'
-            };
-
-            for (const account of tokenAccounts) {
-                const parsedInfo = account.account?.data?.parsed?.info;
-                if (parsedInfo) {
-                    const mint = parsedInfo.mint;
-                    const tokenBalance = parsedInfo.tokenAmount?.uiAmount || 0;
-                    
-                    if (tokenBalance > 0) {
-                        const symbol = tokenMap[mint] || 'UNKNOWN';
-                        const price = await getCryptoPrice(symbol);
-                        
-                        balances[symbol] = {
-                            balance: tokenBalance,
-                            usdValue: tokenBalance * (price || 0),
-                            price: price || 0,
-                            decimals: parsedInfo.tokenAmount?.decimals || 9,
-                            contractAddress: mint,
-                            isNative: false
-                        };
-                    }
-                }
-            }
-        }
-
-        return balances;
-
-    } catch (err) {
-        console.error('Error fetching Solana balances:', err);
-        return {};
-    }
-}
-
-// =============================================
-// 14. HELPER FUNCTIONS
-// =============================================
-
-function getNativeDecimals(network) {
-    const decimals = {
-        ethereum: 18,
-        bsc: 18,
-        polygon: 18,
-        arbitrum: 18,
-        avalanche: 18,
-        fantom: 18,
-        optimism: 18,
-        base: 18,
-        solana: 9
-    };
-    return decimals[network] || 18;
-}
 
 function getNativeSymbol(network) {
     const symbols = {
@@ -32594,39 +32371,33 @@ async function getTokenInfo(asset) {
             'link': '0x514910771AF9Ca656af840dff83E8264EcF986CA',
             'uni': '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',
             'wbtc': '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
-            'matic': '0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0',
-            'aave': '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9',
-            'crv': '0xD533a949740bb3306d119CC777fa900bA034cd52',
-            'mkr': '0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2'
+            'matic': '0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0'
         };
 
-        const tokenABI = [
-            'function decimals() view returns (uint8)',
-            'function symbol() view returns (string)'
-        ];
+        const tokenABI = ['function decimals() view returns (uint8)'];
 
         const tokenAddress = tokenAddresses[asset.toLowerCase()];
         if (!tokenAddress) {
-            return { decimals: 18, symbol: asset.toUpperCase() };
+            return { decimals: 18 };
         }
 
-        const tokenContract = new ethers.Contract(tokenAddress, tokenABI, providers.ethereum);
+        const tokenContract = new ethers.Contract(
+            tokenAddress,
+            tokenABI,
+            new ethers.JsonRpcProvider(process.env.ETHEREUM_RPC_URL)
+        );
         
-        const [decimals, symbol] = await Promise.all([
-            tokenContract.decimals(),
-            tokenContract.symbol()
-        ]);
-
-        return { decimals, symbol };
+        const decimals = await tokenContract.decimals();
+        return { decimals };
 
     } catch (err) {
         console.warn(`Error fetching token info for ${asset}:`, err.message);
-        return { decimals: 18, symbol: asset.toUpperCase() };
+        return { decimals: 18 };
     }
 }
 
 // =============================================
-// 15. SEND ADMIN DEPOSIT NOTIFICATION
+// 13. SEND ADMIN DEPOSIT NOTIFICATION
 // =============================================
 async function sendAdminDepositNotification(user, transaction, deposit, req) {
     try {
@@ -32696,139 +32467,6 @@ async function sendAdminDepositNotification(user, transaction, deposit, req) {
         console.error('Failed to send admin deposit notification:', err);
     }
 }
-
-// =============================================
-// 16. ENHANCED USER ME ENDPOINT
-// =============================================
-app.get('/api/users/me', protect, async (req, res) => {
-    try {
-        const user = await User.findById(req.user.id)
-            .select('-password -passwordChangedAt -passwordResetToken -passwordResetExpires -__v -twoFactorAuth.secret')
-            .lean();
-
-        if (!user) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'User not found'
-            });
-        }
-
-        const responseData = {
-            status: 'success',
-            data: {
-                user: {
-                    id: user._id,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    email: user.email,
-                    fullName: user.fullName,
-                    phone: user.phone,
-                    country: user.country,
-                    city: user.city,
-                    address: user.address,
-                    kycStatus: user.kycStatus,
-                    balances: user.balances,
-                    referralCode: user.referralCode,
-                    isVerified: user.isVerified,
-                    status: user.status,
-                    twoFactorEnabled: user.twoFactorAuth?.enabled || false,
-                    preferences: user.preferences,
-                    createdAt: user.createdAt,
-                    web3Wallet: user.web3Wallet ? {
-                        address: user.web3Wallet.address,
-                        type: user.web3Wallet.type,
-                        network: user.web3Wallet.network,
-                        linkedAt: user.web3Wallet.linkedAt
-                    } : null
-                }
-            }
-        };
-
-        res.status(200).json(responseData);
-    } catch (err) {
-        console.error('Get user error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'An error occurred while fetching user data'
-        });
-    }
-});
-
-// =============================================
-// 17. WEB3 WEBSOCKET - REAL-TIME WALLET BALANCES
-// =============================================
-// Add to your existing Socket.IO setup
-
-io.on('connection', (socket) => {
-    // ... existing code ...
-
-    socket.on('subscribe_wallet_balances', async (walletAddress) => {
-        if (!walletAddress) {
-            socket.emit('wallet_error', { message: 'Wallet address is required' });
-            return;
-        }
-
-        const token = socket.handshake.auth.token;
-        if (token) {
-            try {
-                const decoded = verifyJWT(token);
-                const user = await User.findById(decoded.id);
-                if (!user || !user.web3Wallet || user.web3Wallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
-                    socket.emit('wallet_error', { message: 'Unauthorized wallet address' });
-                    return;
-                }
-            } catch (err) {
-                socket.emit('wallet_error', { message: 'Authentication required' });
-                return;
-            }
-        }
-
-        socket.join(`wallet_${walletAddress.toLowerCase()}`);
-        console.log(`Client subscribed to wallet: ${walletAddress}`);
-
-        const interval = setInterval(async () => {
-            try {
-                const balances = await fetchWalletBalancesFromBlockchain(
-                    walletAddress,
-                    '0x1'
-                );
-                
-                socket.emit('wallet_balance_update', {
-                    walletAddress: walletAddress,
-                    balances: balances,
-                    timestamp: Date.now()
-                });
-            } catch (err) {
-                console.error('Error fetching wallet balances:', err);
-                socket.emit('wallet_error', { message: 'Failed to fetch balances' });
-            }
-        }, 30000);
-
-        socket.on('disconnect', () => {
-            clearInterval(interval);
-        });
-
-        socket.on('unsubscribe_wallet', () => {
-            clearInterval(interval);
-            socket.leave(`wallet_${walletAddress.toLowerCase()}`);
-        });
-    });
-});
-
-console.log('✅ Web3 endpoints implemented successfully');
-console.log('📋 Endpoints added:');
-console.log('   POST /api/users/link-wallet');
-console.log('   DELETE /api/users/unlink-wallet');
-console.log('   GET  /api/users/wallet-status');
-console.log('   POST /api/deposit/web3');
-console.log('   POST /api/deposit/confirm');
-console.log('   GET  /api/deposit/address/:asset');
-console.log('   GET  /api/web3/wallet-balances');
-console.log('   Enhanced GET /api/users/me');
-console.log('   WebSocket: subscribe_wallet_balances');
-
-
-
 
 
 
@@ -33877,6 +33515,57 @@ const processMaturedInvestments = async () => {
     console.error('Error processing matured investments:', err);
   }
 };
+
+
+// Add this INSIDE your existing io.on('connection') handler
+socket.on('subscribe_wallet_balances', async (walletAddress) => {
+    if (!walletAddress) {
+        socket.emit('wallet_error', { message: 'Wallet address is required' });
+        return;
+    }
+
+    const token = socket.handshake.auth.token;
+    if (token) {
+        try {
+            const decoded = verifyJWT(token);
+            const user = await User.findById(decoded.id);
+            if (!user || !user.web3Wallet || user.web3Wallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
+                socket.emit('wallet_error', { message: 'Unauthorized wallet address' });
+                return;
+            }
+        } catch (err) {
+            socket.emit('wallet_error', { message: 'Authentication required' });
+            return;
+        }
+    }
+
+    socket.join(`wallet_${walletAddress.toLowerCase()}`);
+    console.log(`Client subscribed to wallet: ${walletAddress}`);
+
+    const interval = setInterval(async () => {
+        try {
+            const balances = await fetchWalletBalancesFromBlockchain(walletAddress, '0x1');
+            socket.emit('wallet_balance_update', {
+                walletAddress: walletAddress,
+                balances: balances,
+                timestamp: Date.now()
+            });
+        } catch (err) {
+            console.error('Error fetching wallet balances:', err);
+            socket.emit('wallet_error', { message: 'Failed to fetch balances' });
+        }
+    }, 30000);
+
+    socket.on('disconnect', () => {
+        clearInterval(interval);
+    });
+
+    socket.on('unsubscribe_wallet', () => {
+        clearInterval(interval);
+        socket.leave(`wallet_${walletAddress.toLowerCase()}`);
+    });
+});
+
 
 // =============================================
 // START ALL REAL-TIME SERVICES
