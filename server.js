@@ -19355,19 +19355,19 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
     const { asset } = req.params;
     const assetLower = asset.toLowerCase();
     
-    // Map of deposit addresses from your provided list
+   // Map of deposit addresses from your provided list
     const depositAddresses = {
-      'btc': '13KMyC5gMMYs85i1vat1HX9saYcNrQ17ru',
-      'eth': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-      'usdt': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-      'bnb': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-      'sol': 'EETt21sq7G4BM6g5e5wuUBGPNJvpmfUxCK8Bs1T1NzJw', 
-      'usdc': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-      'xrp': 'rexV2DWLYpzqoFd3DtVXmcFSseaoLmT7Z',
-      'doge': 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW',
-      'shib': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-      'ltc': 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg',
-	  'trx': 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t'
+      'btc': '18AvzZ3ir1HHnzPmLhELhSSxuYQNAmR2an',
+      'eth': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
+      'usdt': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
+      'bnb': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
+      'sol': 'HzZvSVqUKJ1mrCd8qybn8Q2dvwJuTnKegUg1cTqvGUxM', 
+      'usdc': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
+      'xrp': 'r463rNR8mjCZBGkbS4dBcCDCukei99PVbk',
+      'doge': 'DJrSW1vWhUTm73mwEjYbiY1ZfuTFHCTbVS',
+      'shib': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
+      'ltc': 'LUtJQK2XmGyfrRfkUK6HUhgYkZeWi7pzmD',
+	  'trx': 'TJbiznb2WoSWiT8JR4R9j5fmpF5bLsJuEd'
     };
 
     // Check if asset is supported
