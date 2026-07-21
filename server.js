@@ -324,6 +324,18 @@ const UserSchema = new mongoose.Schema({
     isRead: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now }
   }],
+
+// Add to UserSchema
+web3Wallet: {
+    address: { type: String, lowercase: true, index: true },
+    type: { type: String, enum: ['metamask', 'trust', 'phantom', 'rainbow', 'walletconnect', 'coinbase'] },
+    network: { type: String },
+    linkedAt: { type: Date },
+    isVerified: { type: Boolean, default: false },
+    lastBalanceCheck: { type: Date }
+}
+
+	
   preferences: {
     notifications: {
       email: { type: Boolean, default: true },
@@ -1520,6 +1532,37 @@ Web3UserSchema.methods.setPrimaryWallet = function(address) {
 };
 
 const Web3User = mongoose.model('Web3User', Web3UserSchema);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // 2. WEB3 SESSION SCHEMA
@@ -31288,7 +31331,1211 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
 
 
 
+// =============================================
+// WEB3 ENDPOINTS - PRODUCTION GRADE
+// REAL BLOCKCHAIN DATA - NO FAKE DATA
+// RENDER.COM COMPATIBLE - USING ENV VARIABLES
+// =============================================
 
+// =============================================
+// 1. BLOCKCHAIN PROVIDER CONFIGURATION
+// =============================================
+
+const { ethers } = require('ethers');
+const axios = require('axios');
+
+// Initialize providers with RENDER environment variables
+const providers = {
+    ethereum: new ethers.JsonRpcProvider(process.env.ETHEREUM_RPC_URL),
+    bsc: new ethers.JsonRpcProvider(process.env.BSC_RPC_URL),
+    polygon: new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL),
+    arbitrum: new ethers.JsonRpcProvider(process.env.ARBITRUM_RPC_URL),
+    avalanche: new ethers.JsonRpcProvider(process.env.AVALANCHE_RPC_URL),
+    fantom: new ethers.JsonRpcProvider(process.env.FANTOM_RPC_URL),
+    optimism: new ethers.JsonRpcProvider(process.env.OPTIMISM_RPC_URL),
+    base: new ethers.JsonRpcProvider(process.env.BASE_RPC_URL),
+    solana: process.env.SOLANA_RPC_URL
+};
+
+// =============================================
+// 2. TOKEN CONTRACT ADDRESSES - REAL MAINNET
+// =============================================
+
+const TOKEN_ADDRESSES = {
+    ethereum: {
+        USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+        USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        WBTC: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+        LINK: '0x514910771AF9Ca656af840dff83E8264EcF986CA',
+        UNI: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',
+        SHIB: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE',
+        MATIC: '0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0',
+        AAVE: '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9',
+        CRV: '0xD533a949740bb3306d119CC777fa900bA034cd52',
+        MKR: '0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2'
+    },
+    bsc: {
+        USDT: '0x55d398326f99059fF775485246999027B3197955',
+        USDC: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+        BUSD: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56',
+        WBNB: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+        CAKE: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82',
+        XRP: '0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE',
+        DOGE: '0xbA2aE424d960c26247Dd6c32edC70B295c744C43'
+    },
+    polygon: {
+        USDT: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+        USDC: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+        WMATIC: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
+        WBTC: '0x1bfd67037b42cf73acF2047067bd4F2C47D9BfD6',
+        LINK: '0x53E0bca35eC356BD5ddDFebbD1Fc0fD03FaBad39'
+    },
+    arbitrum: {
+        USDT: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+        USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+        WBTC: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
+        LINK: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4',
+        UNI: '0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0'
+    },
+    avalanche: {
+        USDT: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7',
+        USDC: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
+        WAVAX: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7',
+        WBTC: '0x50b7545627a5162F82A992c33b87aDc75187B218',
+        LINK: '0x5947BB275c521040051D82396192181b413227A3'
+    }
+};
+
+// =============================================
+// 3. DEPOSIT ADDRESSES - REAL WALLETS
+// =============================================
+
+const DEPOSIT_ADDRESSES = {
+    'btc': '13KMyC5gMMYs85i1vat1HX9saYcNrQ17ru',
+    'eth': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'usdt': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'bnb': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'sol': 'EETt21sq7G4BM6g5e5wuUBGPNJvpmfUxCK8Bs1T1NzJw',
+    'usdc': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'xrp': 'rexV2DWLYpzqoFd3DtVXmcFSseaoLmT7Z',
+    'doge': 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW',
+    'shib': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'ltc': 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg',
+    'trx': 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t',
+    'link': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'uni': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'matic': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+    'wbtc': '0x4e39dBAC4647B9C462F143De8657494874c1400F'
+};
+
+// =============================================
+// 4. NETWORK MAPPING
+// =============================================
+
+const NETWORK_MAP = {
+    '0x1': 'ethereum',
+    '0x38': 'bsc',
+    '0x89': 'polygon',
+    '0xa4b1': 'arbitrum',
+    '0x2105': 'base',
+    '0xfa': 'fantom',
+    '0xa': 'optimism',
+    '0xa86a': 'avalanche'
+};
+
+const NETWORK_NAMES = {
+    '0x1': 'Ethereum Mainnet',
+    '0x38': 'BNB Smart Chain',
+    '0x89': 'Polygon Mainnet',
+    '0xa4b1': 'Arbitrum One',
+    '0x2105': 'Base',
+    '0xfa': 'Fantom Opera',
+    '0xa': 'Optimism',
+    '0xa86a': 'Avalanche C-Chain'
+};
+
+const ASSET_NETWORK_MAP = {
+    'btc': { network: 'Bitcoin', deposit: '13KMyC5gMMYs85i1vat1HX9saYcNrQ17ru' },
+    'eth': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
+    'usdt': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
+    'usdc': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
+    'bnb': { network: 'BNB Smart Chain', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
+    'sol': { network: 'Solana', deposit: 'EETt21sq7G4BM6g5e5wuUBGPNJvpmfUxCK8Bs1T1NzJw' },
+    'xrp': { network: 'XRP Ledger', deposit: 'rexV2DWLYpzqoFd3DtVXmcFSseaoLmT7Z' },
+    'doge': { network: 'Dogecoin', deposit: 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW' },
+    'shib': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
+    'ltc': { network: 'Litecoin', deposit: 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg' },
+    'trx': { network: 'TRON', deposit: 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t' },
+    'link': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
+    'uni': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
+    'matic': { network: 'Polygon', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' },
+    'wbtc': { network: 'Ethereum', deposit: '0x4e39dBAC4647B9C462F143De8657494874c1400F' }
+};
+
+// =============================================
+// 5. WALLET LINK ENDPOINT
+// =============================================
+app.post('/api/users/link-wallet', protect, async (req, res) => {
+    try {
+        const { walletAddress, walletType, network } = req.body;
+        const userId = req.user._id;
+
+        if (!walletAddress || !walletType) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Wallet address and type are required'
+            });
+        }
+
+        const validWalletTypes = ['metamask', 'trust', 'phantom', 'rainbow', 'walletconnect', 'coinbase'];
+        if (!validWalletTypes.includes(walletType)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: `Invalid wallet type. Must be one of: ${validWalletTypes.join(', ')}`
+            });
+        }
+
+        const normalizedAddress = walletAddress.toLowerCase();
+
+        const existingWallet = await User.findOne({
+            'web3Wallet.address': normalizedAddress,
+            _id: { $ne: userId }
+        });
+
+        if (existingWallet) {
+            return res.status(409).json({
+                status: 'fail',
+                message: 'This wallet address is already linked to another account'
+            });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Update user with web3Wallet
+        user.web3Wallet = {
+            address: normalizedAddress,
+            type: walletType,
+            network: network || '0x1',
+            linkedAt: new Date(),
+            isVerified: true,
+            lastBalanceCheck: null
+        };
+
+        await user.save();
+
+        // Create or update Web3User
+        let web3User = await Web3User.findOne({ user: userId });
+        if (!web3User) {
+            web3User = new Web3User({
+                user: userId,
+                wallets: [{
+                    address: normalizedAddress,
+                    type: walletType,
+                    isPrimary: true,
+                    isVerified: true,
+                    connectedAt: new Date(),
+                    lastUsed: new Date(),
+                    metadata: {
+                        chainId: parseInt(network) || 1,
+                        networkName: NETWORK_NAMES[network] || 'Unknown Network',
+                        userAgent: req.headers['user-agent'],
+                        ipAddress: getRealClientIP(req)
+                    }
+                }],
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                status: 'active',
+                isEmailVerified: user.isVerified || false
+            });
+            await web3User.save();
+        }
+
+        await logActivity(
+            'wallet_linked',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            {
+                walletAddress: normalizedAddress,
+                walletType: walletType,
+                network: network || '0x1'
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Wallet linked successfully',
+            data: {
+                wallet: {
+                    address: normalizedAddress,
+                    type: walletType,
+                    network: network || '0x1',
+                    linkedAt: user.web3Wallet.linkedAt
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error linking wallet:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to link wallet'
+        });
+    }
+});
+
+// =============================================
+// 6. UNLINK WALLET ENDPOINT
+// =============================================
+app.delete('/api/users/unlink-wallet', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        if (!user.web3Wallet || !user.web3Wallet.address) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'No wallet linked to this account'
+            });
+        }
+
+        const walletAddress = user.web3Wallet.address;
+
+        user.web3Wallet = undefined;
+        await user.save();
+
+        await Web3User.findOneAndUpdate(
+            { user: userId },
+            { $pull: { wallets: { address: walletAddress } } }
+        );
+
+        await logActivity(
+            'wallet_unlinked',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            { walletAddress: walletAddress }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Wallet unlinked successfully'
+        });
+
+    } catch (err) {
+        console.error('Error unlinking wallet:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to unlink wallet'
+        });
+    }
+});
+
+// =============================================
+// 7. GET WALLET STATUS
+// =============================================
+app.get('/api/users/wallet-status', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const user = await User.findById(userId).select('web3Wallet');
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        const isLinked = !!(user.web3Wallet && user.web3Wallet.address);
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                isLinked: isLinked,
+                wallet: isLinked ? {
+                    address: user.web3Wallet.address,
+                    type: user.web3Wallet.type,
+                    network: user.web3Wallet.network,
+                    linkedAt: user.web3Wallet.linkedAt
+                } : null
+            }
+        });
+
+    } catch (err) {
+        console.error('Error getting wallet status:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to get wallet status'
+        });
+    }
+});
+
+// =============================================
+// 8. WEB3 DEPOSIT - TRIGGERS BLOCKCHAIN TRANSACTION
+// =============================================
+app.post('/api/deposit/web3', protect, async (req, res) => {
+    try {
+        const { asset, amount, walletAddress, network } = req.body;
+        const userId = req.user._id;
+
+        if (!asset || !amount || !walletAddress) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Asset, amount, and wallet address are required'
+            });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        if (!user.web3Wallet || user.web3Wallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
+            return res.status(403).json({
+                status: 'fail',
+                message: 'Wallet address does not match linked wallet'
+            });
+        }
+
+        // Get current price using existing getCryptoPrice function
+        const currentPrice = await getCryptoPrice(asset);
+        if (!currentPrice || currentPrice <= 0) {
+            return res.status(503).json({
+                status: 'fail',
+                message: `Unable to fetch current price for ${asset}. Please try again.`
+            });
+        }
+
+        const usdValue = amount * currentPrice;
+        const assetLower = asset.toLowerCase();
+
+        // Get deposit address - if asset not found, use ETH address for ERC20 tokens
+        let depositAddress = DEPOSIT_ADDRESSES[assetLower];
+        if (!depositAddress) {
+            const erc20Tokens = ['eth', 'usdt', 'usdc', 'shib', 'link', 'uni', 'wbtc', 'matic', 'aave', 'crv', 'mkr'];
+            if (erc20Tokens.includes(assetLower)) {
+                depositAddress = DEPOSIT_ADDRESSES['eth'];
+            } else {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: `Unsupported asset: ${asset}`
+                });
+            }
+        }
+
+        const networkName = ASSET_NETWORK_MAP[assetLower]?.network || 'Ethereum';
+
+        const reference = `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+        // Create transaction record
+        const transaction = await Transaction.create({
+            user: userId,
+            type: 'deposit',
+            amount: usdValue,
+            asset: assetLower,
+            assetAmount: amount,
+            currency: 'USD',
+            status: 'pending',
+            method: asset.toUpperCase(),
+            reference: reference,
+            details: {
+                depositAddress: depositAddress,
+                walletAddress: walletAddress,
+                network: networkName,
+                exchangeRate: currentPrice,
+                usdValue: usdValue,
+                assetAmount: amount,
+                asset: assetLower,
+                rateLockedAt: new Date(),
+                rateExpiry: Date.now() + 15 * 60 * 1000
+            },
+            fee: 0,
+            netAmount: usdValue,
+            network: networkName,
+            exchangeRateAtTime: currentPrice
+        });
+
+        // Create deposit asset record
+        await DepositAsset.create({
+            user: userId,
+            asset: assetLower,
+            amount: amount,
+            usdValue: usdValue,
+            transactionId: transaction._id,
+            status: 'pending',
+            metadata: {
+                txHash: null,
+                fromAddress: walletAddress,
+                toAddress: depositAddress,
+                network: networkName,
+                exchangeRate: currentPrice,
+                assetPriceAtTime: currentPrice
+            }
+        });
+
+        // Build transaction data for wallet signing
+        let txData = {
+            to: depositAddress,
+            value: '0x0',
+            data: '0x'
+        };
+
+        // For ETH and BNB (native tokens), set value
+        if (assetLower === 'eth' || assetLower === 'bnb') {
+            const amountInWei = ethers.parseEther(amount.toString());
+            txData.value = amountInWei.toString();
+        } else if (assetLower === 'matic') {
+            const amountInWei = ethers.parseEther(amount.toString());
+            txData.value = amountInWei.toString();
+        } else if (assetLower === 'sol') {
+            // Solana transactions are handled differently
+            txData = {
+                to: depositAddress,
+                value: (amount * 1e9).toString(),
+                type: 'solana'
+            };
+        } else {
+            // For ERC20/BEP20 tokens, encode transfer function
+            const tokenABI = [
+                'function transfer(address to, uint256 amount) public returns (bool)'
+            ];
+            
+            let provider;
+            if (assetLower === 'bnb') {
+                provider = providers.bsc;
+            } else if (assetLower === 'matic') {
+                provider = providers.polygon;
+            } else {
+                provider = providers.ethereum;
+            }
+
+            const tokenContract = new ethers.Contract(
+                depositAddress,
+                tokenABI,
+                provider
+            );
+
+            // Get token decimals
+            let decimals = 18;
+            try {
+                const tokenInfo = await getTokenInfo(assetLower);
+                decimals = tokenInfo.decimals || 18;
+            } catch (err) {
+                console.warn('Could not fetch token decimals, using 18');
+            }
+
+            const amountWithDecimals = ethers.parseUnits(amount.toString(), decimals);
+            const transferData = tokenContract.interface.encodeFunctionData('transfer', [
+                depositAddress,
+                amountWithDecimals
+            ]);
+
+            txData.data = transferData;
+        }
+
+        await logActivity(
+            'web3_deposit_initiated',
+            'Transaction',
+            transaction._id,
+            userId,
+            'User',
+            req,
+            {
+                asset: assetLower,
+                amount: amount,
+                usdValue: usdValue,
+                walletAddress: walletAddress,
+                depositAddress: depositAddress,
+                reference: reference
+            }
+        );
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Deposit request created. Please sign the transaction in your wallet.',
+            data: {
+                transaction: {
+                    id: transaction._id,
+                    reference: reference,
+                    amount: amount,
+                    asset: asset.toUpperCase(),
+                    usdValue: usdValue,
+                    status: 'pending'
+                },
+                deposit: {
+                    address: depositAddress,
+                    network: networkName,
+                    asset: asset.toUpperCase()
+                },
+                txData: txData
+            }
+        });
+
+    } catch (err) {
+        console.error('Web3 deposit error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to process deposit'
+        });
+    }
+});
+
+// =============================================
+// 9. WEB3 DEPOSIT CONFIRMATION
+// =============================================
+app.post('/api/deposit/confirm', protect, async (req, res) => {
+    try {
+        const { txHash, asset, amount, walletAddress } = req.body;
+        const userId = req.user._id;
+
+        if (!txHash) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Transaction hash is required'
+            });
+        }
+
+        const deposit = await DepositAsset.findOne({
+            user: userId,
+            asset: asset.toLowerCase(),
+            amount: amount,
+            status: 'pending',
+            'metadata.txHash': null
+        }).sort({ createdAt: -1 });
+
+        if (!deposit) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'No pending deposit found for this transaction'
+            });
+        }
+
+        const transaction = await Transaction.findOne({
+            _id: deposit.transactionId,
+            user: userId,
+            status: 'pending'
+        });
+
+        if (!transaction) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Transaction record not found'
+            });
+        }
+
+        // Update deposit with transaction hash
+        deposit.metadata.txHash = txHash;
+        deposit.metadata.confirmedAt = new Date();
+        await deposit.save();
+
+        transaction.details.txHash = txHash;
+        transaction.details.confirmedAt = new Date();
+        await transaction.save();
+
+        // Send admin notification
+        await sendAdminDepositNotification(user, transaction, deposit, req);
+
+        await logActivity(
+            'web3_deposit_confirmed',
+            'Transaction',
+            transaction._id,
+            userId,
+            'User',
+            req,
+            {
+                txHash: txHash,
+                asset: asset,
+                amount: amount,
+                walletAddress: walletAddress
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Deposit transaction confirmed. Waiting for admin approval.',
+            data: {
+                txHash: txHash,
+                asset: asset,
+                amount: amount,
+                status: 'pending_approval'
+            }
+        });
+
+    } catch (err) {
+        console.error('Web3 deposit confirmation error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to confirm deposit'
+        });
+    }
+});
+
+// =============================================
+// 10. GET DEPOSIT ADDRESS
+// =============================================
+app.get('/api/deposit/address/:asset', protect, async (req, res) => {
+    try {
+        const { asset } = req.params;
+        const assetLower = asset.toLowerCase();
+
+        let depositAddress = DEPOSIT_ADDRESSES[assetLower];
+        let networkName = ASSET_NETWORK_MAP[assetLower]?.network || 'Ethereum';
+
+        // If asset not found but is ERC20, use ETH address
+        if (!depositAddress) {
+            const erc20Tokens = ['eth', 'usdt', 'usdc', 'shib', 'link', 'uni', 'wbtc', 'matic', 'aave', 'crv', 'mkr'];
+            if (erc20Tokens.includes(assetLower)) {
+                depositAddress = DEPOSIT_ADDRESSES['eth'];
+                networkName = 'Ethereum (ERC20)';
+            } else {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: `Unsupported asset: ${asset}`
+                });
+            }
+        }
+
+        const price = await getCryptoPrice(asset);
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                address: depositAddress,
+                network: networkName,
+                asset: assetLower,
+                price: price || 0,
+                minDeposit: 50
+            }
+        });
+
+    } catch (err) {
+        console.error('Get deposit address error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to get deposit address'
+        });
+    }
+});
+
+// =============================================
+// 11. GET WALLET BALANCES - REAL BLOCKCHAIN DATA
+// =============================================
+app.get('/api/web3/wallet-balances', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const user = await User.findById(userId).select('web3Wallet');
+        if (!user || !user.web3Wallet || !user.web3Wallet.address) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'No wallet linked to this account'
+            });
+        }
+
+        const walletAddress = user.web3Wallet.address;
+        const network = user.web3Wallet.network || '0x1';
+
+        // Fetch real balances from blockchain
+        const balances = await fetchWalletBalancesFromBlockchain(walletAddress, network);
+
+        // Store balances in database for history
+        if (balances && Object.keys(balances).length > 0) {
+            await Web3BalanceHistory.create({
+                user: userId,
+                walletAddress: walletAddress,
+                balances: balances,
+                snapshotDate: new Date(),
+                source: 'blockchain'
+            });
+
+            user.web3Wallet.lastBalanceCheck = new Date();
+            await user.save();
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                walletAddress: walletAddress,
+                network: network,
+                balances: balances,
+                lastUpdated: new Date().toISOString()
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching wallet balances:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch wallet balances'
+        });
+    }
+});
+
+// =============================================
+// 12. FETCH WALLET BALANCES FROM BLOCKCHAIN
+// =============================================
+async function fetchWalletBalancesFromBlockchain(walletAddress, network) {
+    const balances = {};
+    const chainId = parseInt(network) || 1;
+
+    try {
+        let networkName = 'ethereum';
+        networkName = NETWORK_MAP[network] || 'ethereum';
+
+        const provider = providers[networkName];
+        if (!provider) {
+            throw new Error(`No provider configured for network: ${networkName}`);
+        }
+
+        // Get native currency balance
+        const nativeBalance = await provider.getBalance(walletAddress);
+        const nativeDecimals = getNativeDecimals(networkName);
+        const nativeSymbol = getNativeSymbol(networkName);
+        const nativeBalanceFormatted = ethers.formatUnits(nativeBalance, nativeDecimals);
+
+        if (parseFloat(nativeBalanceFormatted) > 0) {
+            const price = await getCryptoPrice(nativeSymbol);
+            balances[nativeSymbol] = {
+                balance: parseFloat(nativeBalanceFormatted),
+                usdValue: parseFloat(nativeBalanceFormatted) * (price || 0),
+                price: price || 0,
+                decimals: nativeDecimals,
+                isNative: true
+            };
+        }
+
+        // Get ERC20/BEP20 token balances
+        const tokenAddresses = TOKEN_ADDRESSES[networkName] || {};
+        const erc20ABI = [
+            'function balanceOf(address owner) view returns (uint256)',
+            'function decimals() view returns (uint8)',
+            'function symbol() view returns (string)'
+        ];
+
+        for (const [symbol, tokenAddress] of Object.entries(tokenAddresses)) {
+            try {
+                const tokenContract = new ethers.Contract(tokenAddress, erc20ABI, provider);
+                const tokenBalance = await tokenContract.balanceOf(walletAddress);
+                
+                let decimals = 18;
+                try {
+                    decimals = await tokenContract.decimals();
+                } catch (err) {}
+
+                const balanceFormatted = ethers.formatUnits(tokenBalance, decimals);
+                
+                if (parseFloat(balanceFormatted) > 0) {
+                    const price = await getCryptoPrice(symbol);
+                    balances[symbol] = {
+                        balance: parseFloat(balanceFormatted),
+                        usdValue: parseFloat(balanceFormatted) * (price || 0),
+                        price: price || 0,
+                        decimals: decimals,
+                        contractAddress: tokenAddress,
+                        isNative: false
+                    };
+                }
+            } catch (err) {
+                console.warn(`Error fetching ${symbol} balance:`, err.message);
+            }
+        }
+
+        // Solana
+        if (networkName === 'solana') {
+            const solanaBalances = await fetchSolanaBalances(walletAddress);
+            Object.assign(balances, solanaBalances);
+        }
+
+        return balances;
+
+    } catch (err) {
+        console.error('Error fetching blockchain balances:', err);
+        throw err;
+    }
+}
+
+// =============================================
+// 13. FETCH SOLANA BALANCES
+// =============================================
+async function fetchSolanaBalances(walletAddress) {
+    try {
+        const response = await axios.post(process.env.SOLANA_RPC_URL, {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'getTokenAccountsByOwner',
+            params: [
+                walletAddress,
+                {
+                    programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+                },
+                {
+                    encoding: 'jsonParsed'
+                }
+            ]
+        });
+
+        const balances = {};
+        const solPrice = await getCryptoPrice('SOL');
+
+        // Get native SOL balance
+        const solResponse = await axios.post(process.env.SOLANA_RPC_URL, {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'getBalance',
+            params: [walletAddress]
+        });
+
+        if (solResponse.data?.result?.value) {
+            const solBalance = solResponse.data.result.value / 1e9;
+            if (solBalance > 0) {
+                balances['SOL'] = {
+                    balance: solBalance,
+                    usdValue: solBalance * (solPrice || 0),
+                    price: solPrice || 0,
+                    decimals: 9,
+                    isNative: true
+                };
+            }
+        }
+
+        // Get SPL tokens
+        if (response.data?.result?.value) {
+            const tokenAccounts = response.data.result.value;
+            
+            const tokenMap = {
+                'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BEwLV1': 'USDT',
+                'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'MSOL',
+                'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': 'JUP'
+            };
+
+            for (const account of tokenAccounts) {
+                const parsedInfo = account.account?.data?.parsed?.info;
+                if (parsedInfo) {
+                    const mint = parsedInfo.mint;
+                    const tokenBalance = parsedInfo.tokenAmount?.uiAmount || 0;
+                    
+                    if (tokenBalance > 0) {
+                        const symbol = tokenMap[mint] || 'UNKNOWN';
+                        const price = await getCryptoPrice(symbol);
+                        
+                        balances[symbol] = {
+                            balance: tokenBalance,
+                            usdValue: tokenBalance * (price || 0),
+                            price: price || 0,
+                            decimals: parsedInfo.tokenAmount?.decimals || 9,
+                            contractAddress: mint,
+                            isNative: false
+                        };
+                    }
+                }
+            }
+        }
+
+        return balances;
+
+    } catch (err) {
+        console.error('Error fetching Solana balances:', err);
+        return {};
+    }
+}
+
+// =============================================
+// 14. HELPER FUNCTIONS
+// =============================================
+
+function getNativeDecimals(network) {
+    const decimals = {
+        ethereum: 18,
+        bsc: 18,
+        polygon: 18,
+        arbitrum: 18,
+        avalanche: 18,
+        fantom: 18,
+        optimism: 18,
+        base: 18,
+        solana: 9
+    };
+    return decimals[network] || 18;
+}
+
+function getNativeSymbol(network) {
+    const symbols = {
+        ethereum: 'ETH',
+        bsc: 'BNB',
+        polygon: 'MATIC',
+        arbitrum: 'ETH',
+        avalanche: 'AVAX',
+        fantom: 'FTM',
+        optimism: 'ETH',
+        base: 'ETH',
+        solana: 'SOL'
+    };
+    return symbols[network] || 'ETH';
+}
+
+async function getTokenInfo(asset) {
+    try {
+        const tokenAddresses = {
+            'usdt': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+            'usdc': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+            'shib': '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE',
+            'link': '0x514910771AF9Ca656af840dff83E8264EcF986CA',
+            'uni': '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',
+            'wbtc': '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+            'matic': '0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0',
+            'aave': '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9',
+            'crv': '0xD533a949740bb3306d119CC777fa900bA034cd52',
+            'mkr': '0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2'
+        };
+
+        const tokenABI = [
+            'function decimals() view returns (uint8)',
+            'function symbol() view returns (string)'
+        ];
+
+        const tokenAddress = tokenAddresses[asset.toLowerCase()];
+        if (!tokenAddress) {
+            return { decimals: 18, symbol: asset.toUpperCase() };
+        }
+
+        const tokenContract = new ethers.Contract(tokenAddress, tokenABI, providers.ethereum);
+        
+        const [decimals, symbol] = await Promise.all([
+            tokenContract.decimals(),
+            tokenContract.symbol()
+        ]);
+
+        return { decimals, symbol };
+
+    } catch (err) {
+        console.warn(`Error fetching token info for ${asset}:`, err.message);
+        return { decimals: 18, symbol: asset.toUpperCase() };
+    }
+}
+
+// =============================================
+// 15. SEND ADMIN DEPOSIT NOTIFICATION
+// =============================================
+async function sendAdminDepositNotification(user, transaction, deposit, req) {
+    try {
+        const formattedTimestamp = new Date().toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            timeZoneName: 'short'
+        });
+
+        const emailHtml = `
+            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 12px;">
+                    <h1 style="color: #F7A600; font-size: 24px; margin: 0;">₿itHash</h1>
+                    <p style="color: #B7BDC6; font-size: 12px; margin: 12px 0 0;">Where Your Financial Goals Become Reality</p>
+                </div>
+                
+                <div style="padding: 30px; background: #FFFFFF;">
+                    <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                        <h2 style="color: #F7A600; font-size: 20px; margin: 0;">NEW WEB3 DEPOSIT REQUEST</h2>
+                        <p style="color: #92400E; font-size: 13px; margin: 8px 0 0;">Pending Admin Approval</p>
+                    </div>
+
+                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr><td style="padding: 8px 0;"><strong>User:</strong></td><td style="text-align: right;">${user.firstName} ${user.lastName}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Email:</strong></td><td style="text-align: right;">${user.email}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Asset:</strong></td><td style="text-align: right;">${transaction.asset.toUpperCase()}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Amount:</strong></td><td style="text-align: right;">${transaction.assetAmount} ${transaction.asset.toUpperCase()}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>USD Value:</strong></td><td style="text-align: right;">$${transaction.amount.toLocaleString()}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Wallet:</strong></td><td style="text-align: right; font-size: 11px; word-break: break-all;">${user.web3Wallet.address}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Deposit Address:</strong></td><td style="text-align: right; font-size: 11px; word-break: break-all;">${transaction.details.depositAddress}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Network:</strong></td><td style="text-align: right;">${transaction.network}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Tx Hash:</strong></td><td style="text-align: right; font-size: 11px; word-break: break-all;">${transaction.details.txHash}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Rate:</strong></td><td style="text-align: right;">1 ${transaction.asset.toUpperCase()} = $${transaction.exchangeRateAtTime.toLocaleString()}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Request ID:</strong></td><td style="text-align: right; font-family: monospace;">${transaction.reference}</td></tr>
+                            <tr><td style="padding: 8px 0;"><strong>Time:</strong></td><td style="text-align: right;">${formattedTimestamp}</td></tr>
+                        </table>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <a href="https://www.bithashcapital.live/admin/deposits/${transaction._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 40px; font-weight: 600; display: inline-block;">Review Deposit</a>
+                    </div>
+                </div>
+                
+                <div style="text-align: center; padding: 20px; background: #0B0E11;">
+                    <p style="color: #6C7480; font-size: 10px;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                    <p style="color: #6C7480; font-size: 10px; margin-top: 6px;">800 Plant Street, Wilmington, DE 19801, United States</p>
+                </div>
+            </div>
+        `;
+
+        await supportTransporter.sendMail({
+            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+            to: 'thieretw@gmail.com',
+            subject: `🆕 WEB3 DEPOSIT: ${user.firstName} ${user.lastName} - ${transaction.assetAmount} ${transaction.asset.toUpperCase()}`,
+            html: emailHtml
+        });
+
+        console.log(`✅ Admin deposit notification sent for user: ${user.email}`);
+
+    } catch (err) {
+        console.error('Failed to send admin deposit notification:', err);
+    }
+}
+
+// =============================================
+// 16. ENHANCED USER ME ENDPOINT
+// =============================================
+app.get('/api/users/me', protect, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id)
+            .select('-password -passwordChangedAt -passwordResetToken -passwordResetExpires -__v -twoFactorAuth.secret')
+            .lean();
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        const responseData = {
+            status: 'success',
+            data: {
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    fullName: user.fullName,
+                    phone: user.phone,
+                    country: user.country,
+                    city: user.city,
+                    address: user.address,
+                    kycStatus: user.kycStatus,
+                    balances: user.balances,
+                    referralCode: user.referralCode,
+                    isVerified: user.isVerified,
+                    status: user.status,
+                    twoFactorEnabled: user.twoFactorAuth?.enabled || false,
+                    preferences: user.preferences,
+                    createdAt: user.createdAt,
+                    web3Wallet: user.web3Wallet ? {
+                        address: user.web3Wallet.address,
+                        type: user.web3Wallet.type,
+                        network: user.web3Wallet.network,
+                        linkedAt: user.web3Wallet.linkedAt
+                    } : null
+                }
+            }
+        };
+
+        res.status(200).json(responseData);
+    } catch (err) {
+        console.error('Get user error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'An error occurred while fetching user data'
+        });
+    }
+});
+
+// =============================================
+// 17. WEB3 WEBSOCKET - REAL-TIME WALLET BALANCES
+// =============================================
+// Add to your existing Socket.IO setup
+
+io.on('connection', (socket) => {
+    // ... existing code ...
+
+    socket.on('subscribe_wallet_balances', async (walletAddress) => {
+        if (!walletAddress) {
+            socket.emit('wallet_error', { message: 'Wallet address is required' });
+            return;
+        }
+
+        const token = socket.handshake.auth.token;
+        if (token) {
+            try {
+                const decoded = verifyJWT(token);
+                const user = await User.findById(decoded.id);
+                if (!user || !user.web3Wallet || user.web3Wallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
+                    socket.emit('wallet_error', { message: 'Unauthorized wallet address' });
+                    return;
+                }
+            } catch (err) {
+                socket.emit('wallet_error', { message: 'Authentication required' });
+                return;
+            }
+        }
+
+        socket.join(`wallet_${walletAddress.toLowerCase()}`);
+        console.log(`Client subscribed to wallet: ${walletAddress}`);
+
+        const interval = setInterval(async () => {
+            try {
+                const balances = await fetchWalletBalancesFromBlockchain(
+                    walletAddress,
+                    '0x1'
+                );
+                
+                socket.emit('wallet_balance_update', {
+                    walletAddress: walletAddress,
+                    balances: balances,
+                    timestamp: Date.now()
+                });
+            } catch (err) {
+                console.error('Error fetching wallet balances:', err);
+                socket.emit('wallet_error', { message: 'Failed to fetch balances' });
+            }
+        }, 30000);
+
+        socket.on('disconnect', () => {
+            clearInterval(interval);
+        });
+
+        socket.on('unsubscribe_wallet', () => {
+            clearInterval(interval);
+            socket.leave(`wallet_${walletAddress.toLowerCase()}`);
+        });
+    });
+});
+
+console.log('✅ Web3 endpoints implemented successfully');
+console.log('📋 Endpoints added:');
+console.log('   POST /api/users/link-wallet');
+console.log('   DELETE /api/users/unlink-wallet');
+console.log('   GET  /api/users/wallet-status');
+console.log('   POST /api/deposit/web3');
+console.log('   POST /api/deposit/confirm');
+console.log('   GET  /api/deposit/address/:asset');
+console.log('   GET  /api/web3/wallet-balances');
+console.log('   Enhanced GET /api/users/me');
+console.log('   WebSocket: subscribe_wallet_balances');
 
 
 
