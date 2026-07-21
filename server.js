@@ -324,17 +324,6 @@ const UserSchema = new mongoose.Schema({
     isRead: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now }
   }],
-
-// Add to UserSchema
-web3Wallet: {
-    address: { type: String, lowercase: true, index: true },
-    type: { type: String, enum: ['metamask', 'trust', 'phantom', 'rainbow', 'walletconnect', 'coinbase'] },
-    network: { type: String },
-    linkedAt: { type: Date },
-    isVerified: { type: Boolean, default: false },
-    lastBalanceCheck: { type: Date }
-}
-
 	
   preferences: {
     notifications: {
