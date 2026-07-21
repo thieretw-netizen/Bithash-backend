@@ -32468,7 +32468,102 @@ async function sendAdminDepositNotification(user, transaction, deposit, req) {
     }
 }
 
+// =============================================
+// PRICE ENDPOINT - GET REAL-TIME CRYPTO PRICE
+// =============================================
+app.get('/api/prices/:asset', protect, async (req, res) => {
+    try {
+        const { asset } = req.params;
+        
+        if (!asset) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Asset symbol is required'
+            });
+        }
 
+        // Use existing getCryptoPrice function from server.js
+        const price = await getCryptoPrice(asset);
+        
+        if (!price || price <= 0) {
+            return res.status(503).json({
+                status: 'fail',
+                message: `Unable to fetch price for ${asset.toUpperCase()}`
+            });
+        }
+
+        // Get 24h change
+        let change24h = 0;
+        try {
+            const assetLower = asset.toLowerCase();
+            const coinGeckoId = mapSymbolToCoinGeckoId(assetLower);
+            const response = await axios.get(
+                `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd&include_24hr_change=true`,
+                { timeout: 3000 }
+            );
+            if (response.data && response.data[coinGeckoId]) {
+                change24h = response.data[coinGeckoId].usd_24h_change || 0;
+            }
+        } catch (err) {
+            console.warn(`Could not fetch 24h change for ${asset}:`, err.message);
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                price: price,
+                change24h: change24h,
+                asset: asset.toUpperCase()
+            }
+        });
+
+    } catch (err) {
+        console.error('Price fetch error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch price'
+        });
+    }
+});
+
+// =============================================
+// HELPER - Map symbol to CoinGecko ID
+// =============================================
+function mapSymbolToCoinGeckoId(asset) {
+    const mapping = {
+        'btc': 'bitcoin',
+        'eth': 'ethereum',
+        'usdt': 'tether',
+        'bnb': 'binancecoin',
+        'sol': 'solana',
+        'usdc': 'usd-coin',
+        'xrp': 'ripple',
+        'doge': 'dogecoin',
+        'ada': 'cardano',
+        'shib': 'shiba-inu',
+        'avax': 'avalanche-2',
+        'dot': 'polkadot',
+        'trx': 'tron',
+        'link': 'chainlink',
+        'matic': 'matic-network',
+        'wbtc': 'wrapped-bitcoin',
+        'ltc': 'litecoin',
+        'near': 'near',
+        'uni': 'uniswap',
+        'bch': 'bitcoin-cash',
+        'xlm': 'stellar',
+        'atom': 'cosmos',
+        'xmr': 'monero',
+        'flow': 'flow',
+        'vet': 'vechain',
+        'fil': 'filecoin',
+        'theta': 'theta-token',
+        'hbar': 'hedera-hashgraph',
+        'ftm': 'fantom',
+        'xtz': 'tezos'
+    };
+    return mapping[asset.toLowerCase()] || asset.toLowerCase();
+}
 
 
 
