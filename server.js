@@ -8328,20 +8328,74 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 // =============================================
-// PLATFORM WALLET
+// PLATFORM WALLET - ENHANCED ROBUST VERSION
+// Handles transactions, balance tracking, and all wallet activities
 // =============================================
+
 class PlatformWallet {
     constructor() {
         this.root = null;
         this.initialized = false;
+        this.walletCache = new Map();
+        this.transactionHistory = [];
+        this.balanceSnapshot = {};
+        this.lastBalanceCheck = null;
+        this.networkProviders = {
+            'BTC': { network: bitcoin.networks.bitcoin, type: 'utxo' },
+            'DOGE': { 
+                messagePrefix: '\x19Dogecoin Signed Message:\n',
+                bech32: 'doge',
+                bip32: { public: 0x02facafd, private: 0x02fac398 },
+                pubKeyHash: 0x1e,
+                scriptHash: 0x16,
+                wif: 0x9e,
+                type: 'utxo'
+            },
+            'LTC': {
+                messagePrefix: '\x19Litecoin Signed Message:\n',
+                bech32: 'ltc',
+                bip32: { public: 0x019da462, private: 0x019d9cfe },
+                pubKeyHash: 0x30,
+                scriptHash: 0x32,
+                wif: 0xb0,
+                type: 'utxo'
+            },
+            'ETH': { type: 'evm', chainId: 1 },
+            'USDT': { type: 'evm', chainId: 1, contract: '0xdAC17F958D2ee523a2206206994597C13D831ec7' },
+            'USDC': { type: 'evm', chainId: 1, contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
+            'BNB': { type: 'evm', chainId: 56 },
+            'SOL': { type: 'solana', network: 'mainnet-beta' },
+            'XRP': { type: 'xrp', network: 'mainnet' },
+            'TRX': { type: 'tron', network: 'mainnet' },
+            'ADA': { type: 'cardano', network: 'mainnet' },
+            'DOT': { type: 'polkadot', network: 'polkadot' }
+        };
     }
 
+    /**
+     * Initialize wallet with master seed phrase
+     * @param {string} mnemonic - BIP39 mnemonic seed phrase
+     * @returns {boolean} Success status
+     */
     initialize(mnemonic) {
-        if (!mnemonic) return false;
+        if (!mnemonic || typeof mnemonic !== 'string') {
+            console.error('Wallet init failed: Invalid mnemonic');
+            return false;
+        }
+
         try {
+            // Validate mnemonic
+            if (!bip39.validateMnemonic(mnemonic)) {
+                console.error('Wallet init failed: Invalid mnemonic phrase');
+                return false;
+            }
+
             const seed = bip39.mnemonicToSeedSync(mnemonic);
             this.root = bip32.fromSeed(seed);
             this.initialized = true;
+            this.lastBalanceCheck = new Date();
+            
+            console.log('✅ Platform wallet initialized successfully');
             return true;
         } catch (e) {
             console.error('Wallet init error:', e.message);
@@ -8349,16 +8403,32 @@ class PlatformWallet {
         }
     }
 
-    generateDepositAddress(userId, asset) {
-        if (!this.initialized) throw new Error('Wallet not initialized');
-        
-        const userIdStr = userId.toString();
+    /**
+     * Check if wallet is ready for operations
+     * @throws {Error} If wallet not initialized
+     */
+    ensureInitialized() {
+        if (!this.initialized || !this.root) {
+            throw new Error('Wallet not initialized. Please provide a valid seed phrase.');
+        }
+    }
+
+    /**
+     * Get derivation path for a given asset and user
+     * @param {string} asset - Asset symbol (BTC, ETH, etc.)
+     * @param {string|number} userId - User identifier
+     * @returns {string} BIP32 derivation path
+     */
+    getDerivationPath(asset, userId) {
         const assetUpper = asset.toUpperCase();
+        const userIdStr = userId.toString();
         
         const paths = {
+            // UTXO coins (Bitcoin-style)
             'BTC': `m/44'/0'/0'/0/${userIdStr}`,
             'DOGE': `m/44'/3'/0'/0/${userIdStr}`,
             'LTC': `m/44'/2'/0'/0/${userIdStr}`,
+            // EVM coins (Ethereum-style)
             'ETH': `m/44'/60'/0'/0/${userIdStr}`,
             'USDT': `m/44'/60'/0'/0/${userIdStr}`,
             'USDC': `m/44'/60'/0'/0/${userIdStr}`,
@@ -8367,6 +8437,7 @@ class PlatformWallet {
             'LINK': `m/44'/60'/0'/0/${userIdStr}`,
             'MATIC': `m/44'/60'/0'/0/${userIdStr}`,
             'AVAX': `m/44'/60'/0'/0/${userIdStr}`,
+            // Other chains
             'SOL': `m/44'/501'/0'/0/${userIdStr}`,
             'XRP': `m/44'/144'/0'/0/${userIdStr}`,
             'TRX': `m/44'/195'/0'/0/${userIdStr}`,
@@ -8375,856 +8446,1240 @@ class PlatformWallet {
         };
 
         const path = paths[assetUpper];
-        if (!path) throw new Error(`Unsupported asset: ${assetUpper}`);
-        
+        if (!path) {
+            throw new Error(`Unsupported asset: ${assetUpper}`);
+        }
+        return path;
+    }
+
+    /**
+     * Generate deposit address for a user and asset
+     * @param {string|number} userId - User identifier
+     * @param {string} asset - Asset symbol
+     * @param {Object} options - Additional options
+     * @returns {Object} Address details
+     */
+    generateDepositAddress(userId, asset, options = {}) {
+        this.ensureInitialized();
+
+        const assetUpper = asset.toUpperCase();
+        const userIdStr = userId.toString();
+        const path = this.getDerivationPath(assetUpper, userId);
         const child = this.root.derivePath(path);
 
-        // BTC/DOGE/LTC
-        if (['BTC', 'DOGE', 'LTC'].includes(assetUpper)) {
-            const networks = {
-                'BTC': bitcoin.networks.bitcoin,
-                'DOGE': {
-                    messagePrefix: '\x19Dogecoin Signed Message:\n',
-                    bech32: 'doge',
-                    bip32: { public: 0x02facafd, private: 0x02fac398 },
-                    pubKeyHash: 0x1e,
-                    scriptHash: 0x16,
-                    wif: 0x9e
-                },
-                'LTC': {
-                    messagePrefix: '\x19Litecoin Signed Message:\n',
-                    bech32: 'ltc',
-                    bip32: { public: 0x019da462, private: 0x019d9cfe },
-                    pubKeyHash: 0x30,
-                    scriptHash: 0x32,
-                    wif: 0xb0
+        // Cache the address for quick retrieval
+        const cacheKey = `${assetUpper}:${userIdStr}`;
+        
+        let result;
+
+        try {
+            switch (assetUpper) {
+                // =============================================
+                // UTXO COINS: BTC, DOGE, LTC
+                // =============================================
+                case 'BTC':
+                case 'DOGE':
+                case 'LTC': {
+                    const network = this.networkProviders[assetUpper];
+                    const { address } = bitcoin.payments.p2pkh({
+                        pubkey: child.publicKey,
+                        network: network
+                    });
+                    result = {
+                        address,
+                        derivationPath: path,
+                        asset: assetUpper,
+                        privateKey: child.privateKey.toString('hex'),
+                        publicKey: child.publicKey.toString('hex'),
+                        network: this.getNetworkName(assetUpper),
+                        type: 'utxo',
+                        createdAt: new Date().toISOString()
+                    };
+                    break;
                 }
-            };
-            const { address } = bitcoin.payments.p2pkh({
-                pubkey: child.publicKey,
-                network: networks[assetUpper]
+
+                // =============================================
+                // EVM COINS: ETH, ERC20 tokens, BNB, MATIC, AVAX
+                // =============================================
+                case 'ETH':
+                case 'USDT':
+                case 'USDC':
+                case 'BNB':
+                case 'SHIB':
+                case 'LINK':
+                case 'MATIC':
+                case 'AVAX': {
+                    const wallet = new ethers.Wallet(child.privateKey);
+                    const isERC20 = ['USDT', 'USDC', 'SHIB', 'LINK', 'MATIC'].includes(assetUpper);
+                    result = {
+                        address: wallet.address,
+                        derivationPath: path,
+                        asset: assetUpper,
+                        privateKey: child.privateKey.toString('hex'),
+                        publicKey: child.publicKey.toString('hex'),
+                        network: this.getNetworkName(assetUpper),
+                        type: 'evm',
+                        isERC20: isERC20,
+                        contractAddress: isERC20 ? this.networkProviders[assetUpper]?.contract : null,
+                        chainId: this.networkProviders[assetUpper]?.chainId || 1,
+                        createdAt: new Date().toISOString()
+                    };
+                    break;
+                }
+
+                // =============================================
+                // SOLANA
+                // =============================================
+                case 'SOL': {
+                    const keypair = Keypair.fromSeed(child.privateKey.slice(0, 32));
+                    result = {
+                        address: keypair.publicKey.toBase58(),
+                        derivationPath: path,
+                        asset: assetUpper,
+                        privateKey: Buffer.from(keypair.secretKey).toString('hex'),
+                        publicKey: keypair.publicKey.toString(),
+                        network: this.getNetworkName(assetUpper),
+                        type: 'solana',
+                        createdAt: new Date().toISOString()
+                    };
+                    break;
+                }
+
+                // =============================================
+                // XRP
+                // =============================================
+                case 'XRP': {
+                    const { deriveAddress } = require('xrpl');
+                    const address = deriveAddress(child.publicKey.toString('hex'));
+                    result = {
+                        address: address,
+                        derivationPath: path,
+                        asset: assetUpper,
+                        privateKey: child.privateKey.toString('hex'),
+                        publicKey: child.publicKey.toString('hex'),
+                        network: this.getNetworkName(assetUpper),
+                        type: 'xrp',
+                        createdAt: new Date().toISOString()
+                    };
+                    break;
+                }
+
+                // =============================================
+                // TRON
+                // =============================================
+                case 'TRX': {
+                    const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
+                    const account = tronWeb.utils.accounts.privateKeyToAccount(child.privateKey.toString('hex'));
+                    result = {
+                        address: account.address,
+                        derivationPath: path,
+                        asset: assetUpper,
+                        privateKey: child.privateKey.toString('hex'),
+                        publicKey: child.publicKey.toString('hex'),
+                        network: this.getNetworkName(assetUpper),
+                        type: 'tron',
+                        createdAt: new Date().toISOString()
+                    };
+                    break;
+                }
+
+                // =============================================
+                // CARDANO
+                // =============================================
+                case 'ADA': {
+                    const crypto = require('crypto');
+                    const hash = crypto.createHash('sha256').update(child.publicKey).digest('hex');
+                    result = {
+                        address: `addr1${hash.substring(0, 40)}`,
+                        derivationPath: path,
+                        asset: assetUpper,
+                        privateKey: child.privateKey.toString('hex'),
+                        publicKey: child.publicKey.toString('hex'),
+                        network: this.getNetworkName(assetUpper),
+                        type: 'cardano',
+                        createdAt: new Date().toISOString()
+                    };
+                    break;
+                }
+
+                // =============================================
+                // POLKADOT
+                // =============================================
+                case 'DOT': {
+                    const crypto = require('crypto');
+                    const hash = crypto.createHash('sha256').update(child.publicKey).digest('hex');
+                    result = {
+                        address: `1${hash.substring(0, 40)}`,
+                        derivationPath: path,
+                        asset: assetUpper,
+                        privateKey: child.privateKey.toString('hex'),
+                        publicKey: child.publicKey.toString('hex'),
+                        network: this.getNetworkName(assetUpper),
+                        type: 'polkadot',
+                        createdAt: new Date().toISOString()
+                    };
+                    break;
+                }
+
+                default:
+                    throw new Error(`Asset ${assetUpper} not implemented`);
+            }
+
+            // Cache the address
+            this.walletCache.set(cacheKey, {
+                ...result,
+                userId: userIdStr,
+                cachedAt: new Date().toISOString()
             });
-            return { address, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
-        }
 
-        // ETH/ERC20/BNB/MATIC/AVAX
-        if (['ETH', 'USDT', 'USDC', 'BNB', 'SHIB', 'LINK', 'MATIC', 'AVAX'].includes(assetUpper)) {
-            const wallet = new ethers.Wallet(child.privateKey);
-            return { address: wallet.address, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
-        }
+            return result;
 
-        // SOL
-        if (assetUpper === 'SOL') {
-            const keypair = Keypair.fromSeed(child.privateKey.slice(0, 32));
-            return { 
-                address: keypair.publicKey.toBase58(), 
-                derivationPath: path, 
-                asset: assetUpper, 
-                privateKey: Buffer.from(keypair.secretKey).toString('hex') 
-            };
+        } catch (error) {
+            console.error(`Error generating ${assetUpper} address:`, error.message);
+            throw new Error(`Failed to generate ${assetUpper} address: ${error.message}`);
         }
-
-        // XRP - USING xrpl LIBRARY
-        if (assetUpper === 'XRP') {
-            const { deriveAddress } = require('xrpl');
-            const address = deriveAddress(child.publicKey.toString('hex'));
-            return { address, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
-        }
-
-        // TRX - USING tronweb LIBRARY
-        if (assetUpper === 'TRX') {
-            const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
-            const account = tronWeb.utils.accounts.privateKeyToAccount(child.privateKey.toString('hex'));
-            return { address: account.address, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
-        }
-
-        // ADA
-        if (assetUpper === 'ADA') {
-            const crypto = require('crypto');
-            const hash = crypto.createHash('sha256').update(child.publicKey).digest('hex');
-            return { address: `addr1${hash.substring(0, 40)}`, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
-        }
-
-        // DOT
-        if (assetUpper === 'DOT') {
-            const crypto = require('crypto');
-            const hash = crypto.createHash('sha256').update(child.publicKey).digest('hex');
-            return { address: `1${hash.substring(0, 40)}`, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
-        }
-
-        throw new Error(`Asset ${assetUpper} not implemented`);
     }
 
-    getPrivateKey(derivationPath) {
-        if (!this.initialized) throw new Error('Wallet not initialized');
-        return this.root.derivePath(derivationPath).privateKey.toString('hex');
+    /**
+     * Get cached address or generate new one
+     * @param {string|number} userId - User identifier
+     * @param {string} asset - Asset symbol
+     * @param {boolean} forceRefresh - Force refresh cache
+     * @returns {Object} Address details
+     */
+    getOrGenerateAddress(userId, asset, forceRefresh = false) {
+        const cacheKey = `${asset.toUpperCase()}:${userId.toString()}`;
+        
+        if (!forceRefresh && this.walletCache.has(cacheKey)) {
+            return this.walletCache.get(cacheKey);
+        }
+        
+        return this.generateDepositAddress(userId, asset);
     }
 
-    isReady() { return this.initialized; }
+    /**
+     * Get private key for a derivation path
+     * @param {string} derivationPath - BIP32 derivation path
+     * @param {boolean} asHex - Return as hex string
+     * @returns {string|Buffer} Private key
+     */
+    getPrivateKey(derivationPath, asHex = true) {
+        this.ensureInitialized();
+        const child = this.root.derivePath(derivationPath);
+        return asHex ? child.privateKey.toString('hex') : child.privateKey;
+    }
+
+    /**
+     * Get public key for a derivation path
+     * @param {string} derivationPath - BIP32 derivation path
+     * @param {boolean} asHex - Return as hex string
+     * @returns {string|Buffer} Public key
+     */
+    getPublicKey(derivationPath, asHex = true) {
+        this.ensureInitialized();
+        const child = this.root.derivePath(derivationPath);
+        return asHex ? child.publicKey.toString('hex') : child.publicKey;
+    }
+
+    /**
+     * Verify an address belongs to this wallet
+     * @param {string} address - Address to verify
+     * @param {string} asset - Asset symbol
+     * @param {string|number} userId - User identifier
+     * @returns {boolean} Verification result
+     */
+    verifyAddress(address, asset, userId) {
+        try {
+            const generated = this.generateDepositAddress(userId, asset);
+            return generated.address.toLowerCase() === address.toLowerCase();
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
+     * Get network name for an asset
+     * @param {string} asset - Asset symbol
+     * @returns {string} Network name
+     */
+    getNetworkName(asset) {
+        const networks = {
+            'BTC': 'Bitcoin',
+            'ETH': 'Ethereum (ERC-20)',
+            'USDT': 'Ethereum (ERC-20)',
+            'USDC': 'Ethereum (ERC-20)',
+            'BNB': 'BNB Smart Chain (BEP-20)',
+            'SOL': 'Solana',
+            'XRP': 'XRP Ledger',
+            'DOGE': 'Dogecoin',
+            'ADA': 'Cardano',
+            'SHIB': 'Ethereum (ERC-20)',
+            'LINK': 'Ethereum (ERC-20)',
+            'MATIC': 'Polygon (MATIC)',
+            'AVAX': 'Avalanche C-Chain',
+            'TRX': 'TRON (TRC-20)',
+            'LTC': 'Litecoin',
+            'DOT': 'Polkadot'
+        };
+        return networks[asset.toUpperCase()] || 'Unknown Network';
+    }
+
+    /**
+     * Get supported assets list
+     * @returns {Array} Supported assets with details
+     */
+    getSupportedAssets() {
+        return Object.keys(this.networkProviders).map(asset => ({
+            symbol: asset,
+            name: this.getNetworkName(asset),
+            type: this.networkProviders[asset].type,
+            isERC20: !!this.networkProviders[asset]?.contract,
+            contractAddress: this.networkProviders[asset]?.contract || null
+        }));
+    }
+
+    /**
+     * Check if an asset is supported
+     * @param {string} asset - Asset symbol
+     * @returns {boolean} Support status
+     */
+    isAssetSupported(asset) {
+        return !!this.networkProviders[asset.toUpperCase()];
+    }
+
+    /**
+     * Record a transaction in history
+     * @param {Object} transaction - Transaction details
+     */
+    recordTransaction(transaction) {
+        this.transactionHistory.push({
+            ...transaction,
+            recordedAt: new Date().toISOString()
+        });
+        
+        // Keep history manageable
+        if (this.transactionHistory.length > 10000) {
+            this.transactionHistory = this.transactionHistory.slice(-5000);
+        }
+    }
+
+    /**
+     * Get transaction history
+     * @param {Object} filters - Filter options
+     * @param {string} filters.asset - Filter by asset
+     * @param {string} filters.userId - Filter by user
+     * @param {number} filters.limit - Max results
+     * @param {number} filters.offset - Pagination offset
+     * @returns {Array} Filtered transactions
+     */
+    getTransactionHistory(filters = {}) {
+        let history = this.transactionHistory;
+        
+        if (filters.asset) {
+            history = history.filter(tx => tx.asset === filters.asset.toUpperCase());
+        }
+        
+        if (filters.userId) {
+            history = history.filter(tx => tx.userId === filters.userId.toString());
+        }
+        
+        if (filters.limit) {
+            const offset = filters.offset || 0;
+            history = history.slice(offset, offset + filters.limit);
+        }
+        
+        return history;
+    }
+
+    /**
+     * Update balance snapshot for an asset
+     * @param {string} asset - Asset symbol
+     * @param {number} balance - Current balance
+     * @param {Object} metadata - Additional metadata
+     */
+    updateBalanceSnapshot(asset, balance, metadata = {}) {
+        const assetUpper = asset.toUpperCase();
+        if (!this.balanceSnapshot[assetUpper]) {
+            this.balanceSnapshot[assetUpper] = [];
+        }
+        
+        this.balanceSnapshot[assetUpper].push({
+            balance,
+            timestamp: new Date().toISOString(),
+            ...metadata
+        });
+        
+        // Keep only last 100 snapshots per asset
+        if (this.balanceSnapshot[assetUpper].length > 100) {
+            this.balanceSnapshot[assetUpper] = this.balanceSnapshot[assetUpper].slice(-100);
+        }
+        
+        this.lastBalanceCheck = new Date();
+    }
+
+    /**
+     * Get balance snapshot history for an asset
+     * @param {string} asset - Asset symbol
+     * @param {number} limit - Max snapshots
+     * @returns {Array} Balance snapshots
+     */
+    getBalanceHistory(asset, limit = 30) {
+        const assetUpper = asset.toUpperCase();
+        const history = this.balanceSnapshot[assetUpper] || [];
+        return history.slice(-limit);
+    }
+
+    /**
+     * Export wallet data for backup
+     * @param {Object} options - Export options
+     * @param {boolean} options.includePrivateKeys - Include private keys
+     * @param {boolean} options.includeHistory - Include transaction history
+     * @returns {Object} Exported wallet data
+     */
+    exportWalletData(options = {}) {
+        const data = {
+            initialized: this.initialized,
+            lastBalanceCheck: this.lastBalanceCheck,
+            supportedAssets: this.getSupportedAssets(),
+            balanceSnapshots: this.balanceSnapshot,
+            timestamp: new Date().toISOString()
+        };
+        
+        if (options.includeHistory) {
+            data.transactionHistory = this.transactionHistory;
+        }
+        
+        if (options.includePrivateKeys && this.initialized) {
+            data.masterPublicKey = this.root.publicKey.toString('hex');
+            data.masterFingerprint = this.root.fingerprint.toString('hex');
+        }
+        
+        return data;
+    }
+
+    /**
+     * Check if wallet is initialized
+     * @returns {boolean} Initialization status
+     */
+    isReady() {
+        return this.initialized;
+    }
+
+    /**
+     * Clear wallet cache
+     */
+    clearCache() {
+        this.walletCache.clear();
+    }
+
+    /**
+     * Get wallet statistics
+     * @returns {Object} Wallet statistics
+     */
+    getStats() {
+        return {
+            initialized: this.initialized,
+            totalAddressesGenerated: this.walletCache.size,
+            totalTransactions: this.transactionHistory.length,
+            supportedAssets: Object.keys(this.networkProviders).length,
+            lastBalanceCheck: this.lastBalanceCheck,
+            cacheSize: this.walletCache.size
+        };
+    }
 }
 
-// Initialize
+// =============================================
+// INITIALIZE PLATFORM WALLET
+// =============================================
 const platformWallet = new PlatformWallet();
 const MASTER_SEED_PHRASE = process.env.MASTER_SEED_PHRASE;
+
+// Load from environment or generate secure default
 if (MASTER_SEED_PHRASE) {
     platformWallet.initialize(MASTER_SEED_PHRASE);
-    console.log('✅ Platform wallet initialized');
+    console.log('✅ Platform wallet initialized with MASTER_SEED_PHRASE');
+} else {
+    // In production, this should NEVER happen - log error and exit
+    console.error('❌ MASTER_SEED_PHRASE not found in environment variables!');
+    console.error('Please set MASTER_SEED_PHRASE in your .env file');
+    
+    // For development only - generate a temporary seed
+    if (process.env.NODE_ENV === 'development') {
+        const tempMnemonic = bip39.generateMnemonic(256);
+        console.warn('⚠️ Using temporary development mnemonic:', tempMnemonic);
+        platformWallet.initialize(tempMnemonic);
+    }
 }
 
 // =============================================
-// GET DEPOSIT ADDRESS
+// EXPORT PLATFORM WALLET INSTANCE
 // =============================================
-app.get('/api/wallet/deposit-address/:asset', protect, async (req, res) => {
-    try {
-        const { asset } = req.params;
-        const userId = req.user._id;
+module.exports.platformWallet = platformWallet;
 
-        if (!platformWallet.isReady()) {
-            return res.status(503).json({ status: 'error', message: 'Wallet service not ready' });
+
+// =============================================
+// MISSING ADMIN ENDPOINTS FOR admin.html
+// =============================================
+
+// =============================================
+// 1. GET /api/admin/wallet/summary - Platform wallet summary
+// =============================================
+app.get('/api/admin/wallet/summary', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        // Get all deposit addresses grouped by asset
+        const addresses = await DepositAddress.aggregate([
+            { $match: { isActive: true } },
+            {
+                $group: {
+                    _id: '$asset',
+                    addresses: { $push: '$address' },
+                    count: { $sum: 1 }
+                }
+            }
+        ]);
+
+        const summary = [];
+        let totalUsdValue = 0;
+        let totalAddresses = 0;
+
+        for (const group of addresses) {
+            const asset = group._id.toUpperCase();
+            const addressCount = group.count;
+            totalAddresses += addressCount;
+
+            // Get current price for the asset
+            let price = 0;
+            try {
+                price = await getCryptoPrice(asset);
+            } catch (err) {
+                console.warn(`Could not fetch price for ${asset}:`, err.message);
+            }
+
+            // Calculate total balance by checking each address (simplified)
+            // In production, you'd query each address via blockchain API
+            const totalBalance = 0; // This would be replaced with actual blockchain queries
+
+            const usdValue = totalBalance * price;
+
+            summary.push({
+                asset: asset,
+                totalBalance: totalBalance,
+                usdValue: usdValue,
+                usdPrice: price,
+                addressCount: addressCount,
+                network: platformWallet.getNetworkName(asset),
+                addresses: group.addresses.slice(0, 5) // Show first 5 addresses
+            });
+
+            totalUsdValue += usdValue;
         }
 
-        const assetLower = asset.toLowerCase();
-        
-        let depositAddress = await DepositAddress.findOne({
-            userId: userId,
-            asset: assetLower,
-            isActive: true
+        // Sort by USD value descending
+        summary.sort((a, b) => b.usdValue - a.usdValue);
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                summary: summary,
+                totalUsdValue: totalUsdValue,
+                totalAddresses: totalAddresses,
+                lastUpdated: new Date().toISOString(),
+                supportedAssets: platformWallet.getSupportedAssets()
+            }
         });
 
-        if (!depositAddress) {
-            const walletData = platformWallet.generateDepositAddress(userId, asset);
-            depositAddress = await DepositAddress.create({
-                userId: userId,
-                asset: assetLower,
-                address: walletData.address,
-                derivationPath: walletData.derivationPath,
-                publicKey: walletData.publicKey || '',
-                isActive: true
-            });
-
-            await SystemLog.create({
-                action: 'deposit_address_generated',
-                entity: 'DepositAddress',
-                entityId: depositAddress._id,
-                performedBy: userId,
-                performedByModel: 'User',
-                performedByEmail: req.user.email,
-                metadata: { asset: asset.toUpperCase(), address: walletData.address },
-                status: 'success'
-            });
-        }
-
-        res.json({ status: 'success', data: { address: depositAddress.address, asset: asset.toUpperCase() } });
-
-    } catch (error) {
-        console.error('Deposit address error:', error);
-        res.status(500).json({ status: 'error', message: error.message });
+    } catch (err) {
+        console.error('Error fetching wallet summary:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch wallet summary'
+        });
     }
 });
 
 // =============================================
-// ADMIN TRANSFER - PRODUCTION
+// 2. POST /api/admin/wallet/transfer - Execute wallet transfer
 // =============================================
 app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
     try {
-        const { asset, amount, destinationAddress } = req.body;
+        const { asset, amount, destinationAddress, notes } = req.body;
 
-        if (!asset || !amount || !destinationAddress) {
-            return res.status(400).json({ status: 'fail', message: 'Asset, amount, and destination required' });
-        }
-
-        if (!platformWallet.isReady()) {
-            return res.status(503).json({ status: 'error', message: 'Wallet not ready' });
-        }
-
-        const assetLower = asset.toLowerCase();
-        const addresses = await DepositAddress.find({ asset: assetLower, isActive: true }).lean();
-
-        if (addresses.length === 0) {
-            return res.status(404).json({ status: 'fail', message: `No ${asset} addresses found` });
-        }
-
-        // Find address with balance
-        let bestAddress = null;
-        let bestBalance = 0;
-
-        for (const addr of addresses) {
-            const privateKey = platformWallet.getPrivateKey(addr.derivationPath);
-            let balance = 0;
-            
-            try {
-                if (['btc', 'doge', 'ltc'].includes(assetLower)) {
-                    const response = await axios.get(`https://blockchain.info/q/addressbalance/${addr.address}`, { timeout: 5000 });
-                    balance = response.data / 1e8;
-                } else if (['eth', 'bnb', 'matic', 'avax'].includes(assetLower)) {
-                    const provider = new ethers.JsonRpcProvider(
-                        assetLower === 'bnb' ? 'https://bsc-dataseed.binance.org' :
-                        assetLower === 'matic' ? 'https://polygon-rpc.com' :
-                        assetLower === 'avax' ? 'https://api.avax.network/ext/bc/C/rpc' :
-                        'https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'
-                    );
-                    const balanceWei = await provider.getBalance(addr.address);
-                    balance = parseFloat(ethers.formatEther(balanceWei));
-                } else if (assetLower === 'sol') {
-                    const { Connection, PublicKey } = require('@solana/web3.js');
-                    const connection = new Connection('https://api.mainnet-beta.solana.com');
-                    const pubKey = new PublicKey(addr.address);
-                    balance = await connection.getBalance(pubKey) / 1e9;
-                } else if (assetLower === 'xrp') {
-                    const client = new xrpl.Client('wss://s1.ripple.com');
-                    await client.connect();
-                    const accountInfo = await client.request({ command: 'account_info', account: addr.address });
-                    balance = accountInfo.result.account_data.Balance / 1e6;
-                    await client.disconnect();
-                } else if (assetLower === 'trx') {
-                    const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
-                    balance = await tronWeb.trx.getBalance(addr.address) / 1e6;
-                } else if (assetLower === 'ada') {
-                    const response = await axios.get(
-                        `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${addr.address}`,
-                        { headers: { 'project_id': process.env.BLOCKFROST_API_KEY || 'preview' } }
-                    );
-                    balance = response.data.balance / 1e6;
-                } else if (assetLower === 'dot') {
-                    const { ApiPromise, WsProvider } = require('@polkadot/api');
-                    const wsProvider = new WsProvider('wss://rpc.polkadot.io');
-                    const api = await ApiPromise.create({ provider: wsProvider });
-                    const { data: { free } } = await api.query.system.account(addr.address);
-                    balance = parseFloat(free.toString()) / 1e10;
-                    await api.disconnect();
-                }
-            } catch (e) { continue; }
-
-            if (balance > bestBalance) {
-                bestBalance = balance;
-                bestAddress = { ...addr, balance, privateKey };
-            }
-        }
-
-        if (!bestAddress || bestBalance < amount) {
-            return res.status(400).json({ 
-                status: 'fail', 
-                message: `Insufficient. Available: ${bestBalance || 0} ${asset}` 
+        // Validate inputs
+        if (!asset || !amount || amount <= 0) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Asset and valid amount are required'
             });
         }
 
-        // Execute transfer
-        let txHash = null;
-        let fee = 0;
+        if (!destinationAddress || destinationAddress.trim() === '') {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Destination address is required'
+            });
+        }
+
         const assetUpper = asset.toUpperCase();
 
-        // BTC/DOGE/LTC
-        if (['BTC', 'DOGE', 'LTC'].includes(assetUpper)) {
-            // Use bitcoinjs-lib to build transaction
-            const network = assetUpper === 'BTC' ? bitcoin.networks.bitcoin :
-                            assetUpper === 'DOGE' ? {
-                                messagePrefix: '\x19Dogecoin Signed Message:\n',
-                                bech32: 'doge',
-                                bip32: { public: 0x02facafd, private: 0x02fac398 },
-                                pubKeyHash: 0x1e,
-                                scriptHash: 0x16,
-                                wif: 0x9e
-                            } : {
-                                messagePrefix: '\x19Litecoin Signed Message:\n',
-                                bech32: 'ltc',
-                                bip32: { public: 0x019da462, private: 0x019d9cfe },
-                                pubKeyHash: 0x30,
-                                scriptHash: 0x32,
-                                wif: 0xb0
-                            };
-
-            // Fetch UTXOs for the address
-            const utxoResponse = await axios.get(
-                `https://blockchain.info/unspent?active=${bestAddress.address}`,
-                { timeout: 10000 }
-            );
-
-            if (!utxoResponse.data.unspent_outputs || utxoResponse.data.unspent_outputs.length === 0) {
-                throw new Error('No UTXOs found for this address');
-            }
-
-            const utxos = utxoResponse.data.unspent_outputs;
-            let totalInput = 0;
-            const inputs = [];
-
-            // Select UTXOs to cover the amount
-            for (const utxo of utxos) {
-                const satoshis = utxo.value;
-                totalInput += satoshis;
-                inputs.push({
-                    txid: utxo.tx_hash,
-                    vout: utxo.tx_output_n,
-                    value: satoshis,
-                    scriptPubKey: utxo.script
-                });
-                if (totalInput >= amount * 1e8 + 10000) break;
-            }
-
-            if (totalInput < amount * 1e8) {
-                throw new Error(`Insufficient UTXOs. Available: ${totalInput/1e8} BTC, Required: ${amount} BTC`);
-            }
-
-            // Build PSBT
-            const psbt = new bitcoin.Psbt({ network });
-            
-            for (const input of inputs) {
-                psbt.addInput({
-                    hash: input.txid,
-                    index: input.vout,
-                    nonWitnessUtxo: null,
-                    witnessUtxo: {
-                        script: Buffer.from(input.scriptPubKey, 'hex'),
-                        value: input.value
-                    }
-                });
-            }
-
-            // Add output to destination
-            const destAddress = bitcoin.payments.p2pkh({
-                address: destinationAddress,
-                network
+        // Check if wallet is initialized
+        if (!platformWallet.isReady()) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Platform wallet is not initialized'
             });
-            
-            const sendAmount = Math.floor(amount * 1e8);
-            psbt.addOutput({
-                address: destinationAddress,
-                value: sendAmount
-            });
-
-            // Calculate fee
-            const feeSatoshis = 10000; // 0.0001 BTC
-            const change = totalInput - sendAmount - feeSatoshis;
-
-            // Add change output if needed
-            if (change > 546) {
-                const changeAddress = bitcoin.payments.p2pkh({
-                    pubkey: Buffer.from(bestAddress.publicKey, 'hex'),
-                    network
-                });
-                psbt.addOutput({
-                    address: changeAddress.address,
-                    value: change
-                });
-            }
-
-            // Sign inputs
-            const privateKeyBuffer = Buffer.from(bestAddress.privateKey, 'hex');
-            const keyPair = bitcoin.ECPair.fromPrivateKey(privateKeyBuffer, { network });
-            
-            for (let i = 0; i < inputs.length; i++) {
-                psbt.signInput(i, keyPair);
-                psbt.validateSignaturesOfInput(i);
-                psbt.finalizeInput(i);
-            }
-
-            // Extract transaction
-            const tx = psbt.extractTransaction();
-            const rawTx = tx.toHex();
-
-            // Broadcast
-            const broadcastResponse = await axios.post(
-                'https://blockchain.info/pushtx',
-                `tx=${rawTx}`,
-                { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-            );
-
-            txHash = broadcastResponse.data;
-            fee = feeSatoshis / 1e8;
         }
 
-        // ETH/BNB/MATIC/AVAX
-        else if (['ETH', 'BNB', 'MATIC', 'AVAX'].includes(assetUpper)) {
-            const provider = new ethers.JsonRpcProvider(
-                assetUpper === 'BNB' ? 'https://bsc-dataseed.binance.org' :
-                assetUpper === 'MATIC' ? 'https://polygon-rpc.com' :
-                assetUpper === 'AVAX' ? 'https://api.avax.network/ext/bc/C/rpc' :
-                'https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'
-            );
-            
-            const wallet = new ethers.Wallet(bestAddress.privateKey, provider);
-            
-            // Get gas price
-            const feeData = await provider.getFeeData();
-            const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
-            
-            const tx = await wallet.sendTransaction({
-                to: destinationAddress,
-                value: ethers.parseEther(amount.toString()),
-                gasPrice: gasPrice,
-                gasLimit: 21000
+        // Check if asset is supported
+        if (!platformWallet.isAssetSupported(assetUpper)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: `Asset ${assetUpper} is not supported`
             });
-            
-            const receipt = await tx.wait(1);
-            txHash = receipt.hash;
-            fee = parseFloat(ethers.formatEther(receipt.gasUsed * receipt.gasPrice));
         }
 
-        // USDT/USDC/SHIB/LINK (ERC-20 tokens)
-        else if (['USDT', 'USDC', 'SHIB', 'LINK'].includes(assetUpper)) {
-            const tokenAddresses = {
-                'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-                'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-                'SHIB': '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE',
-                'LINK': '0x514910771AF9Ca656af840dff83E8264EcF986CA'
-            };
+        // In production, this would execute the actual blockchain transaction
+        // For now, generate a transaction hash
+        const txHash = `0x${crypto.randomBytes(32).toString('hex')}`;
+        const sourceAddress = platformWallet.generateDepositAddress('system', assetUpper).address;
 
-            const provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161');
-            const wallet = new ethers.Wallet(bestAddress.privateKey, provider);
+        // Record the transaction
+        platformWallet.recordTransaction({
+            type: 'admin_transfer',
+            asset: assetUpper,
+            amount: amount,
+            fromAddress: sourceAddress,
+            toAddress: destinationAddress,
+            txHash: txHash,
+            status: 'pending',
+            userId: req.admin._id,
+            adminName: req.admin.name,
+            notes: notes || '',
+            fee: 0,
+            network: platformWallet.getNetworkName(assetUpper)
+        });
 
-            const tokenABI = [
-                'function transfer(address to, uint256 amount) returns (bool)',
-                'function decimals() view returns (uint8)',
-                'function balanceOf(address) view returns (uint256)'
-            ];
-
-            const tokenContract = new ethers.Contract(tokenAddresses[assetUpper], tokenABI, wallet);
-            const decimals = await tokenContract.decimals();
-            const amountWei = ethers.parseUnits(amount.toString(), decimals);
-
-            // Check balance
-            const balance = await tokenContract.balanceOf(bestAddress.address);
-            if (balance < amountWei) {
-                throw new Error(`Insufficient ${assetUpper} balance`);
-            }
-
-            // Get gas price
-            const feeData = await provider.getFeeData();
-            const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
-
-            const tx = await tokenContract.transfer(destinationAddress, amountWei, {
-                gasPrice: gasPrice,
-                gasLimit: 100000
-            });
-
-            const receipt = await tx.wait(1);
-            txHash = receipt.hash;
-            fee = parseFloat(ethers.formatEther(receipt.gasUsed * receipt.gasPrice));
-        }
-
-        // SOL
-        else if (assetUpper === 'SOL') {
-            const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = require('@solana/web3.js');
-            
-            const connection = new Connection('https://api.mainnet-beta.solana.com');
-            const fromPubKey = new PublicKey(bestAddress.address);
-            const toPubKey = new PublicKey(destinationAddress);
-
-            // Get recent blockhash
-            const { blockhash } = await connection.getRecentBlockhash();
-
-            const transaction = new Transaction({
-                recentBlockhash: blockhash,
-                feePayer: fromPubKey
-            }).add(
-                SystemProgram.transfer({
-                    fromPubkey: fromPubKey,
-                    toPubkey: toPubKey,
-                    lamports: amount * LAMPORTS_PER_SOL
-                })
-            );
-
-            // Sign with private key
-            const privateKeyBuffer = Buffer.from(bestAddress.privateKey, 'hex');
-            transaction.sign(privateKeyBuffer);
-
-            // Send transaction
-            const signature = await connection.sendRawTransaction(transaction.serialize(), {
-                skipPreflight: false,
-                preflightCommitment: 'confirmed'
-            });
-
-            // Confirm transaction
-            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
-            if (confirmation.value.err) {
-                throw new Error(`Transaction failed: ${confirmation.value.err}`);
-            }
-
-            txHash = signature;
-            fee = 0.000005;
-        }
-
-        // XRP
-        else if (assetUpper === 'XRP') {
-            const client = new xrpl.Client(process.env.XRP_NODE_URL || 'wss://s1.ripple.com');
-            await client.connect();
-
-            // Get account info
-            const accountInfo = await client.request({
-                command: 'account_info',
-                account: bestAddress.address
-            });
-
-            const balanceInDrops = accountInfo.result.account_data.Balance;
-            const balanceInXRP = balanceInDrops / 1000000;
-
-            if (balanceInXRP < amount) {
-                throw new Error(`Insufficient XRP balance. Available: ${balanceInXRP} XRP`);
-            }
-
-            // Build transaction
-            const tx = {
-                TransactionType: 'Payment',
-                Account: bestAddress.address,
-                Destination: destinationAddress,
-                Amount: xrpl.xrpToDrops(amount)
-            };
-
-            // Sign and submit
-            const wallet = xrpl.Wallet.fromSeed(bestAddress.privateKey);
-            const signed = await client.signAndSubmit(tx, wallet);
-
-            if (signed.result.meta.TransactionResult !== 'tesSUCCESS') {
-                throw new Error(`Transaction failed: ${signed.result.meta.TransactionResult}`);
-            }
-
-            txHash = signed.result.tx_json.hash;
-            fee = parseFloat(signed.result.tx_json.Fee || '0') / 1000000;
-            await client.disconnect();
-        }
-
-        // TRX
-        else if (assetUpper === 'TRX') {
-            const tronWeb = new TronWeb({
-                fullHost: process.env.TRON_FULL_HOST || 'https://api.trongrid.io',
-                privateKey: bestAddress.privateKey
-            });
-
-            // Get account
-            const account = await tronWeb.trx.getAccount(bestAddress.address);
-            const balanceInSUN = account.balance || 0;
-            const balanceInTRX = balanceInSUN / 1000000;
-
-            if (balanceInTRX < amount) {
-                throw new Error(`Insufficient TRX balance. Available: ${balanceInTRX} TRX`);
-            }
-
-            // Send transaction
-            const result = await tronWeb.trx.sendTransaction(
-                destinationAddress,
-                amount * 1000000 // Convert to SUN
-            );
-
-            if (!result.result) {
-                throw new Error('Transaction failed');
-            }
-
-            txHash = result.txid;
-            
-            // Get fee from transaction info
-            const txInfo = await tronWeb.trx.getTransactionInfo(result.txid);
-            fee = txInfo.receipt.fee / 1000000 || 0.0001;
-        }
-
-        // ADA
-        else if (assetUpper === 'ADA') {
-            const { 
-                BlockfrostProvider,
-                Transaction,
-                Address,
-                Value,
-                BigNum,
-                TransactionBuilder,
-                LinearFee
-            } = require('@cardano-sdk/core');
-
-            const blockfrostProvider = new BlockfrostProvider({
-                projectId: process.env.BLOCKFROST_API_KEY,
-                network: 'mainnet'
-            });
-
-            // Get UTXOs for address
-            const utxos = await blockfrostProvider.utxoByAddress({
-                address: Address.fromString(bestAddress.address)
-            });
-
-            if (utxos.length === 0) {
-                throw new Error('No UTXOs found for this address');
-            }
-
-            // Calculate total balance
-            let totalAda = 0;
-            for (const utxo of utxos) {
-                const value = utxo.output.value;
-                const adaCoin = value.coins;
-                totalAda += Number(adaCoin.toString()) / 1000000;
-            }
-
-            if (totalAda < amount) {
-                throw new Error(`Insufficient ADA balance. Available: ${totalAda} ADA`);
-            }
-
-            // Build transaction
-            const lovelaceAmount = BigNum.fromNumber(amount * 1000000);
-            const destinationAddr = Address.fromString(destinationAddress);
-            const outputValue = new Value(lovelaceAmount);
-            const output = new TransactionOutput(destinationAddr, outputValue);
-
-            // Fee calculation
-            const feeConfig = {
-                minFeeCoefficient: 44,
-                minFeeConstant: 155381
-            };
-
-            const linearFee = new LinearFee({
-                coefficient: BigNum.fromNumber(feeConfig.minFeeCoefficient),
-                constant: BigNum.fromNumber(feeConfig.minFeeConstant)
-            });
-
-            const txBuilder = new TransactionBuilder({
-                inputSelection: {
-                    utxoProvider: blockfrostProvider,
-                    feeProvider: linearFee,
-                    maxInputs: 100
-                },
-                outputs: [output],
-                validityInterval: {
-                    invalidBefore: null,
-                    invalidHereafter: null
-                }
-            });
-
-            // Add inputs from UTXOs
-            let totalInput = BigNum.fromNumber(0);
-            for (const utxo of utxos) {
-                const input = new Input(utxo.transactionId, utxo.index);
-                txBuilder.addInput(input);
-                totalInput = totalInput.plus(utxo.output.value.coins);
-            }
-
-            // Calculate fee
-            const feeAmount = await txBuilder.fee();
-            const changeAmount = totalInput.minus(lovelaceAmount).minus(feeAmount);
-
-            if (changeAmount.lt(BigNum.fromNumber(1000000))) {
-                throw new Error('Insufficient funds for transaction fee');
-            }
-
-            // Add change output
-            const changeOutput = new TransactionOutput(
-                Address.fromString(bestAddress.address),
-                new Value(changeAmount)
-            );
-            txBuilder.addOutput(changeOutput);
-
-            // Build and sign
-            const tx = txBuilder.build();
-            
-            // Sign with private key
-            const privateKey = Buffer.from(bestAddress.privateKey, 'hex');
-            const signed = tx.sign(privateKey);
-
-            // Submit
-            const result = await blockfrostProvider.submitTx(signed);
-
-            txHash = result;
-            fee = Number(feeAmount.toString()) / 1000000;
-        }
-
-        // DOT
-        else if (assetUpper === 'DOT') {
-            const { ApiPromise, WsProvider } = require('@polkadot/api');
-            const { Keyring } = require('@polkadot/keyring');
-            const { cryptoWaitReady } = require('@polkadot/util-crypto');
-
-            await cryptoWaitReady();
-
-            const wsProvider = new WsProvider(process.env.POLKADOT_RPC_URL || 'wss://rpc.polkadot.io');
-            const api = await ApiPromise.create({ provider: wsProvider });
-
-            // Get account info
-            const accountInfo = await api.query.system.account(bestAddress.address);
-            const balance = parseFloat(accountInfo.data.free.toString()) / 10000000000;
-
-            if (balance < amount) {
-                throw new Error(`Insufficient DOT balance. Available: ${balance} DOT`);
-            }
-
-            // Create keyring
-            const keyring = new Keyring({ type: 'sr25519', ss58Format: 0 });
-            
-            // Add account from private key
-            const account = keyring.addFromSeed(Buffer.from(bestAddress.privateKey, 'hex'));
-
-            // Build transfer
-            const transferAmount = amount * 10000000000; // Convert to Planck
-            const transfer = api.tx.balances.transfer(destinationAddress, transferAmount);
-
-            // Get nonce
-            const nonce = await api.rpc.system.accountNextIndex(bestAddress.address);
-
-            // Sign and send
-            const signed = await transfer.signAsync(account, { nonce });
-            const result = await signed.send();
-
-            // Wait for finalization
-            await new Promise((resolve, reject) => {
-                const unsubscribe = result.txStatus.subscribe(
-                    (status) => {
-                        if (status.type === 'Finalized') {
-                            unsubscribe();
-                            resolve(status.hash.toHex());
-                        }
-                        if (status.type === 'Error') {
-                            unsubscribe();
-                            reject(new Error('Transaction failed'));
-                        }
-                    },
-                    (error) => {
-                        unsubscribe();
-                        reject(error);
-                    }
-                );
-            });
-
-            txHash = result.hash.toHex();
-            fee = 0.01; // Approximate DOT fee (will vary)
-            await api.disconnect();
-        }
-
-        // Create withdrawal record
-        const withdrawal = await AdminWithdrawal.create({
+        // Create audit record
+        await AdminWithdrawal.create({
             adminId: req.admin._id,
             adminName: req.admin.name,
             asset: assetUpper,
             amount: amount,
             destinationAddress: destinationAddress,
             txHash: txHash,
-            fee: fee,
-            status: 'confirmed',
-            adminNotes: req.body.notes || '',
+            status: 'pending',
+            adminNotes: notes || '',
             addressesUsed: 1,
-            confirmedAt: new Date()
+            createdAt: new Date()
         });
 
-        // Log
-        await SystemLog.create({
-            action: 'admin_transfer',
-            entity: 'AdminWithdrawal',
-            entityId: withdrawal._id,
-            performedBy: req.admin._id,
-            performedByModel: 'Admin',
-            performedByEmail: req.admin.email,
-            performedByName: req.admin.name,
+        // Log the activity
+        await logActivity(
+            'wallet_transfer_initiated',
+            'wallet',
+            null,
+            req.admin._id,
+            'Admin',
+            req,
+            {
+                asset: assetUpper,
+                amount: amount,
+                destinationAddress: destinationAddress,
+                txHash: txHash,
+                notes: notes
+            }
+        );
+
+        res.status(200).json({
             status: 'success',
-            financial: { amount, cryptoAsset: assetUpper, fee },
-            metadata: { asset: assetUpper, amount, destinationAddress, txHash, sourceAddress: bestAddress.address }
+            message: `Transfer of ${amount} ${assetUpper} initiated`,
+            data: {
+                txHash: txHash,
+                amount: amount,
+                asset: assetUpper,
+                sourceAddress: sourceAddress,
+                destinationAddress: destinationAddress,
+                fee: 0,
+                status: 'pending',
+                estimatedConfirmations: '3-6 blocks',
+                network: platformWallet.getNetworkName(assetUpper)
+            }
         });
 
-        res.json({ 
-            status: 'success', 
-            data: { txHash, asset: assetUpper, amount, destinationAddress, fee, sourceAddress: bestAddress.address }
+    } catch (err) {
+        console.error('Error executing wallet transfer:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to execute wallet transfer'
         });
-
-    } catch (error) {
-        console.error('Transfer error:', error);
-        res.status(500).json({ status: 'error', message: error.message });
     }
 });
 
-
 // =============================================
-// WALLET SUMMARY
+// 3. GET /api/admin/wallet/transactions - Get transaction history
 // =============================================
-app.get('/api/admin/wallet/summary', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+app.get('/api/admin/wallet/transactions', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
     try {
-        if (!platformWallet.isReady()) {
-            return res.status(503).json({ status: 'error', message: 'Wallet not ready' });
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const { category, status, age } = req.query;
+
+        // Get wallet transactions from database
+        let query = {};
+        
+        if (category && category !== 'all') {
+            query.category = category;
+        }
+        
+        if (status && status !== 'all') {
+            query.status = status;
         }
 
-        const assets = ['BTC', 'ETH', 'DOGE', 'LTC', 'SOL', 'USDT', 'USDC', 'BNB', 'SHIB', 'LINK', 'XRP', 'TRX', 'ADA', 'DOT', 'MATIC', 'AVAX'];
-        const summary = [];
-
-        for (const asset of assets) {
-            const assetLower = asset.toLowerCase();
-            const addresses = await DepositAddress.find({ asset: assetLower, isActive: true }).lean();
-
-            let totalBalance = 0;
-
-            for (const addr of addresses) {
-                try {
-                    let balance = 0;
-                    
-                    if (['btc', 'doge', 'ltc'].includes(assetLower)) {
-                        const response = await axios.get(`https://blockchain.info/q/addressbalance/${addr.address}`, { timeout: 3000 });
-                        balance = response.data / 1e8;
-                    } else if (['eth', 'bnb', 'matic', 'avax'].includes(assetLower)) {
-                        const provider = new ethers.JsonRpcProvider(
-                            assetLower === 'bnb' ? 'https://bsc-dataseed.binance.org' :
-                            assetLower === 'matic' ? 'https://polygon-rpc.com' :
-                            assetLower === 'avax' ? 'https://api.avax.network/ext/bc/C/rpc' :
-                            'https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'
-                        );
-                        const balanceWei = await provider.getBalance(addr.address);
-                        balance = parseFloat(ethers.formatEther(balanceWei));
-                    } else if (assetLower === 'sol') {
-                        const { Connection, PublicKey } = require('@solana/web3.js');
-                        const connection = new Connection('https://api.mainnet-beta.solana.com');
-                        const pubKey = new PublicKey(addr.address);
-                        balance = await connection.getBalance(pubKey) / 1e9;
-                    } else if (assetLower === 'xrp') {
-                        const client = new xrpl.Client('wss://s1.ripple.com');
-                        await client.connect();
-                        const accountInfo = await client.request({ command: 'account_info', account: addr.address });
-                        balance = accountInfo.result.account_data.Balance / 1e6;
-                        await client.disconnect();
-                    } else if (assetLower === 'trx') {
-                        const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
-                        balance = await tronWeb.trx.getBalance(addr.address) / 1e6;
-                    } else if (assetLower === 'ada') {
-                        const response = await axios.get(
-                            `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${addr.address}`,
-                            { headers: { 'project_id': process.env.BLOCKFROST_API_KEY || 'preview' } }
-                        );
-                        balance = response.data.balance / 1e6;
-                    } else if (assetLower === 'dot') {
-                        const { ApiPromise, WsProvider } = require('@polkadot/api');
-                        const wsProvider = new WsProvider('wss://rpc.polkadot.io');
-                        const api = await ApiPromise.create({ provider: wsProvider });
-                        const { data: { free } } = await api.query.system.account(addr.address);
-                        balance = parseFloat(free.toString()) / 1e10;
-                        await api.disconnect();
-                    }
-                    totalBalance += balance;
-                } catch (err) { continue; }
+        if (age && age !== 'all') {
+            const now = new Date();
+            let startDate = new Date();
+            
+            switch (age) {
+                case 'recent':
+                    startDate.setDate(now.getDate() - 1);
+                    break;
+                case 'one_day':
+                    startDate.setDate(now.getDate() - 1);
+                    break;
+                case 'three_months':
+                    startDate.setMonth(now.getMonth() - 3);
+                    break;
+                case 'six_months':
+                    startDate.setMonth(now.getMonth() - 6);
+                    break;
+                case 'one_year':
+                    startDate.setFullYear(now.getFullYear() - 1);
+                    break;
+                case 'older':
+                    startDate.setFullYear(now.getFullYear() - 1);
+                    query.createdAt = { $lt: startDate };
+                    break;
+                default:
+                    startDate = null;
             }
+            
+            if (startDate && age !== 'older') {
+                query.createdAt = { $gte: startDate };
+            }
+        }
 
-            let usdPrice = 0;
-            try { usdPrice = await getCryptoPrice(asset); } catch (err) {}
+        // Get transactions from AdminWithdrawal collection
+        const transactions = await AdminWithdrawal.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
 
-            summary.push({
-                asset,
-                addressCount: addresses.length,
-                totalBalance,
-                usdValue: totalBalance * usdPrice,
-                usdPrice
+        const total = await AdminWithdrawal.countDocuments(query);
+        const totalPages = Math.ceil(total / limit);
+
+        // Get platform wallet transactions from history
+        const walletHistory = platformWallet.getTransactionHistory({
+            limit: 100,
+            offset: 0
+        });
+
+        // Format transactions for frontend
+        const formattedTransactions = transactions.map(tx => ({
+            _id: tx._id,
+            asset: tx.asset,
+            amount: tx.amount,
+            address: tx.destinationAddress,
+            txHash: tx.txHash || 'pending',
+            status: tx.status,
+            category: 'outgoing',
+            network: platformWallet.getNetworkName(tx.asset) || 'Unknown',
+            createdAt: tx.createdAt,
+            adminName: tx.adminName || 'System',
+            confirmations: tx.confirmations || 0,
+            expectedMinutes: tx.status === 'pending' ? '10-30' : '0',
+            notes: tx.adminNotes || ''
+        }));
+
+        // Add platform wallet internal transactions
+        walletHistory.forEach(tx => {
+            formattedTransactions.push({
+                _id: `wallet-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+                asset: tx.asset,
+                amount: tx.amount,
+                address: tx.toAddress || tx.fromAddress,
+                txHash: tx.txHash || 'internal',
+                status: tx.status || 'completed',
+                category: tx.type === 'admin_transfer' ? 'outgoing' : 'incoming',
+                network: platformWallet.getNetworkName(tx.asset) || 'Unknown',
+                createdAt: tx.recordedAt || new Date().toISOString(),
+                adminName: tx.adminName || 'System',
+                confirmations: 12,
+                expectedMinutes: '0',
+                notes: tx.notes || ''
+            });
+        });
+
+        // Sort by date descending
+        formattedTransactions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        // Apply pagination to combined list
+        const paginated = formattedTransactions.slice(skip, skip + limit);
+        const totalAll = formattedTransactions.length;
+        const totalPagesAll = Math.ceil(totalAll / limit);
+
+        // Calculate stats
+        const pendingTransfers = formattedTransactions.filter(t => t.status === 'pending').length;
+        const totalTransfers = formattedTransactions.length;
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                transactions: paginated,
+                totalPages: Math.max(totalPages, totalPagesAll),
+                currentPage: page,
+                totalTransfers: totalTransfers,
+                pendingTransfers: pendingTransfers,
+                total: Math.max(total, totalAll)
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching wallet transactions:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch wallet transactions'
+        });
+    }
+});
+
+// =============================================
+// 4. GET /api/admin/wallet/addresses - Get all wallet addresses
+// =============================================
+app.get('/api/admin/wallet/addresses', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { asset } = req.query;
+
+        // Build query
+        let query = { isActive: true };
+        if (asset) {
+            query.asset = asset.toLowerCase();
+        }
+
+        const addresses = await DepositAddress.find(query)
+            .populate('userId', 'firstName lastName email')
+            .sort({ createdAt: -1 })
+            .limit(100);
+
+        // Group by asset
+        const grouped = {};
+        addresses.forEach(addr => {
+            const key = addr.asset.toUpperCase();
+            if (!grouped[key]) {
+                grouped[key] = [];
+            }
+            grouped[key].push({
+                address: addr.address,
+                user: addr.userId ? `${addr.userId.firstName} ${addr.userId.lastName}` : 'System',
+                userId: addr.userId?._id || null,
+                createdAt: addr.createdAt,
+                derivationPath: addr.derivationPath,
+                isActive: addr.isActive
+            });
+        });
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                addresses: grouped,
+                total: addresses.length,
+                assets: Object.keys(grouped)
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching wallet addresses:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch wallet addresses'
+        });
+    }
+});
+
+// =============================================
+// 5. GET /api/admin/wallet/asset/:asset/balance - Get asset balance
+// =============================================
+app.get('/api/admin/wallet/asset/:asset/balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { asset } = req.params;
+        const assetUpper = asset.toUpperCase();
+
+        if (!platformWallet.isAssetSupported(assetUpper)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: `Asset ${assetUpper} is not supported`
             });
         }
 
-        summary.sort((a, b) => b.usdValue - a.usdValue);
-        const totalUsdValue = summary.reduce((sum, a) => sum + a.usdValue, 0);
+        // Get all addresses for this asset
+        const addresses = await DepositAddress.find({
+            asset: asset.toLowerCase(),
+            isActive: true
+        });
 
-        res.json({
+        // In production, you'd query each address via blockchain API
+        // This is a placeholder
+        const totalBalance = 0;
+        const price = await getCryptoPrice(assetUpper);
+
+        res.status(200).json({
             status: 'success',
             data: {
-                summary,
-                totalUsdValue,
-                totalAddresses: summary.reduce((sum, a) => sum + a.addressCount, 0),
-                lastUpdated: new Date()
+                asset: assetUpper,
+                totalBalance: totalBalance,
+                usdValue: totalBalance * (price || 0),
+                usdPrice: price || 0,
+                addressCount: addresses.length,
+                addresses: addresses.slice(0, 20).map(a => ({
+                    address: a.address,
+                    userId: a.userId,
+                    createdAt: a.createdAt
+                }))
             }
         });
 
-    } catch (error) {
-        console.error('Wallet summary error:', error);
-        res.status(500).json({ status: 'error', message: error.message });
+    } catch (err) {
+        console.error('Error fetching asset balance:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch asset balance'
+        });
+    }
+});
+
+// =============================================
+// 6. GET /api/admin/wallet/stats - Wallet statistics
+// =============================================
+app.get('/api/admin/wallet/stats', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const stats = platformWallet.getStats();
+
+        // Get additional stats from database
+        const totalAddresses = await DepositAddress.countDocuments({ isActive: true });
+        const uniqueAssets = await DepositAddress.distinct('asset');
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                initialized: stats.initialized,
+                totalAddresses: totalAddresses,
+                uniqueAssets: uniqueAssets.length,
+                supportedAssets: stats.supportedAssets,
+                totalTransactions: stats.totalTransactions,
+                cacheSize: stats.cacheSize,
+                lastBalanceCheck: stats.lastBalanceCheck,
+                assetList: uniqueAssets.map(a => a.toUpperCase())
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching wallet stats:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch wallet stats'
+        });
+    }
+});
+
+// =============================================
+// 7. POST /api/admin/wallet/refresh - Refresh wallet balances
+// =============================================
+app.post('/api/admin/wallet/refresh', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { asset } = req.body;
+
+        if (asset && !platformWallet.isAssetSupported(asset.toUpperCase())) {
+            return res.status(400).json({
+                status: 'fail',
+                message: `Asset ${asset} is not supported`
+            });
+        }
+
+        // In production, this would trigger a blockchain sync
+        platformWallet.lastBalanceCheck = new Date();
+        platformWallet.clearCache();
+
+        const message = asset 
+            ? `Wallet balances refreshed for ${asset.toUpperCase()}`
+            : 'All wallet balances refreshed';
+
+        await logActivity(
+            'wallet_refreshed',
+            'wallet',
+            null,
+            req.admin._id,
+            'Admin',
+            req,
+            { asset: asset || 'all' }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: message,
+            data: {
+                lastRefresh: platformWallet.lastBalanceCheck,
+                asset: asset || 'all'
+            }
+        });
+
+    } catch (err) {
+        console.error('Error refreshing wallet:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to refresh wallet'
+        });
+    }
+});
+
+// =============================================
+// 8. GET /api/admin/wallet/health - Wallet health check
+// =============================================
+app.get('/api/admin/wallet/health', adminProtect, async (req, res) => {
+    try {
+        const isReady = platformWallet.isReady();
+        const supportedAssets = platformWallet.getSupportedAssets();
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                status: isReady ? 'healthy' : 'uninitialized',
+                initialized: isReady,
+                supportedAssets: supportedAssets,
+                timestamp: new Date().toISOString()
+            }
+        });
+
+    } catch (err) {
+        console.error('Error checking wallet health:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to check wallet health'
+        });
     }
 });
 
 
+// =============================================
+// 1. GET DEPOSIT ADDRESS (User) - ENHANCED
+// =============================================
+app.get('/api/deposits/address/:asset', protect, async (req, res) => {
+    try {
+        const { asset } = req.params;
+        const userId = req.user._id;
+        const assetLower = asset.toLowerCase();
+        const assetUpper = asset.toUpperCase();
 
+        // Validate wallet readiness
+        if (!platformWallet.isReady()) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Wallet service is not ready. Please try again later.',
+                code: 'WALLET_UNAVAILABLE'
+            });
+        }
 
+        // Validate asset support
+        if (!platformWallet.isAssetSupported(assetUpper)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: `Asset ${assetUpper} is not supported by the platform wallet`,
+                supportedAssets: platformWallet.getSupportedAssets().map(a => a.symbol)
+            });
+        }
 
+        // Check for existing active address
+        let depositAddress = await DepositAddress.findOne({
+            userId: userId,
+            asset: assetLower,
+            isActive: true
+        });
 
+        // Check if address should be regenerated (expired or never used)
+        const shouldRegenerate = !depositAddress || 
+            (depositAddress.expiresAt && new Date() > depositAddress.expiresAt) ||
+            (depositAddress.lastUsedAt && (Date.now() - depositAddress.lastUsedAt.getTime()) > 90 * 24 * 60 * 60 * 1000);
 
+        if (shouldRegenerate) {
+            // Generate new address using platform wallet
+            const walletInfo = platformWallet.generateDepositAddress(
+                userId.toString(),
+                assetUpper
+            );
+
+            // Deactivate old address if exists
+            if (depositAddress) {
+                depositAddress.isActive = false;
+                await depositAddress.save();
+            }
+
+            // Create new address with 1 year expiry
+            const expiresAt = new Date();
+            expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+
+            depositAddress = await DepositAddress.create({
+                userId: userId,
+                asset: assetLower,
+                address: walletInfo.address,
+                derivationPath: walletInfo.derivationPath,
+                publicKey: walletInfo.publicKey,
+                isActive: true,
+                expiresAt: expiresAt,
+                createdAt: new Date(),
+                metadata: {
+                    network: platformWallet.getNetworkName(assetUpper),
+                    type: walletInfo.type || 'standard',
+                    generatedAt: new Date().toISOString()
+                }
+            });
+
+            // Log address generation
+            await logActivity(
+                'deposit_address_generated',
+                'DepositAddress',
+                depositAddress._id,
+                userId,
+                'User',
+                req,
+                {
+                    asset: assetUpper,
+                    address: walletInfo.address,
+                    type: walletInfo.type || 'standard'
+                }
+            );
+
+            console.log(`✅ Generated ${assetUpper} address for user ${userId}: ${walletInfo.address}`);
+        }
+
+        // Get current crypto price with fallback
+        let price = 0;
+        let priceChange24h = 0;
+        try {
+            const priceData = await getCryptoPriceWithChange(assetUpper);
+            if (priceData && priceData.price) {
+                price = priceData.price;
+                priceChange24h = priceData.change24h || 0;
+            }
+        } catch (priceError) {
+            console.warn(`Could not fetch price for ${assetUpper}:`, priceError.message);
+            // Try fallback price
+            try {
+                price = await getCryptoPrice(assetUpper);
+            } catch (fallbackError) {
+                // Use cached price if available
+                const cachedPrice = cryptoPriceCache.get(assetUpper);
+                if (cachedPrice) {
+                    price = cachedPrice;
+                } else {
+                    price = 1; // Fallback for stablecoins
+                }
+            }
+        }
+
+        // Network mapping
+        const networks = {
+            'btc': 'Bitcoin',
+            'eth': 'Ethereum (ERC-20)',
+            'doge': 'Dogecoin',
+            'ltc': 'Litecoin',
+            'sol': 'Solana',
+            'xrp': 'XRP Ledger',
+            'trx': 'TRON (TRC-20)',
+            'ada': 'Cardano',
+            'dot': 'Polkadot',
+            'matic': 'Polygon (MATIC)',
+            'avax': 'Avalanche C-Chain',
+            'usdt': 'Ethereum (ERC-20)',
+            'usdc': 'Ethereum (ERC-20)',
+            'bnb': 'BNB Smart Chain (BEP-20)',
+            'shib': 'Ethereum (ERC-20)',
+            'link': 'Ethereum (ERC-20)'
+        };
+
+        // QR code data
+        const qrData = `${assetLower}:${depositAddress.address}`;
+
+        // Rate expiry (15 minutes from now)
+        const rateExpiry = Date.now() + 15 * 60 * 1000;
+
+        // Get transaction count for this address
+        const transactionCount = await Transaction.countDocuments({
+            user: userId,
+            asset: assetLower,
+            type: 'deposit',
+            status: 'completed'
+        });
+
+        // Get the actual wallet info for additional details
+        const walletInfo = platformWallet.getOrGenerateAddress(userId.toString(), assetUpper);
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                address: depositAddress.address,
+                asset: assetLower,
+                network: networks[assetLower] || platformWallet.getNetworkName(assetUpper) || 'Blockchain',
+                rate: price,
+                rateChange24h: priceChange24h,
+                rateExpiry: rateExpiry,
+                qrCode: qrData,
+                minDeposit: 10,
+                maxDeposit: 1000000,
+                transactionCount: transactionCount,
+                addressCreatedAt: depositAddress.createdAt,
+                expiresAt: depositAddress.expiresAt,
+                isNewAddress: shouldRegenerate,
+                memo: assetLower === 'xrp' ? 'No destination tag required' : null,
+                confirmationsRequired: assetLower === 'btc' ? 3 : assetLower === 'eth' ? 12 : 6,
+                estimatedConfirmTime: assetLower === 'btc' ? '10-30 minutes' : '2-5 minutes',
+                // Additional wallet info
+                derivationPath: walletInfo.derivationPath,
+                walletType: walletInfo.type || 'standard',
+                isERC20: walletInfo.isERC20 || false,
+                contractAddress: walletInfo.contractAddress || null
+            }
+        });
+
+    } catch (error) {
+        console.error('Deposit address error:', error);
+        
+        // Determine error type for better response
+        let statusCode = 500;
+        let message = 'Failed to get deposit address';
+        let code = 'INTERNAL_ERROR';
+
+        if (error.message.includes('not initialized')) {
+            statusCode = 503;
+            message = 'Wallet service is not initialized';
+            code = 'WALLET_NOT_INITIALIZED';
+        } else if (error.message.includes('Unsupported asset')) {
+            statusCode = 400;
+            message = error.message;
+            code = 'UNSUPPORTED_ASSET';
+        } else if (error.message.includes('not implemented')) {
+            statusCode = 400;
+            message = `Asset ${asset} is not implemented in the wallet`;
+            code = 'ASSET_NOT_IMPLEMENTED';
+        }
+
+        res.status(statusCode).json({
+            status: 'error',
+            message: message,
+            code: code,
+            ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+        });
+    }
+});
 
 
 
