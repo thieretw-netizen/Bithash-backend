@@ -8327,6 +8327,918 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 
+// =============================================
+// PLATFORM WALLET
+// =============================================
+class PlatformWallet {
+    constructor() {
+        this.root = null;
+        this.initialized = false;
+    }
+
+    initialize(mnemonic) {
+        if (!mnemonic) return false;
+        try {
+            const seed = bip39.mnemonicToSeedSync(mnemonic);
+            this.root = bip32.fromSeed(seed);
+            this.initialized = true;
+            return true;
+        } catch (e) {
+            console.error('Wallet init error:', e.message);
+            return false;
+        }
+    }
+
+    generateDepositAddress(userId, asset) {
+        if (!this.initialized) throw new Error('Wallet not initialized');
+        
+        const userIdStr = userId.toString();
+        const assetUpper = asset.toUpperCase();
+        
+        const paths = {
+            'BTC': `m/44'/0'/0'/0/${userIdStr}`,
+            'DOGE': `m/44'/3'/0'/0/${userIdStr}`,
+            'LTC': `m/44'/2'/0'/0/${userIdStr}`,
+            'ETH': `m/44'/60'/0'/0/${userIdStr}`,
+            'USDT': `m/44'/60'/0'/0/${userIdStr}`,
+            'USDC': `m/44'/60'/0'/0/${userIdStr}`,
+            'BNB': `m/44'/60'/0'/0/${userIdStr}`,
+            'SHIB': `m/44'/60'/0'/0/${userIdStr}`,
+            'LINK': `m/44'/60'/0'/0/${userIdStr}`,
+            'MATIC': `m/44'/60'/0'/0/${userIdStr}`,
+            'AVAX': `m/44'/60'/0'/0/${userIdStr}`,
+            'SOL': `m/44'/501'/0'/0/${userIdStr}`,
+            'XRP': `m/44'/144'/0'/0/${userIdStr}`,
+            'TRX': `m/44'/195'/0'/0/${userIdStr}`,
+            'ADA': `m/44'/1815'/0'/0/${userIdStr}`,
+            'DOT': `m/44'/354'/0'/0/${userIdStr}`
+        };
+
+        const path = paths[assetUpper];
+        if (!path) throw new Error(`Unsupported asset: ${assetUpper}`);
+        
+        const child = this.root.derivePath(path);
+
+        // BTC/DOGE/LTC
+        if (['BTC', 'DOGE', 'LTC'].includes(assetUpper)) {
+            const networks = {
+                'BTC': bitcoin.networks.bitcoin,
+                'DOGE': {
+                    messagePrefix: '\x19Dogecoin Signed Message:\n',
+                    bech32: 'doge',
+                    bip32: { public: 0x02facafd, private: 0x02fac398 },
+                    pubKeyHash: 0x1e,
+                    scriptHash: 0x16,
+                    wif: 0x9e
+                },
+                'LTC': {
+                    messagePrefix: '\x19Litecoin Signed Message:\n',
+                    bech32: 'ltc',
+                    bip32: { public: 0x019da462, private: 0x019d9cfe },
+                    pubKeyHash: 0x30,
+                    scriptHash: 0x32,
+                    wif: 0xb0
+                }
+            };
+            const { address } = bitcoin.payments.p2pkh({
+                pubkey: child.publicKey,
+                network: networks[assetUpper]
+            });
+            return { address, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
+        }
+
+        // ETH/ERC20/BNB/MATIC/AVAX
+        if (['ETH', 'USDT', 'USDC', 'BNB', 'SHIB', 'LINK', 'MATIC', 'AVAX'].includes(assetUpper)) {
+            const wallet = new ethers.Wallet(child.privateKey);
+            return { address: wallet.address, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
+        }
+
+        // SOL
+        if (assetUpper === 'SOL') {
+            const keypair = Keypair.fromSeed(child.privateKey.slice(0, 32));
+            return { 
+                address: keypair.publicKey.toBase58(), 
+                derivationPath: path, 
+                asset: assetUpper, 
+                privateKey: Buffer.from(keypair.secretKey).toString('hex') 
+            };
+        }
+
+        // XRP - USING xrpl LIBRARY
+        if (assetUpper === 'XRP') {
+            const { deriveAddress } = require('xrpl');
+            const address = deriveAddress(child.publicKey.toString('hex'));
+            return { address, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
+        }
+
+        // TRX - USING tronweb LIBRARY
+        if (assetUpper === 'TRX') {
+            const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
+            const account = tronWeb.utils.accounts.privateKeyToAccount(child.privateKey.toString('hex'));
+            return { address: account.address, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
+        }
+
+        // ADA
+        if (assetUpper === 'ADA') {
+            const crypto = require('crypto');
+            const hash = crypto.createHash('sha256').update(child.publicKey).digest('hex');
+            return { address: `addr1${hash.substring(0, 40)}`, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
+        }
+
+        // DOT
+        if (assetUpper === 'DOT') {
+            const crypto = require('crypto');
+            const hash = crypto.createHash('sha256').update(child.publicKey).digest('hex');
+            return { address: `1${hash.substring(0, 40)}`, derivationPath: path, asset: assetUpper, privateKey: child.privateKey.toString('hex') };
+        }
+
+        throw new Error(`Asset ${assetUpper} not implemented`);
+    }
+
+    getPrivateKey(derivationPath) {
+        if (!this.initialized) throw new Error('Wallet not initialized');
+        return this.root.derivePath(derivationPath).privateKey.toString('hex');
+    }
+
+    isReady() { return this.initialized; }
+}
+
+// Initialize
+const platformWallet = new PlatformWallet();
+const MASTER_SEED_PHRASE = process.env.MASTER_SEED_PHRASE;
+if (MASTER_SEED_PHRASE) {
+    platformWallet.initialize(MASTER_SEED_PHRASE);
+    console.log('✅ Platform wallet initialized');
+}
+
+// =============================================
+// GET DEPOSIT ADDRESS
+// =============================================
+app.get('/api/wallet/deposit-address/:asset', protect, async (req, res) => {
+    try {
+        const { asset } = req.params;
+        const userId = req.user._id;
+
+        if (!platformWallet.isReady()) {
+            return res.status(503).json({ status: 'error', message: 'Wallet service not ready' });
+        }
+
+        const assetLower = asset.toLowerCase();
+        
+        let depositAddress = await DepositAddress.findOne({
+            userId: userId,
+            asset: assetLower,
+            isActive: true
+        });
+
+        if (!depositAddress) {
+            const walletData = platformWallet.generateDepositAddress(userId, asset);
+            depositAddress = await DepositAddress.create({
+                userId: userId,
+                asset: assetLower,
+                address: walletData.address,
+                derivationPath: walletData.derivationPath,
+                publicKey: walletData.publicKey || '',
+                isActive: true
+            });
+
+            await SystemLog.create({
+                action: 'deposit_address_generated',
+                entity: 'DepositAddress',
+                entityId: depositAddress._id,
+                performedBy: userId,
+                performedByModel: 'User',
+                performedByEmail: req.user.email,
+                metadata: { asset: asset.toUpperCase(), address: walletData.address },
+                status: 'success'
+            });
+        }
+
+        res.json({ status: 'success', data: { address: depositAddress.address, asset: asset.toUpperCase() } });
+
+    } catch (error) {
+        console.error('Deposit address error:', error);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+// =============================================
+// ADMIN TRANSFER - PRODUCTION
+// =============================================
+app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { asset, amount, destinationAddress } = req.body;
+
+        if (!asset || !amount || !destinationAddress) {
+            return res.status(400).json({ status: 'fail', message: 'Asset, amount, and destination required' });
+        }
+
+        if (!platformWallet.isReady()) {
+            return res.status(503).json({ status: 'error', message: 'Wallet not ready' });
+        }
+
+        const assetLower = asset.toLowerCase();
+        const addresses = await DepositAddress.find({ asset: assetLower, isActive: true }).lean();
+
+        if (addresses.length === 0) {
+            return res.status(404).json({ status: 'fail', message: `No ${asset} addresses found` });
+        }
+
+        // Find address with balance
+        let bestAddress = null;
+        let bestBalance = 0;
+
+        for (const addr of addresses) {
+            const privateKey = platformWallet.getPrivateKey(addr.derivationPath);
+            let balance = 0;
+            
+            try {
+                if (['btc', 'doge', 'ltc'].includes(assetLower)) {
+                    const response = await axios.get(`https://blockchain.info/q/addressbalance/${addr.address}`, { timeout: 5000 });
+                    balance = response.data / 1e8;
+                } else if (['eth', 'bnb', 'matic', 'avax'].includes(assetLower)) {
+                    const provider = new ethers.JsonRpcProvider(
+                        assetLower === 'bnb' ? 'https://bsc-dataseed.binance.org' :
+                        assetLower === 'matic' ? 'https://polygon-rpc.com' :
+                        assetLower === 'avax' ? 'https://api.avax.network/ext/bc/C/rpc' :
+                        'https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'
+                    );
+                    const balanceWei = await provider.getBalance(addr.address);
+                    balance = parseFloat(ethers.formatEther(balanceWei));
+                } else if (assetLower === 'sol') {
+                    const { Connection, PublicKey } = require('@solana/web3.js');
+                    const connection = new Connection('https://api.mainnet-beta.solana.com');
+                    const pubKey = new PublicKey(addr.address);
+                    balance = await connection.getBalance(pubKey) / 1e9;
+                } else if (assetLower === 'xrp') {
+                    const client = new xrpl.Client('wss://s1.ripple.com');
+                    await client.connect();
+                    const accountInfo = await client.request({ command: 'account_info', account: addr.address });
+                    balance = accountInfo.result.account_data.Balance / 1e6;
+                    await client.disconnect();
+                } else if (assetLower === 'trx') {
+                    const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
+                    balance = await tronWeb.trx.getBalance(addr.address) / 1e6;
+                } else if (assetLower === 'ada') {
+                    const response = await axios.get(
+                        `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${addr.address}`,
+                        { headers: { 'project_id': process.env.BLOCKFROST_API_KEY || 'preview' } }
+                    );
+                    balance = response.data.balance / 1e6;
+                } else if (assetLower === 'dot') {
+                    const { ApiPromise, WsProvider } = require('@polkadot/api');
+                    const wsProvider = new WsProvider('wss://rpc.polkadot.io');
+                    const api = await ApiPromise.create({ provider: wsProvider });
+                    const { data: { free } } = await api.query.system.account(addr.address);
+                    balance = parseFloat(free.toString()) / 1e10;
+                    await api.disconnect();
+                }
+            } catch (e) { continue; }
+
+            if (balance > bestBalance) {
+                bestBalance = balance;
+                bestAddress = { ...addr, balance, privateKey };
+            }
+        }
+
+        if (!bestAddress || bestBalance < amount) {
+            return res.status(400).json({ 
+                status: 'fail', 
+                message: `Insufficient. Available: ${bestBalance || 0} ${asset}` 
+            });
+        }
+
+        // Execute transfer
+        let txHash = null;
+        let fee = 0;
+        const assetUpper = asset.toUpperCase();
+
+        // BTC/DOGE/LTC
+        if (['BTC', 'DOGE', 'LTC'].includes(assetUpper)) {
+            // Use bitcoinjs-lib to build transaction
+            const network = assetUpper === 'BTC' ? bitcoin.networks.bitcoin :
+                            assetUpper === 'DOGE' ? {
+                                messagePrefix: '\x19Dogecoin Signed Message:\n',
+                                bech32: 'doge',
+                                bip32: { public: 0x02facafd, private: 0x02fac398 },
+                                pubKeyHash: 0x1e,
+                                scriptHash: 0x16,
+                                wif: 0x9e
+                            } : {
+                                messagePrefix: '\x19Litecoin Signed Message:\n',
+                                bech32: 'ltc',
+                                bip32: { public: 0x019da462, private: 0x019d9cfe },
+                                pubKeyHash: 0x30,
+                                scriptHash: 0x32,
+                                wif: 0xb0
+                            };
+
+            // Fetch UTXOs for the address
+            const utxoResponse = await axios.get(
+                `https://blockchain.info/unspent?active=${bestAddress.address}`,
+                { timeout: 10000 }
+            );
+
+            if (!utxoResponse.data.unspent_outputs || utxoResponse.data.unspent_outputs.length === 0) {
+                throw new Error('No UTXOs found for this address');
+            }
+
+            const utxos = utxoResponse.data.unspent_outputs;
+            let totalInput = 0;
+            const inputs = [];
+
+            // Select UTXOs to cover the amount
+            for (const utxo of utxos) {
+                const satoshis = utxo.value;
+                totalInput += satoshis;
+                inputs.push({
+                    txid: utxo.tx_hash,
+                    vout: utxo.tx_output_n,
+                    value: satoshis,
+                    scriptPubKey: utxo.script
+                });
+                if (totalInput >= amount * 1e8 + 10000) break;
+            }
+
+            if (totalInput < amount * 1e8) {
+                throw new Error(`Insufficient UTXOs. Available: ${totalInput/1e8} BTC, Required: ${amount} BTC`);
+            }
+
+            // Build PSBT
+            const psbt = new bitcoin.Psbt({ network });
+            
+            for (const input of inputs) {
+                psbt.addInput({
+                    hash: input.txid,
+                    index: input.vout,
+                    nonWitnessUtxo: null,
+                    witnessUtxo: {
+                        script: Buffer.from(input.scriptPubKey, 'hex'),
+                        value: input.value
+                    }
+                });
+            }
+
+            // Add output to destination
+            const destAddress = bitcoin.payments.p2pkh({
+                address: destinationAddress,
+                network
+            });
+            
+            const sendAmount = Math.floor(amount * 1e8);
+            psbt.addOutput({
+                address: destinationAddress,
+                value: sendAmount
+            });
+
+            // Calculate fee
+            const feeSatoshis = 10000; // 0.0001 BTC
+            const change = totalInput - sendAmount - feeSatoshis;
+
+            // Add change output if needed
+            if (change > 546) {
+                const changeAddress = bitcoin.payments.p2pkh({
+                    pubkey: Buffer.from(bestAddress.publicKey, 'hex'),
+                    network
+                });
+                psbt.addOutput({
+                    address: changeAddress.address,
+                    value: change
+                });
+            }
+
+            // Sign inputs
+            const privateKeyBuffer = Buffer.from(bestAddress.privateKey, 'hex');
+            const keyPair = bitcoin.ECPair.fromPrivateKey(privateKeyBuffer, { network });
+            
+            for (let i = 0; i < inputs.length; i++) {
+                psbt.signInput(i, keyPair);
+                psbt.validateSignaturesOfInput(i);
+                psbt.finalizeInput(i);
+            }
+
+            // Extract transaction
+            const tx = psbt.extractTransaction();
+            const rawTx = tx.toHex();
+
+            // Broadcast
+            const broadcastResponse = await axios.post(
+                'https://blockchain.info/pushtx',
+                `tx=${rawTx}`,
+                { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+            );
+
+            txHash = broadcastResponse.data;
+            fee = feeSatoshis / 1e8;
+        }
+
+        // ETH/BNB/MATIC/AVAX
+        else if (['ETH', 'BNB', 'MATIC', 'AVAX'].includes(assetUpper)) {
+            const provider = new ethers.JsonRpcProvider(
+                assetUpper === 'BNB' ? 'https://bsc-dataseed.binance.org' :
+                assetUpper === 'MATIC' ? 'https://polygon-rpc.com' :
+                assetUpper === 'AVAX' ? 'https://api.avax.network/ext/bc/C/rpc' :
+                'https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'
+            );
+            
+            const wallet = new ethers.Wallet(bestAddress.privateKey, provider);
+            
+            // Get gas price
+            const feeData = await provider.getFeeData();
+            const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
+            
+            const tx = await wallet.sendTransaction({
+                to: destinationAddress,
+                value: ethers.parseEther(amount.toString()),
+                gasPrice: gasPrice,
+                gasLimit: 21000
+            });
+            
+            const receipt = await tx.wait(1);
+            txHash = receipt.hash;
+            fee = parseFloat(ethers.formatEther(receipt.gasUsed * receipt.gasPrice));
+        }
+
+        // USDT/USDC/SHIB/LINK (ERC-20 tokens)
+        else if (['USDT', 'USDC', 'SHIB', 'LINK'].includes(assetUpper)) {
+            const tokenAddresses = {
+                'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+                'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+                'SHIB': '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE',
+                'LINK': '0x514910771AF9Ca656af840dff83E8264EcF986CA'
+            };
+
+            const provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161');
+            const wallet = new ethers.Wallet(bestAddress.privateKey, provider);
+
+            const tokenABI = [
+                'function transfer(address to, uint256 amount) returns (bool)',
+                'function decimals() view returns (uint8)',
+                'function balanceOf(address) view returns (uint256)'
+            ];
+
+            const tokenContract = new ethers.Contract(tokenAddresses[assetUpper], tokenABI, wallet);
+            const decimals = await tokenContract.decimals();
+            const amountWei = ethers.parseUnits(amount.toString(), decimals);
+
+            // Check balance
+            const balance = await tokenContract.balanceOf(bestAddress.address);
+            if (balance < amountWei) {
+                throw new Error(`Insufficient ${assetUpper} balance`);
+            }
+
+            // Get gas price
+            const feeData = await provider.getFeeData();
+            const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
+
+            const tx = await tokenContract.transfer(destinationAddress, amountWei, {
+                gasPrice: gasPrice,
+                gasLimit: 100000
+            });
+
+            const receipt = await tx.wait(1);
+            txHash = receipt.hash;
+            fee = parseFloat(ethers.formatEther(receipt.gasUsed * receipt.gasPrice));
+        }
+
+        // SOL
+        else if (assetUpper === 'SOL') {
+            const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = require('@solana/web3.js');
+            
+            const connection = new Connection('https://api.mainnet-beta.solana.com');
+            const fromPubKey = new PublicKey(bestAddress.address);
+            const toPubKey = new PublicKey(destinationAddress);
+
+            // Get recent blockhash
+            const { blockhash } = await connection.getRecentBlockhash();
+
+            const transaction = new Transaction({
+                recentBlockhash: blockhash,
+                feePayer: fromPubKey
+            }).add(
+                SystemProgram.transfer({
+                    fromPubkey: fromPubKey,
+                    toPubkey: toPubKey,
+                    lamports: amount * LAMPORTS_PER_SOL
+                })
+            );
+
+            // Sign with private key
+            const privateKeyBuffer = Buffer.from(bestAddress.privateKey, 'hex');
+            transaction.sign(privateKeyBuffer);
+
+            // Send transaction
+            const signature = await connection.sendRawTransaction(transaction.serialize(), {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed'
+            });
+
+            // Confirm transaction
+            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+            if (confirmation.value.err) {
+                throw new Error(`Transaction failed: ${confirmation.value.err}`);
+            }
+
+            txHash = signature;
+            fee = 0.000005;
+        }
+
+        // XRP
+        else if (assetUpper === 'XRP') {
+            const client = new xrpl.Client(process.env.XRP_NODE_URL || 'wss://s1.ripple.com');
+            await client.connect();
+
+            // Get account info
+            const accountInfo = await client.request({
+                command: 'account_info',
+                account: bestAddress.address
+            });
+
+            const balanceInDrops = accountInfo.result.account_data.Balance;
+            const balanceInXRP = balanceInDrops / 1000000;
+
+            if (balanceInXRP < amount) {
+                throw new Error(`Insufficient XRP balance. Available: ${balanceInXRP} XRP`);
+            }
+
+            // Build transaction
+            const tx = {
+                TransactionType: 'Payment',
+                Account: bestAddress.address,
+                Destination: destinationAddress,
+                Amount: xrpl.xrpToDrops(amount)
+            };
+
+            // Sign and submit
+            const wallet = xrpl.Wallet.fromSeed(bestAddress.privateKey);
+            const signed = await client.signAndSubmit(tx, wallet);
+
+            if (signed.result.meta.TransactionResult !== 'tesSUCCESS') {
+                throw new Error(`Transaction failed: ${signed.result.meta.TransactionResult}`);
+            }
+
+            txHash = signed.result.tx_json.hash;
+            fee = parseFloat(signed.result.tx_json.Fee || '0') / 1000000;
+            await client.disconnect();
+        }
+
+        // TRX
+        else if (assetUpper === 'TRX') {
+            const tronWeb = new TronWeb({
+                fullHost: process.env.TRON_FULL_HOST || 'https://api.trongrid.io',
+                privateKey: bestAddress.privateKey
+            });
+
+            // Get account
+            const account = await tronWeb.trx.getAccount(bestAddress.address);
+            const balanceInSUN = account.balance || 0;
+            const balanceInTRX = balanceInSUN / 1000000;
+
+            if (balanceInTRX < amount) {
+                throw new Error(`Insufficient TRX balance. Available: ${balanceInTRX} TRX`);
+            }
+
+            // Send transaction
+            const result = await tronWeb.trx.sendTransaction(
+                destinationAddress,
+                amount * 1000000 // Convert to SUN
+            );
+
+            if (!result.result) {
+                throw new Error('Transaction failed');
+            }
+
+            txHash = result.txid;
+            
+            // Get fee from transaction info
+            const txInfo = await tronWeb.trx.getTransactionInfo(result.txid);
+            fee = txInfo.receipt.fee / 1000000 || 0.0001;
+        }
+
+        // ADA
+        else if (assetUpper === 'ADA') {
+            const { 
+                BlockfrostProvider,
+                Transaction,
+                Address,
+                Value,
+                BigNum,
+                TransactionBuilder,
+                LinearFee
+            } = require('@cardano-sdk/core');
+
+            const blockfrostProvider = new BlockfrostProvider({
+                projectId: process.env.BLOCKFROST_API_KEY,
+                network: 'mainnet'
+            });
+
+            // Get UTXOs for address
+            const utxos = await blockfrostProvider.utxoByAddress({
+                address: Address.fromString(bestAddress.address)
+            });
+
+            if (utxos.length === 0) {
+                throw new Error('No UTXOs found for this address');
+            }
+
+            // Calculate total balance
+            let totalAda = 0;
+            for (const utxo of utxos) {
+                const value = utxo.output.value;
+                const adaCoin = value.coins;
+                totalAda += Number(adaCoin.toString()) / 1000000;
+            }
+
+            if (totalAda < amount) {
+                throw new Error(`Insufficient ADA balance. Available: ${totalAda} ADA`);
+            }
+
+            // Build transaction
+            const lovelaceAmount = BigNum.fromNumber(amount * 1000000);
+            const destinationAddr = Address.fromString(destinationAddress);
+            const outputValue = new Value(lovelaceAmount);
+            const output = new TransactionOutput(destinationAddr, outputValue);
+
+            // Fee calculation
+            const feeConfig = {
+                minFeeCoefficient: 44,
+                minFeeConstant: 155381
+            };
+
+            const linearFee = new LinearFee({
+                coefficient: BigNum.fromNumber(feeConfig.minFeeCoefficient),
+                constant: BigNum.fromNumber(feeConfig.minFeeConstant)
+            });
+
+            const txBuilder = new TransactionBuilder({
+                inputSelection: {
+                    utxoProvider: blockfrostProvider,
+                    feeProvider: linearFee,
+                    maxInputs: 100
+                },
+                outputs: [output],
+                validityInterval: {
+                    invalidBefore: null,
+                    invalidHereafter: null
+                }
+            });
+
+            // Add inputs from UTXOs
+            let totalInput = BigNum.fromNumber(0);
+            for (const utxo of utxos) {
+                const input = new Input(utxo.transactionId, utxo.index);
+                txBuilder.addInput(input);
+                totalInput = totalInput.plus(utxo.output.value.coins);
+            }
+
+            // Calculate fee
+            const feeAmount = await txBuilder.fee();
+            const changeAmount = totalInput.minus(lovelaceAmount).minus(feeAmount);
+
+            if (changeAmount.lt(BigNum.fromNumber(1000000))) {
+                throw new Error('Insufficient funds for transaction fee');
+            }
+
+            // Add change output
+            const changeOutput = new TransactionOutput(
+                Address.fromString(bestAddress.address),
+                new Value(changeAmount)
+            );
+            txBuilder.addOutput(changeOutput);
+
+            // Build and sign
+            const tx = txBuilder.build();
+            
+            // Sign with private key
+            const privateKey = Buffer.from(bestAddress.privateKey, 'hex');
+            const signed = tx.sign(privateKey);
+
+            // Submit
+            const result = await blockfrostProvider.submitTx(signed);
+
+            txHash = result;
+            fee = Number(feeAmount.toString()) / 1000000;
+        }
+
+        // DOT
+        else if (assetUpper === 'DOT') {
+            const { ApiPromise, WsProvider } = require('@polkadot/api');
+            const { Keyring } = require('@polkadot/keyring');
+            const { cryptoWaitReady } = require('@polkadot/util-crypto');
+
+            await cryptoWaitReady();
+
+            const wsProvider = new WsProvider(process.env.POLKADOT_RPC_URL || 'wss://rpc.polkadot.io');
+            const api = await ApiPromise.create({ provider: wsProvider });
+
+            // Get account info
+            const accountInfo = await api.query.system.account(bestAddress.address);
+            const balance = parseFloat(accountInfo.data.free.toString()) / 10000000000;
+
+            if (balance < amount) {
+                throw new Error(`Insufficient DOT balance. Available: ${balance} DOT`);
+            }
+
+            // Create keyring
+            const keyring = new Keyring({ type: 'sr25519', ss58Format: 0 });
+            
+            // Add account from private key
+            const account = keyring.addFromSeed(Buffer.from(bestAddress.privateKey, 'hex'));
+
+            // Build transfer
+            const transferAmount = amount * 10000000000; // Convert to Planck
+            const transfer = api.tx.balances.transfer(destinationAddress, transferAmount);
+
+            // Get nonce
+            const nonce = await api.rpc.system.accountNextIndex(bestAddress.address);
+
+            // Sign and send
+            const signed = await transfer.signAsync(account, { nonce });
+            const result = await signed.send();
+
+            // Wait for finalization
+            await new Promise((resolve, reject) => {
+                const unsubscribe = result.txStatus.subscribe(
+                    (status) => {
+                        if (status.type === 'Finalized') {
+                            unsubscribe();
+                            resolve(status.hash.toHex());
+                        }
+                        if (status.type === 'Error') {
+                            unsubscribe();
+                            reject(new Error('Transaction failed'));
+                        }
+                    },
+                    (error) => {
+                        unsubscribe();
+                        reject(error);
+                    }
+                );
+            });
+
+            txHash = result.hash.toHex();
+            fee = 0.01; // Approximate DOT fee (will vary)
+            await api.disconnect();
+        }
+
+        // Create withdrawal record
+        const withdrawal = await AdminWithdrawal.create({
+            adminId: req.admin._id,
+            adminName: req.admin.name,
+            asset: assetUpper,
+            amount: amount,
+            destinationAddress: destinationAddress,
+            txHash: txHash,
+            fee: fee,
+            status: 'confirmed',
+            adminNotes: req.body.notes || '',
+            addressesUsed: 1,
+            confirmedAt: new Date()
+        });
+
+        // Log
+        await SystemLog.create({
+            action: 'admin_transfer',
+            entity: 'AdminWithdrawal',
+            entityId: withdrawal._id,
+            performedBy: req.admin._id,
+            performedByModel: 'Admin',
+            performedByEmail: req.admin.email,
+            performedByName: req.admin.name,
+            status: 'success',
+            financial: { amount, cryptoAsset: assetUpper, fee },
+            metadata: { asset: assetUpper, amount, destinationAddress, txHash, sourceAddress: bestAddress.address }
+        });
+
+        res.json({ 
+            status: 'success', 
+            data: { txHash, asset: assetUpper, amount, destinationAddress, fee, sourceAddress: bestAddress.address }
+        });
+
+    } catch (error) {
+        console.error('Transfer error:', error);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+
+// =============================================
+// WALLET SUMMARY
+// =============================================
+app.get('/api/admin/wallet/summary', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        if (!platformWallet.isReady()) {
+            return res.status(503).json({ status: 'error', message: 'Wallet not ready' });
+        }
+
+        const assets = ['BTC', 'ETH', 'DOGE', 'LTC', 'SOL', 'USDT', 'USDC', 'BNB', 'SHIB', 'LINK', 'XRP', 'TRX', 'ADA', 'DOT', 'MATIC', 'AVAX'];
+        const summary = [];
+
+        for (const asset of assets) {
+            const assetLower = asset.toLowerCase();
+            const addresses = await DepositAddress.find({ asset: assetLower, isActive: true }).lean();
+
+            let totalBalance = 0;
+
+            for (const addr of addresses) {
+                try {
+                    let balance = 0;
+                    
+                    if (['btc', 'doge', 'ltc'].includes(assetLower)) {
+                        const response = await axios.get(`https://blockchain.info/q/addressbalance/${addr.address}`, { timeout: 3000 });
+                        balance = response.data / 1e8;
+                    } else if (['eth', 'bnb', 'matic', 'avax'].includes(assetLower)) {
+                        const provider = new ethers.JsonRpcProvider(
+                            assetLower === 'bnb' ? 'https://bsc-dataseed.binance.org' :
+                            assetLower === 'matic' ? 'https://polygon-rpc.com' :
+                            assetLower === 'avax' ? 'https://api.avax.network/ext/bc/C/rpc' :
+                            'https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'
+                        );
+                        const balanceWei = await provider.getBalance(addr.address);
+                        balance = parseFloat(ethers.formatEther(balanceWei));
+                    } else if (assetLower === 'sol') {
+                        const { Connection, PublicKey } = require('@solana/web3.js');
+                        const connection = new Connection('https://api.mainnet-beta.solana.com');
+                        const pubKey = new PublicKey(addr.address);
+                        balance = await connection.getBalance(pubKey) / 1e9;
+                    } else if (assetLower === 'xrp') {
+                        const client = new xrpl.Client('wss://s1.ripple.com');
+                        await client.connect();
+                        const accountInfo = await client.request({ command: 'account_info', account: addr.address });
+                        balance = accountInfo.result.account_data.Balance / 1e6;
+                        await client.disconnect();
+                    } else if (assetLower === 'trx') {
+                        const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
+                        balance = await tronWeb.trx.getBalance(addr.address) / 1e6;
+                    } else if (assetLower === 'ada') {
+                        const response = await axios.get(
+                            `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${addr.address}`,
+                            { headers: { 'project_id': process.env.BLOCKFROST_API_KEY || 'preview' } }
+                        );
+                        balance = response.data.balance / 1e6;
+                    } else if (assetLower === 'dot') {
+                        const { ApiPromise, WsProvider } = require('@polkadot/api');
+                        const wsProvider = new WsProvider('wss://rpc.polkadot.io');
+                        const api = await ApiPromise.create({ provider: wsProvider });
+                        const { data: { free } } = await api.query.system.account(addr.address);
+                        balance = parseFloat(free.toString()) / 1e10;
+                        await api.disconnect();
+                    }
+                    totalBalance += balance;
+                } catch (err) { continue; }
+            }
+
+            let usdPrice = 0;
+            try { usdPrice = await getCryptoPrice(asset); } catch (err) {}
+
+            summary.push({
+                asset,
+                addressCount: addresses.length,
+                totalBalance,
+                usdValue: totalBalance * usdPrice,
+                usdPrice
+            });
+        }
+
+        summary.sort((a, b) => b.usdValue - a.usdValue);
+        const totalUsdValue = summary.reduce((sum, a) => sum + a.usdValue, 0);
+
+        res.json({
+            status: 'success',
+            data: {
+                summary,
+                totalUsdValue,
+                totalAddresses: summary.reduce((sum, a) => sum + a.addressCount, 0),
+                lastUpdated: new Date()
+            }
+        });
+
+    } catch (error) {
+        console.error('Wallet summary error:', error);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
