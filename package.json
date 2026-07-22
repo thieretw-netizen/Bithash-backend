@@ -63,7 +63,7 @@
 "tronweb": "^5.3.0",
 "@cardano-sdk/core": "^0.15.0",
 "@polkadot/api": "^10.11.0",
-"@polkadot/util-crypto": "^12.5.0"
+"@polkadot/util-crypto": "^12.5.0",
 "dotenv": "^16.3.1",
     "jsonwebtoken": "^9.0.2",
     "moment": "^2.29.4",
