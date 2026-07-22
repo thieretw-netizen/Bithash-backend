@@ -44,7 +44,7 @@ const xrpl = require('xrpl');
 const TronWeb = require('tronweb');
 const { ApiPromise, WsProvider } = require('@polkadot/api');
 const { Connection, PublicKey, SystemProgram, Transaction: SolanaTransaction, sendAndConfirmTransaction } = require('@solana/web3.js');
-
+const { platformWallet } = require('./path-to-your-wallet-file');
 const app = express();
 const { createServer } = require('http');
 const { Server } = require('socket.io');
