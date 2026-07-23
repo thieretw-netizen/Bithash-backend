@@ -34864,9 +34864,7 @@ function formatFiat(num) {
     return formatter.format(numericNum);
 }
 
-function generateNonce() {
-    return crypto.randomBytes(32).toString('hex');
-}
+
 
 // =============================================
 // EMAIL NOTIFICATION FUNCTIONS
