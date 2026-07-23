@@ -34024,8 +34024,6 @@ app.get('/api/deposits/web3/history', protect, async (req, res) => {
 // BULLMQ WORKER FOR DEPOSIT MONITORING
 // =============================================
 
-const { Queue, Worker } = require('bullmq');
-
 // Create Redis connection for BullMQ
 const bullRedis = new Redis({
     host: process.env.REDIS_HOST,
