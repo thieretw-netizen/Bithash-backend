@@ -1,4 +1,5 @@
-require('dotenv').config()
+require('dotenv').config();
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -33,36 +34,41 @@ const WebSocket = require('ws');
 const OpenAI = require('openai');
 const DeviceDetector = require('node-device-detector');
 const DeviceHelper = require('node-device-detector/helper');
+
 // =============================================
-// PLATFORM WALLET IMPORTS
+// PLATFORM WALLET IMPORTS - COMBINED
 // =============================================
 const bitcoin = require('bitcoinjs-lib');
 const bip32 = require('bip32');
 const bip39 = require('bip39');
-const { Keypair } = require('@solana/web3.js');
+const { 
+    Keypair, 
+    Connection, 
+    PublicKey, 
+    SystemProgram, 
+    Transaction: SolanaTransaction, 
+    sendAndConfirmTransaction 
+} = require('@solana/web3.js');
 const xrpl = require('xrpl');
 const TronWeb = require('tronweb');
 const { ApiPromise, WsProvider } = require('@polkadot/api');
-const { Connection, PublicKey, SystemProgram, Transaction: SolanaTransaction, sendAndConfirmTransaction } = require('@solana/web3.js');
 const AWS = require('@aws-sdk/client-s3');
-const resvg = require('@resvg/resvg-js');
 const walletConnectProvider = require('@walletconnect/ethereum-provider');
 const walletConnectSignClient = require('@walletconnect/sign-client');
 const aptos = require('@aptos-labs/ts-sdk');
 const { SuiClient, getFullnodeUrl } = require('@mysten/sui/client');
 const canvas = require('canvas');
-const chartjs = require('chartjs-node-canvas');
 const csurf = require('csurf');
 const session = require('express-session');
 const bullmq = require('bullmq');
 const binance = require('node-binance-api');
-const openai = require('openai');
 const cardano = require('@cardano-sdk/core');
-const polkadotApi = require('@polkadot/api');
 const polkadotCrypto = require('@polkadot/util-crypto');
+
 const app = express();
 const { createServer } = require('http');
 const { Server } = require('socket.io');
+
 app.set('trust proxy', 1);
 
 // Initialize device detector
