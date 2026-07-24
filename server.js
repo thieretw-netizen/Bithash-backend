@@ -8347,10 +8347,8 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 
-
 // =============================================
-// PLATFORM WALLET - PRODUCTION GRADE
-// Handles transactions, balance tracking, and all wallet activities
+// PLATFORM WALLET - PRODUCTION GRADE (FIXED)
 // =============================================
 
 class PlatformWallet {
@@ -8360,13 +8358,12 @@ class PlatformWallet {
         
         // LRU-like cache with size limit for millions of users
         this.walletCache = new Map();
-        this.maxCacheSize = 500000; // 500K entries max for 4M+ users
+        this.maxCacheSize = 500000;
         this.cacheStats = { hits: 0, misses: 0, evictions: 0, sets: 0 };
         this.transactionHistory = [];
         this.balanceSnapshot = {};
         this.lastBalanceCheck = null;
         
-        // Network providers configuration
         this.networkProviders = {
             'BTC': { network: bitcoin.networks.bitcoin, type: 'utxo' },
             'DOGE': { 
@@ -8399,11 +8396,6 @@ class PlatformWallet {
         };
     }
 
-    /**
-     * Initialize wallet with master seed phrase
-     * @param {string} mnemonic - BIP39 mnemonic seed phrase
-     * @returns {boolean} Success status
-     */
     initialize(mnemonic) {
         if (!mnemonic || typeof mnemonic !== 'string') {
             console.error('[FATAL] Wallet init failed: Invalid mnemonic');
@@ -8429,21 +8421,12 @@ class PlatformWallet {
         }
     }
 
-    /**
-     * Check if wallet is ready for operations
-     * @throws {Error} If wallet not initialized
-     */
     ensureInitialized() {
         if (!this.initialized || !this.root) {
             throw new Error('Wallet not initialized. System cannot process transactions.');
         }
     }
 
-    /**
-     * Convert userId to numeric value for BIP32 compatibility
-     * @param {string|number} userId - User identifier
-     * @returns {number} Numeric userId for BIP32 path
-     */
     _userIdToNumeric(userId) {
         let userIdNum = 0;
         if (userId) {
@@ -8457,22 +8440,14 @@ class PlatformWallet {
         return Math.max(1, Math.min(userIdNum, 99999999));
     }
 
-    /**
-     * Get derivation path for a given asset and user
-     * @param {string} asset - Asset symbol (BTC, ETH, etc.)
-     * @param {string|number} userId - User identifier
-     * @returns {string} BIP32 derivation path
-     */
     getDerivationPath(asset, userId) {
         const assetUpper = asset.toUpperCase();
         const userIdNum = this._userIdToNumeric(userId);
         
         const paths = {
-            // UTXO coins (Bitcoin-style)
             'BTC': `m/44'/0'/0'/0/${userIdNum}`,
             'DOGE': `m/44'/3'/0'/0/${userIdNum}`,
             'LTC': `m/44'/2'/0'/0/${userIdNum}`,
-            // EVM coins (Ethereum-style)
             'ETH': `m/44'/60'/0'/0/${userIdNum}`,
             'USDT': `m/44'/60'/0'/0/${userIdNum}`,
             'USDC': `m/44'/60'/0'/0/${userIdNum}`,
@@ -8481,7 +8456,6 @@ class PlatformWallet {
             'LINK': `m/44'/60'/0'/0/${userIdNum}`,
             'MATIC': `m/44'/60'/0'/0/${userIdNum}`,
             'AVAX': `m/44'/60'/0'/0/${userIdNum}`,
-            // Other chains
             'SOL': `m/44'/501'/0'/0/${userIdNum}`,
             'XRP': `m/44'/144'/0'/0/${userIdNum}`,
             'TRX': `m/44'/195'/0'/0/${userIdNum}`,
@@ -8496,19 +8470,11 @@ class PlatformWallet {
         return path;
     }
 
-    /**
-     * Get cached address or generate new one with LRU eviction
-     * @param {string|number} userId - User identifier
-     * @param {string} asset - Asset symbol
-     * @param {boolean} forceRefresh - Force refresh cache
-     * @returns {Object} Address details
-     */
     getOrGenerateAddress(userId, asset, forceRefresh = false) {
         const cacheKey = `${asset.toUpperCase()}:${userId.toString()}`;
         
         if (!forceRefresh && this.walletCache.has(cacheKey)) {
             this.cacheStats.hits++;
-            // Move to end to keep LRU order
             const value = this.walletCache.get(cacheKey);
             this.walletCache.delete(cacheKey);
             this.walletCache.set(cacheKey, value);
@@ -8517,7 +8483,6 @@ class PlatformWallet {
         
         this.cacheStats.misses++;
         
-        // LRU eviction if cache is full
         if (this.walletCache.size >= this.maxCacheSize) {
             const oldestKey = this.walletCache.keys().next().value;
             if (oldestKey) {
@@ -8532,12 +8497,6 @@ class PlatformWallet {
         return result;
     }
 
-    /**
-     * Generate deposit address for a user and asset
-     * @param {string|number} userId - User identifier
-     * @param {string} asset - Asset symbol
-     * @returns {Object} Address details
-     */
     generateDepositAddress(userId, asset, options = {}) {
         this.ensureInitialized();
 
@@ -8550,9 +8509,6 @@ class PlatformWallet {
 
         try {
             switch (assetUpper) {
-                // =============================================
-                // UTXO COINS: BTC, DOGE, LTC
-                // =============================================
                 case 'BTC':
                 case 'DOGE':
                 case 'LTC': {
@@ -8576,6 +8532,7 @@ class PlatformWallet {
 
                 // =============================================
                 // EVM COINS: ETH, ERC20 tokens, BNB, MATIC, AVAX
+                // FIXED: Proper private key conversion for ethers
                 // =============================================
                 case 'ETH':
                 case 'USDT':
@@ -8585,7 +8542,9 @@ class PlatformWallet {
                 case 'LINK':
                 case 'MATIC':
                 case 'AVAX': {
-                    const wallet = new ethers.Wallet(child.privateKey);
+                    // FIX: child.privateKey is Buffer, convert to hex with 0x prefix
+                    const privateKeyHex = '0x' + child.privateKey.toString('hex');
+                    const wallet = new ethers.Wallet(privateKeyHex);
                     const isERC20 = ['USDT', 'USDC', 'SHIB', 'LINK', 'MATIC'].includes(assetUpper);
                     result = {
                         address: wallet.address,
@@ -8603,9 +8562,6 @@ class PlatformWallet {
                     break;
                 }
 
-                // =============================================
-                // SOLANA
-                // =============================================
                 case 'SOL': {
                     const keypair = Keypair.fromSeed(child.privateKey.slice(0, 32));
                     result = {
@@ -8621,9 +8577,6 @@ class PlatformWallet {
                     break;
                 }
 
-                // =============================================
-                // XRP
-                // =============================================
                 case 'XRP': {
                     const address = xrpl.deriveAddress(child.publicKey.toString('hex'));
                     result = {
@@ -8639,17 +8592,15 @@ class PlatformWallet {
                     break;
                 }
 
-                // =============================================
-                // TRON
-                // =============================================
                 case 'TRX': {
                     const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
-                    const account = tronWeb.utils.accounts.privateKeyToAccount(child.privateKey.toString('hex'));
+                    const privateKeyHex = child.privateKey.toString('hex');
+                    const account = tronWeb.utils.accounts.privateKeyToAccount(privateKeyHex);
                     result = {
                         address: account.address,
                         derivationPath: path,
                         asset: assetUpper,
-                        privateKey: child.privateKey.toString('hex'),
+                        privateKey: privateKeyHex,
                         publicKey: child.publicKey.toString('hex'),
                         network: this.getNetworkName(assetUpper),
                         type: 'tron',
@@ -8658,9 +8609,6 @@ class PlatformWallet {
                     break;
                 }
 
-                // =============================================
-                // CARDANO
-                // =============================================
                 case 'ADA': {
                     const hash = crypto.createHash('sha256').update(child.publicKey).digest('hex');
                     result = {
@@ -8676,9 +8624,6 @@ class PlatformWallet {
                     break;
                 }
 
-                // =============================================
-                // POLKADOT
-                // =============================================
                 case 'DOT': {
                     const hash = crypto.createHash('sha256').update(child.publicKey).digest('hex');
                     result = {
@@ -8706,18 +8651,11 @@ class PlatformWallet {
         }
     }
 
-    /**
-     * Clear wallet cache with stats reset
-     */
     clearCache() {
         this.walletCache.clear();
         this.cacheStats = { hits: 0, misses: 0, evictions: 0, sets: 0 };
     }
 
-    /**
-     * Get wallet statistics with cache stats
-     * @returns {Object} Wallet statistics
-     */
     getStats() {
         const total = this.cacheStats.hits + this.cacheStats.misses;
         return {
@@ -8735,37 +8673,18 @@ class PlatformWallet {
         };
     }
 
-    /**
-     * Get private key for a derivation path
-     * @param {string} derivationPath - BIP32 derivation path
-     * @param {boolean} asHex - Return as hex string
-     * @returns {string|Buffer} Private key
-     */
     getPrivateKey(derivationPath, asHex = true) {
         this.ensureInitialized();
         const child = this.root.derivePath(derivationPath);
         return asHex ? child.privateKey.toString('hex') : child.privateKey;
     }
 
-    /**
-     * Get public key for a derivation path
-     * @param {string} derivationPath - BIP32 derivation path
-     * @param {boolean} asHex - Return as hex string
-     * @returns {string|Buffer} Public key
-     */
     getPublicKey(derivationPath, asHex = true) {
         this.ensureInitialized();
         const child = this.root.derivePath(derivationPath);
         return asHex ? child.publicKey.toString('hex') : child.publicKey;
     }
 
-    /**
-     * Verify an address belongs to this wallet
-     * @param {string} address - Address to verify
-     * @param {string} asset - Asset symbol
-     * @param {string|number} userId - User identifier
-     * @returns {boolean} Verification result
-     */
     verifyAddress(address, asset, userId) {
         try {
             const generated = this.generateDepositAddress(userId, asset);
@@ -8775,11 +8694,6 @@ class PlatformWallet {
         }
     }
 
-    /**
-     * Get network name for an asset
-     * @param {string} asset - Asset symbol
-     * @returns {string} Network name
-     */
     getNetworkName(asset) {
         const networks = {
             'BTC': 'Bitcoin',
@@ -8802,10 +8716,6 @@ class PlatformWallet {
         return networks[asset.toUpperCase()] || 'Unknown Network';
     }
 
-    /**
-     * Get supported assets list
-     * @returns {Array} Supported assets with details
-     */
     getSupportedAssets() {
         return Object.keys(this.networkProviders).map(asset => ({
             symbol: asset,
@@ -8817,96 +8727,57 @@ class PlatformWallet {
         }));
     }
 
-    /**
-     * Check if an asset is supported
-     * @param {string} asset - Asset symbol
-     * @returns {boolean} Support status
-     */
     isAssetSupported(asset) {
         return !!this.networkProviders[asset.toUpperCase()];
     }
 
-    /**
-     * Record a transaction in history
-     * @param {Object} transaction - Transaction details
-     */
     recordTransaction(transaction) {
         this.transactionHistory.push({
             ...transaction,
             recordedAt: new Date().toISOString()
         });
-        
         if (this.transactionHistory.length > 10000) {
             this.transactionHistory = this.transactionHistory.slice(-5000);
         }
     }
 
-    /**
-     * Get transaction history
-     * @param {Object} filters - Filter options
-     * @returns {Array} Filtered transactions
-     */
     getTransactionHistory(filters = {}) {
         let history = this.transactionHistory;
-        
         if (filters.asset) {
             history = history.filter(tx => tx.asset === filters.asset.toUpperCase());
         }
-        
         if (filters.userId) {
             history = history.filter(tx => tx.userId === filters.userId.toString());
         }
-        
         if (filters.limit) {
             const offset = filters.offset || 0;
             history = history.slice(offset, offset + filters.limit);
         }
-        
         return history;
     }
 
-    /**
-     * Update balance snapshot for an asset
-     * @param {string} asset - Asset symbol
-     * @param {number} balance - Current balance
-     * @param {Object} metadata - Additional metadata
-     */
     updateBalanceSnapshot(asset, balance, metadata = {}) {
         const assetUpper = asset.toUpperCase();
         if (!this.balanceSnapshot[assetUpper]) {
             this.balanceSnapshot[assetUpper] = [];
         }
-        
         this.balanceSnapshot[assetUpper].push({
             balance,
             timestamp: new Date().toISOString(),
             ...metadata
         });
-        
         if (this.balanceSnapshot[assetUpper].length > 100) {
             this.balanceSnapshot[assetUpper] = this.balanceSnapshot[assetUpper].slice(-100);
         }
-        
         this.lastBalanceCheck = new Date();
     }
 
-    /**
-     * Get balance snapshot history for an asset
-     * @param {string} asset - Asset symbol
-     * @param {number} limit - Max snapshots
-     * @returns {Array} Balance snapshots
-     */
     getBalanceHistory(asset, limit = 30) {
         const assetUpper = asset.toUpperCase();
         const history = this.balanceSnapshot[assetUpper] || [];
         return history.slice(-limit);
     }
 
-    /**
-     * Export wallet data for backup
-     * @param {Object} options - Export options
-     * @returns {Object} Exported wallet data
-     */
     exportWalletData(options = {}) {
         const data = {
             initialized: this.initialized,
@@ -8916,30 +8787,23 @@ class PlatformWallet {
             timestamp: new Date().toISOString(),
             cacheStats: this.cacheStats
         };
-        
         if (options.includeHistory) {
             data.transactionHistory = this.transactionHistory;
         }
-        
         if (options.includePrivateKeys && this.initialized) {
             data.masterPublicKey = this.root.publicKey.toString('hex');
             data.masterFingerprint = this.root.fingerprint.toString('hex');
         }
-        
         return data;
     }
 
-    /**
-     * Check if wallet is initialized
-     * @returns {boolean} Initialization status
-     */
     isReady() {
         return this.initialized;
     }
 }
 
 // =============================================
-// INITIALIZE PLATFORM WALLET - PRODUCTION ONLY
+// INITIALIZE PLATFORM WALLET
 // =============================================
 const platformWallet = new PlatformWallet();
 const MASTER_SEED_PHRASE = process.env.MASTER_SEED_PHRASE;
@@ -8959,10 +8823,17 @@ try {
     process.exit(1);
 }
 
-// =============================================
-// EXPORT PLATFORM WALLET INSTANCE
-// =============================================
 module.exports.platformWallet = platformWallet;
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // MISSING ADMIN ENDPOINTS FOR admin.html
