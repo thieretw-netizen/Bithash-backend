@@ -33652,6 +33652,8 @@ app.delete('/api/users/wallets/remove', protect, async (req, res) => {
 // =============================================
 // 4. GET /api/deposits/address/:asset - Generate deposit address (BACKEND GENERATED)
 // =============================================
+// GET /api/deposits/address/:asset - Generate deposit address (BACKEND GENERATED)
+// =============================================
 app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     try {
         const { asset } = req.params;
@@ -33719,7 +33721,7 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
                 publicKey: addressData.publicKey,
                 isActive: true,
                 createdAt: new Date(),
-                expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year
+                expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
             });
             await depositAddress.save();
         }
@@ -33796,7 +33798,6 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         });
     }
 });
-
 // =============================================
 // 5. POST /api/deposit/confirm - Confirm deposit after transaction
 // =============================================
