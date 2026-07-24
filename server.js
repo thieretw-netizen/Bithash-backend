@@ -32747,7 +32747,7 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
 
 // RPC Providers
 const RPC_PROVIDERS = {
-    'BTC': process.env.BTC_RPC_URL || null, // Bitcoin uses different provider
+    'BTC': process.env.BTC_RPC_URL || null,
     'ETH': process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io/v3/2e692d39dad941d799bb09fa90bf2881',
     'BSC': process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org/',
     'POLYGON': process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com/',
@@ -32820,7 +32820,7 @@ const DEPOSIT_LIMITS = {
 };
 
 // =============================================
-// BLOCKCHAIN TRANSACTION CHECK FUNCTIONS
+// BLOCKCHAIN TRANSACTION CHECK FUNCTIONS (RPC CALLS)
 // =============================================
 
 // Check EVM transaction (Ethereum, BSC, Polygon, etc.)
@@ -32828,24 +32828,20 @@ async function checkEVMTx(txHash, rpcUrl, requiredConfirmations = 12) {
     try {
         const provider = new ethers.JsonRpcProvider(rpcUrl);
         
-        // Get transaction
         const tx = await provider.getTransaction(txHash);
         if (!tx) {
             return { confirmed: false, confirmations: 0, requiredConfirmations, error: 'Transaction not found' };
         }
         
-        // Get receipt for confirmations
         const receipt = await provider.getTransactionReceipt(txHash);
         if (!receipt) {
             return { confirmed: false, confirmations: 0, requiredConfirmations, error: 'Receipt not found' };
         }
         
-        // Check if failed
         if (receipt.status !== 1) {
             return { confirmed: false, confirmations: 0, requiredConfirmations, failed: true, error: 'Transaction failed' };
         }
         
-        // Get current block for confirmations
         const currentBlock = await provider.getBlockNumber();
         const confirmations = currentBlock - receipt.blockNumber;
         
@@ -32927,7 +32923,6 @@ async function checkTronTx(txHash) {
 // Check Bitcoin-like UTXO transaction (BTC, DOGE, LTC)
 async function checkUtxoTx(txHash, asset) {
     try {
-        // Use Blockchair API for UTXO coins
         const assetLower = asset.toLowerCase();
         const explorerMap = {
             'btc': 'https://api.blockchair.com/bitcoin',
@@ -32989,6 +32984,256 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
         default:
             return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: `Unsupported type: ${assetConfig.type}` };
     }
+}
+
+// =============================================
+// BACKGROUND MONITORING FUNCTION (USES RPC CALLS)
+// =============================================
+function startBlockchainMonitoring(txHash, asset, chainId, transactionId, depositAssetId, user, depositAddress, amount, usdValue) {
+    const networkInfo = ASSET_NETWORK_MAP[asset] || { network: 'Unknown', chainId: 1 };
+    const requiredConfirmations = REQUIRED_CONFIRMATIONS[asset] || 12;
+    let attempts = 0;
+    const maxAttempts = 120; // 120 attempts = 60 minutes (every 30 seconds)
+
+    console.log(`🔍 Starting blockchain monitoring for ${txHash} on ${asset} network`);
+
+    const monitoringInterval = setInterval(async () => {
+        attempts++;
+        
+        if (attempts > maxAttempts) {
+            clearInterval(monitoringInterval);
+            console.log(`⏰ Monitoring timeout for transaction ${txHash} after ${maxAttempts} attempts`);
+            
+            // Send timeout alert to admin
+            try {
+                const brandHeader = `
+                    <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+                    </div>
+                `;
+
+                const brandFooter = `
+                    <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                    </div>
+                `;
+
+                await supportTransporter.sendMail({
+                    from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+                    to: 'thieretw@gmail.com',
+                    subject: `⏰ MONITORING TIMEOUT: Transaction ${txHash.substring(0, 10)}...`,
+                    html: `
+                        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                            ${brandHeader}
+                            <div style="padding: 30px; background: #FFFFFF;">
+                                <div style="background: #FEF2F2; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
+                                    <h2 style="color: #DC2626; font-size: 22px; margin: 0 0 8px 0; font-weight: 700;">⚠️ Blockchain Monitoring Timeout</h2>
+                                    <p style="color: #991B1B; font-size: 14px; margin: 0;">Transaction ${txHash.substring(0, 10)}... has not been confirmed after ${maxAttempts} attempts</p>
+                                </div>
+                                
+                                <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                                    <table style="width: 100%; border-collapse: collapse;">
+                                        <tr style="border-bottom: 1px solid #E2E8F0;">
+                                            <td style="padding: 8px 0;"><strong>User:</strong></td>
+                                            <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</td>
+                                        </tr>
+                                        <tr style="border-top: 1px solid #E2E8F0;">
+                                            <td style="padding: 8px 0;"><strong>Asset:</strong></td>
+                                            <td style="padding: 8px 0; text-align: right;">${asset}</td>
+                                        </tr>
+                                        <tr style="border-top: 1px solid #E2E8F0;">
+                                            <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                                            <td style="padding: 8px 0; text-align: right;">${amount.toFixed(8)} ${asset} (≈ $${usdValue.toFixed(2)})</td>
+                                        </tr>
+                                        <tr style="border-top: 1px solid #E2E8F0;">
+                                            <td style="padding: 8px 0;"><strong>Deposit Address:</strong></td>
+                                            <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${depositAddress}</td>
+                                        </tr>
+                                        <tr style="border-top: 1px solid #E2E8F0;">
+                                            <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+                                            <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${txHash}</td>
+                                        </tr>
+                                    </table>
+                                </div>
+                                
+                                <div style="text-align: center; margin: 30px 0;">
+                                    <a href="${networkInfo.explorer || '#'}${txHash}" target="_blank" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View on Explorer</a>
+                                    <a href="https://www.bithashcapital.live/admin/transactions/${transactionId}" style="background-color: #3B82F6; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-left: 12px;">View Transaction</a>
+                                </div>
+                                
+                                <p style="color: #DC2626; font-size: 13px; margin-top: 20px;">Please manually verify this transaction.</p>
+                            </div>
+                            ${brandFooter}
+                        </div>
+                    `
+                });
+            } catch (emailErr) {
+                console.error('Failed to send timeout alert email:', emailErr);
+            }
+            return;
+        }
+
+        try {
+            // =============================================
+            // RPC CALL - Check transaction on blockchain
+            // =============================================
+            const txStatus = await checkTransactionOnBlockchain(txHash, asset, chainId);
+            
+            // Update deposit record with latest status
+            await DepositAsset.findByIdAndUpdate(depositAssetId, {
+                $set: {
+                    'metadata.confirmations': txStatus.confirmations || 0,
+                    'metadata.blockchainStatus': txStatus,
+                    'metadata.lastChecked': new Date()
+                }
+            });
+
+            await Transaction.findByIdAndUpdate(transactionId, {
+                $set: {
+                    'details.confirmations': txStatus.confirmations || 0,
+                    'details.blockchainStatus': txStatus,
+                    'details.readyForAdminApproval': txStatus.confirmed || false
+                }
+            });
+
+            console.log(`📊 Transaction ${txHash.substring(0, 10)}... confirmations: ${txStatus.confirmations || 0}/${txStatus.requiredConfirmations || 12}`);
+
+            // =============================================
+            // TRANSACTION IS CONFIRMED ON BLOCKCHAIN
+            // =============================================
+            if (txStatus.confirmed && txStatus.confirmations >= txStatus.requiredConfirmations) {
+                clearInterval(monitoringInterval);
+                console.log(`✅ Transaction ${txHash} confirmed with ${txStatus.confirmations} confirmations`);
+
+                // Update records
+                await DepositAsset.findByIdAndUpdate(depositAssetId, {
+                    $set: {
+                        'metadata.readyForAdminApproval': true,
+                        'metadata.confirmedAt': new Date()
+                    }
+                });
+
+                await Transaction.findByIdAndUpdate(transactionId, {
+                    $set: {
+                        'details.readyForAdminApproval': true,
+                        'details.confirmedAt': new Date()
+                    }
+                });
+
+                // =============================================
+                // SEND ADMIN CONFIRMATION EMAIL
+                // =============================================
+                const brandHeader = `
+                    <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+                    </div>
+                `;
+
+                const brandFooter = `
+                    <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                    </div>
+                `;
+
+                const confirmationHtml = `
+                    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                        ${brandHeader}
+                        <div style="padding: 30px; background: #FFFFFF;">
+                            <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                                        <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#F7A600" stroke-width="2" fill="none"/>
+                                        <circle cx="12" cy="9" r="2.5" stroke="#F7A600" stroke-width="2" fill="none"/>
+                                    </svg>
+                                </div>
+                                <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">BLOCKCHAIN CONFIRMATION RECEIVED!</h2>
+                                <p style="color: #065F46; font-size: 13px; margin: 0;">Transaction ${txHash.substring(0, 10)}... is confirmed on the blockchain</p>
+                            </div>
+                            
+                            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr style="border-bottom: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>User:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Asset:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${asset}</td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${amount.toFixed(8)} ${asset} (≈ $${usdValue.toFixed(2)})</td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Confirmations:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${txStatus.confirmations} / ${txStatus.requiredConfirmations}</td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${txHash}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            
+                            <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Next Step</p>
+                                <p style="color: #78350F; margin: 0; font-size: 14px;">The transaction is confirmed on the blockchain. Please review and approve this deposit to credit the user's account.</p>
+                                <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">🔍 <a href="${networkInfo.explorer || '#'}${txHash}" target="_blank" style="color: #F7A600;">View on Blockchain Explorer</a></p>
+                            </div>
+                            
+                            <div style="text-align: center; margin: 30px 0;">
+                                <a href="https://www.bithashcapital.live/admin/transactions/${transactionId}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Review & Approve Now</a>
+                            </div>
+                            
+                            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${new Date().toLocaleString()}</p>
+                        </div>
+                        
+                        ${brandFooter}
+                    </div>
+                `;
+
+                await supportTransporter.sendMail({
+                    from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+                    to: 'thieretw@gmail.com',
+                    subject: `✅ BLOCKCHAIN CONFIRMATION: ${user.firstName} ${user.lastName} deposit confirmed - Ready for admin approval`,
+                    html: confirmationHtml
+                });
+
+                console.log(`✅ Admin blockchain confirmation email sent to thieretw@gmail.com for user: ${user.email}`);
+
+                // Create system log for blockchain confirmation
+                await SystemLog.create({
+                    action: 'blockchain_confirmation_received',
+                    entity: 'Transaction',
+                    entityId: transactionId,
+                    performedBy: null,
+                    performedByModel: 'System',
+                    status: 'success',
+                    metadata: {
+                        txHash: txHash,
+                        asset: asset,
+                        amount: amount,
+                        confirmations: txStatus.confirmations,
+                        requiredConfirmations: txStatus.requiredConfirmations,
+                        userId: user._id,
+                        userEmail: user.email
+                    }
+                });
+            }
+        } catch (error) {
+            console.error(`Monitoring error for ${txHash}:`, error.message);
+        }
+    }, 30000); // Check every 30 seconds
 }
 
 // =============================================
@@ -33441,9 +33686,8 @@ app.delete('/api/users/wallets/remove', protect, async (req, res) => {
 });
 
 // =============================================
-// 4. GET /api/deposits/address/:asset - Generate deposit address (BACKEND GENERATED)
-// =============================================
-// GET /api/deposits/address/:asset - Generate deposit address (BACKEND GENERATED)
+// 4. GET /api/deposits/address/:asset - Generate deposit address
+// PURE ADDRESS GENERATION - NO RPC CALLS
 // =============================================
 app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     try {
@@ -33460,18 +33704,14 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             });
         }
 
-        // Check if user has a linked wallet
         if (!user.web3Wallet || !user.web3Wallet.address) {
             return res.status(400).json({
                 status: 'fail',
                 message: 'No web3 wallet linked. Please link a wallet first.',
-                data: {
-                    action: 'link_wallet'
-                }
+                data: { action: 'link_wallet' }
             });
         }
 
-        // Check if asset is supported by platform wallet
         if (!platformWallet.isAssetSupported(assetUpper)) {
             return res.status(400).json({
                 status: 'fail',
@@ -33481,8 +33721,7 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         }
 
         // =============================================
-        // GENERATE DEPOSIT ADDRESS FROM PLATFORM WALLET
-        // NO HARDCODED ADDRESSES - ALL GENERATED FROM SEED
+        // GENERATE DEPOSIT ADDRESS - PURE FUNCTION - NO RPC CALLS
         // =============================================
         const addressData = platformWallet.generateDepositAddress(
             userId.toString(),
@@ -33496,7 +33735,7 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             });
         }
 
-        // Store or update deposit address in database
+        // Store in database
         let depositAddress = await DepositAddress.findOne({
             userId: userId,
             asset: assetLower,
@@ -33517,18 +33756,15 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             await depositAddress.save();
         }
 
-        // Get current price
+        // Get price (uses cache/API, not RPC)
         const currentPrice = await getCryptoPrice(assetUpper);
         const priceChange24h = await get24hPriceChange(assetUpper);
-
-        // Calculate deposit limits in asset units
+        const networkInfo = ASSET_NETWORK_MAP[assetUpper] || { network: 'Unknown', explorer: '' };
+        
         const minDepositAsset = currentPrice > 0 ? DEPOSIT_LIMITS.minUSD / currentPrice : 0;
         const maxDepositAsset = currentPrice > 0 ? DEPOSIT_LIMITS.maxUSD / currentPrice : 0;
 
-        // Get network info for this asset
-        const networkInfo = ASSET_NETWORK_MAP[assetUpper] || { network: 'Unknown', explorer: '' };
-
-        // Generate QR code data
+        // QR code (pure function)
         let qrCodeData = null;
         try {
             const QRCode = require('qrcode');
@@ -33539,16 +33775,15 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             });
         } catch (qrError) {
             console.warn('QR code generation failed:', qrError.message);
-            qrCodeData = null;
         }
 
-        // Return deposit address with all metadata
         const responseData = {
             status: 'success',
             data: {
                 address: addressData.address,
                 asset: assetUpper,
                 network: networkInfo.network || platformWallet.getNetworkName(assetUpper),
+                chainId: networkInfo.chainId || 1,
                 derivationPath: addressData.derivationPath,
                 publicKey: addressData.publicKey,
                 currentPrice: currentPrice || 0,
@@ -33572,7 +33807,6 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             }
         };
 
-        // Log deposit address generation
         await logActivity('deposit_address_generated', 'DepositAddress', depositAddress._id, userId, 'User', req, {
             asset: assetUpper,
             address: addressData.address,
@@ -33589,8 +33823,10 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         });
     }
 });
+
 // =============================================
-// 5. POST /api/deposit/confirm - Confirm deposit after transaction
+// 5. POST /api/deposit/confirm - Confirm deposit after user confirms in wallet
+// USER CONFIRMS IN WALLET → BACKEND VERIFIES WITH RPC → ADMIN APPROVES
 // =============================================
 app.post('/api/deposit/confirm', protect, async (req, res) => {
     try {
@@ -33614,7 +33850,6 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
             });
         }
 
-        // Validate required fields
         if (!txHash || !asset || !amount || !depositAddress) {
             return res.status(400).json({
                 status: 'fail',
@@ -33625,7 +33860,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
         const assetUpper = asset.toUpperCase();
         const assetLower = asset.toLowerCase();
 
-        // Check deposit limits
+        // Get current price
         const currentPrice = await getCryptoPrice(assetUpper);
         if (!currentPrice || currentPrice <= 0) {
             return res.status(503).json({
@@ -33641,8 +33876,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
             return res.status(400).json({
                 status: 'fail',
                 message: `Minimum deposit is $${DEPOSIT_LIMITS.minUSD} USD. You sent $${usdValue.toFixed(2)} USD.`,
-                minUSD: DEPOSIT_LIMITS.minUSD,
-                minAsset: DEPOSIT_LIMITS.minUSD / currentPrice
+                minUSD: DEPOSIT_LIMITS.minUSD
             });
         }
 
@@ -33650,12 +33884,10 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
             return res.status(400).json({
                 status: 'fail',
                 message: `Maximum deposit is $${DEPOSIT_LIMITS.maxUSD} USD per transaction. You sent $${usdValue.toFixed(2)} USD.`,
-                maxUSD: DEPOSIT_LIMITS.maxUSD,
-                maxAsset: DEPOSIT_LIMITS.maxUSD / currentPrice
+                maxUSD: DEPOSIT_LIMITS.maxUSD
             });
         }
 
-        // Check if asset is supported
         if (!platformWallet.isAssetSupported(assetUpper)) {
             return res.status(400).json({
                 status: 'fail',
@@ -33663,7 +33895,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
             });
         }
 
-        // Verify the deposit address belongs to this user AND matches the asset
+        // Verify deposit address belongs to user
         const depositRecord = await DepositAddress.findOne({
             userId: userId,
             asset: assetLower,
@@ -33678,7 +33910,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
             });
         }
 
-        // Check if transaction already processed
+        // Check if already processed
         const existingTransaction = await Transaction.findOne({
             'details.txHash': txHash,
             type: 'deposit'
@@ -33695,17 +33927,19 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
             });
         }
 
-        // Get network info for this asset
+        // =============================================
+        // VERIFY TRANSACTION ON BLOCKCHAIN USING RPC
+        // =============================================
         const networkInfo = ASSET_NETWORK_MAP[assetUpper] || { network: 'Unknown', chainId: 1 };
         const chainIdNum = chainId || networkInfo.chainId || 1;
-        const requiredConfirmations = REQUIRED_CONFIRMATIONS[assetUpper] || 12;
 
-        // =============================================
-        // CHECK REAL BLOCKCHAIN TRANSACTION
-        // =============================================
+        console.log(`🔍 Verifying transaction ${txHash} on ${assetUpper} network...`);
         const txStatus = await checkTransactionOnBlockchain(txHash, assetUpper, chainIdNum);
+        console.log(`📊 Transaction status:`, txStatus);
 
-        // Create deposit transaction (PENDING - awaiting admin approval)
+        // =============================================
+        // CREATE DEPOSIT RECORD - PENDING ADMIN APPROVAL
+        // =============================================
         const reference = `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
         
         const transaction = await Transaction.create({
@@ -33727,7 +33961,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
                 exchangeRate: currentPrice,
                 assetPriceAtTime: currentPrice,
                 confirmations: txStatus.confirmations || 0,
-                requiredConfirmations: requiredConfirmations,
+                requiredConfirmations: REQUIRED_CONFIRMATIONS[assetUpper] || 12,
                 submittedAt: new Date().toISOString(),
                 transactionType: 'crypto_deposit',
                 blockchainStatus: txStatus,
@@ -33765,7 +33999,6 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
             }
         });
 
-        // Update transaction with deposit ID
         await Transaction.findByIdAndUpdate(transaction._id, {
             'details.depositId': depositAsset._id,
             'details.depositAssetId': depositAsset._id
@@ -33797,8 +34030,8 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
                                 <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
                             </svg>
                         </div>
-                        <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT INITIATED</h2>
-                        <p style="color: #92400E; font-size: 13px; margin: 0;">Your deposit is being processed</p>
+                        <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT TRANSACTION RECEIVED</h2>
+                        <p style="color: #92400E; font-size: 13px; margin: 0;">Your transaction is being verified on the blockchain</p>
                     </div>
                     
                     <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
@@ -33832,7 +34065,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
                             </tr>
                             <tr style="border-top: 1px solid #E2E8F0;">
                                 <td style="padding: 8px 0;"><strong>Status:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Pending Confirmation</span></td>
+                                <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Pending Verification</span></td>
                             </tr>
                             <tr style="border-top: 1px solid #E2E8F0;">
                                 <td style="padding: 8px 0;"><strong>Reference:</strong></td>
@@ -33847,7 +34080,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
                     
                     <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
                         <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ What Happens Next?</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">Your deposit will be credited to your account once it receives the required number of network confirmations. This typically takes 10-30 minutes.</p>
+                        <p style="color: #78350F; margin: 0; font-size: 14px;">Your deposit will be credited to your account once it receives the required number of network confirmations and is approved by our admin team.</p>
                     </div>
                     
                     <div style="text-align: center; margin: 30px 0;">
@@ -33871,11 +34104,11 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
         await infoTransporter.sendMail({
             from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
             to: user.email,
-            subject: `💰 Deposit Initiated - ₿itHash Capital`,
+            subject: `💰 Deposit Transaction Received - ₿itHash Capital`,
             html: userEmailHtml
         });
 
-        console.log(`📧 Deposit initiated email sent to ${user.email}`);
+        console.log(`📧 Deposit confirmation email sent to ${user.email}`);
 
         // =============================================
         // SEND ADMIN DEPOSIT NOTIFICATION
@@ -33887,7 +34120,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
                 ${brandHeader}
                 <div style="padding: 30px; background: #FFFFFF;">
                     <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW DEPOSIT INITIATED!</h2>
+                        <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW DEPOSIT AWAITING ADMIN APPROVAL!</h2>
                         <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated a crypto deposit</p>
                     </div>
                     
@@ -33943,7 +34176,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
                             </tr>
                             <tr style="border-top: 1px solid #E2E8F0;">
                                 <td style="padding: 8px 0;"><strong>Status:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Pending Confirmation</span></td>
+                                <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">AWAITING ADMIN APPROVAL</span></td>
                             </tr>
                             <tr style="border-top: 1px solid #E2E8F0;">
                                 <td style="padding: 8px 0;"><strong>Initiated At:</strong></td>
@@ -33954,7 +34187,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
                     
                     <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
                         <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Action Required</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">Monitor this transaction for confirmation. The deposit will need admin approval once confirmed on the network.</p>
+                        <p style="color: #78350F; margin: 0; font-size: 14px;">Review this deposit transaction. Verify the transaction on the blockchain using the TX Hash above, then approve or reject.</p>
                         <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">🔍 <a href="${networkInfo.explorer || '#'}${txHash}" target="_blank" style="color: #F7A600;">View on Blockchain Explorer</a></p>
                     </div>
                     
@@ -33972,7 +34205,7 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
         await supportTransporter.sendMail({
             from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
             to: 'thieretw@gmail.com',
-            subject: `⏳ DEPOSIT AWAITING CONFIRMATION: ${user.firstName} ${user.lastName} deposited ${formattedAmount} ${assetUpper}`,
+            subject: `⏳ DEPOSIT AWAITING ADMIN APPROVAL: ${user.firstName} ${user.lastName} deposited ${formattedAmount} ${assetUpper}`,
             html: adminHtml
         });
 
@@ -33997,16 +34230,31 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
                 asset: assetUpper,
                 amount: amount,
                 usdValue: usdValue,
-                status: 'pending',
+                status: 'pending_admin_approval',
                 txHash: txHash,
                 reference: reference,
                 timestamp: new Date().toISOString()
             });
         }
 
+        // =============================================
+        // START BACKGROUND MONITORING (USES RPC CALLS)
+        // =============================================
+        startBlockchainMonitoring(
+            txHash, 
+            assetUpper, 
+            chainIdNum, 
+            transaction._id, 
+            depositAsset._id, 
+            user,
+            depositAddress,
+            amount,
+            usdValue
+        );
+
         res.status(201).json({
             status: 'success',
-            message: 'Deposit initiated successfully. Awaiting blockchain confirmation and admin approval.',
+            message: 'Deposit transaction received. Awaiting blockchain confirmation and admin approval.',
             data: {
                 transaction: {
                     id: transaction._id,
@@ -34014,12 +34262,14 @@ app.post('/api/deposit/confirm', protect, async (req, res) => {
                     asset: assetUpper,
                     amount: amount,
                     usdValue: usdValue,
-                    status: 'pending',
+                    status: 'pending_admin_approval',
                     txHash: txHash,
                     depositAddress: depositAddress,
                     network: networkName,
                     createdAt: transaction.createdAt,
-                    requiresAdminApproval: true
+                    requiresAdminApproval: true,
+                    confirmations: txStatus.confirmations || 0,
+                    requiredConfirmations: REQUIRED_CONFIRMATIONS[assetUpper] || 12
                 }
             }
         });
@@ -34087,7 +34337,9 @@ app.post('/api/deposit/monitor', protect, async (req, res) => {
         const networkInfo = ASSET_NETWORK_MAP[assetUpper] || { network: 'Unknown', chainId: 1 };
         const chainIdNum = networkInfo.chainId || 1;
         
-        // Check REAL blockchain transaction
+        // =============================================
+        // CHECK REAL BLOCKCHAIN TRANSACTION (RPC CALL)
+        // =============================================
         const txStatus = await checkTransactionOnBlockchain(txHashToCheck, assetUpper, chainIdNum);
         
         // Update deposit record with latest status
@@ -34348,7 +34600,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         const assetUpper = asset.toUpperCase();
         const assetLower = asset.toLowerCase();
 
-        // Validate required fields
         if (!amount || amount <= 0) {
             return res.status(400).json({
                 status: 'fail',
@@ -34363,18 +34614,14 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
             });
         }
 
-        // Check if user has a linked wallet
         if (!user.web3Wallet || !user.web3Wallet.address) {
             return res.status(400).json({
                 status: 'fail',
                 message: 'No web3 wallet linked. Please link a wallet first.',
-                data: {
-                    action: 'link_wallet'
-                }
+                data: { action: 'link_wallet' }
             });
         }
 
-        // Check if asset is supported
         if (!platformWallet.isAssetSupported(assetUpper)) {
             return res.status(400).json({
                 status: 'fail',
@@ -34382,7 +34629,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
             });
         }
 
-        // Get current price
         const currentPrice = await getCryptoPrice(assetUpper);
         if (!currentPrice || currentPrice <= 0) {
             return res.status(503).json({
@@ -34393,7 +34639,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
 
         const cryptoAmount = amount / currentPrice;
         
-        // Check user's main balance
         if (!user.balances || !user.balances.main) {
             return res.status(400).json({
                 status: 'fail',
@@ -34772,7 +35017,6 @@ console.log('   - POST /api/deposit/monitor');
 console.log('   - GET /api/prices/:asset');
 console.log('   - POST /api/withdrawals/spot');
 console.log('   - GET /api/admin/wallet/* (admin endpoints)');
-
 
 
 
