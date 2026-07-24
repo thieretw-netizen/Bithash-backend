@@ -20624,35 +20624,56 @@ app.get('/api/transactions/:id', protect, async (req, res) => {
 
 
 // =============================================
-// DEPOSIT ENDPOINTS
+// DEPOSIT ENDPOINTS - COMPLETE REWRITE WITH NO HARDCODED ADDRESSES
 // =============================================
 
-// Get deposit address for specific asset
+// Get deposit address for specific asset - GENERATED FROM MASTER SEED
 app.get('/api/deposits/address/:asset', async (req, res) => {
   try {
     const { asset } = req.params;
     const assetLower = asset.toLowerCase();
-    
-   // Map of deposit addresses from your provided list
-    const depositAddresses = {
-      'btc': '18AvzZ3ir1HHnzPmLhELhSSxuYQNAmR2an',
-      'eth': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
-      'usdt': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
-      'bnb': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
-      'sol': 'HzZvSVqUKJ1mrCd8qybn8Q2dvwJuTnKegUg1cTqvGUxM', 
-      'usdc': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
-      'xrp': 'r463rNR8mjCZBGkbS4dBcCDCukei99PVbk',
-      'doge': 'DJrSW1vWhUTm73mwEjYbiY1ZfuTFHCTbVS',
-      'shib': '0xAc476dBc24488f8b8f6c30e2eb7332E9bcB754d1',
-      'ltc': 'LUtJQK2XmGyfrRfkUK6HUhgYkZeWi7pzmD',
-	  'trx': 'TJbiznb2WoSWiT8JR4R9j5fmpF5bLsJuEd'
-    };
+    const assetUpper = asset.toUpperCase();
 
-    // Check if asset is supported
-    if (!depositAddresses[assetLower]) {
+    // Check if asset is supported by platform wallet
+    if (!platformWallet.isAssetSupported(assetUpper)) {
       return res.status(400).json({
         status: 'fail',
-        message: `Unsupported asset: ${asset}. Supported assets: ${Object.keys(depositAddresses).join(', ')}`
+        message: `Unsupported asset: ${asset}. Supported assets: ${platformWallet.getSupportedAssets().map(a => a.symbol).join(', ')}`
+      });
+    }
+
+    // Get user ID from token (if authenticated)
+    let userId = 'system';
+    let user = null;
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (token) {
+      try {
+        const decoded = verifyJWT(token);
+        if (decoded && !decoded.isAdmin) {
+          user = await User.findById(decoded.id);
+          if (user) {
+            userId = user._id.toString();
+          }
+        }
+      } catch (err) {
+        console.warn('Token verification failed, using system user');
+      }
+    }
+
+    // =============================================
+    // GENERATE DEPOSIT ADDRESS FROM PLATFORM WALLET
+    // NO HARDCODED ADDRESSES - ALL GENERATED FROM SEED
+    // =============================================
+    const addressData = platformWallet.generateDepositAddress(
+      userId,
+      assetUpper
+    );
+
+    if (!addressData || !addressData.address) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to generate deposit address'
       });
     }
 
@@ -20661,47 +20682,19 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
     let rateChange24h = 0;
     
     try {
-      const coinGeckoId = {
-        'btc': 'bitcoin',
-        'eth': 'ethereum',
-        'usdt': 'tether',
-        'bnb': 'binancecoin',
-        'sol': 'solana',
-        'usdc': 'usd-coin',
-        'xrp': 'ripple',
-        'doge': 'dogecoin',
-		'TRX': 'tron',
-        'shib': 'shiba-inu',
-        'ltc': 'litecoin'
-      }[assetLower];
-
-      if (coinGeckoId) {
-        const response = await axios.get(
-          `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd&include_24hr_change=true`,
-          { timeout: 5000 }
-        );
-        
-        if (response.data && response.data[coinGeckoId]) {
-          currentRate = response.data[coinGeckoId].usd;
-          rateChange24h = response.data[coinGeckoId].usd_24h_change || 0;
-        }
+      const price = await getCryptoPrice(assetUpper);
+      if (price && price > 0) {
+        currentRate = price;
+      }
+      
+      // Get 24h change
+      const change = await get24hPriceChange(assetUpper);
+      if (change !== null && change !== undefined) {
+        rateChange24h = change;
       }
     } catch (priceError) {
       console.warn('Could not fetch current price:', priceError.message);
-      // Set default rates
-      const defaultRates = {
-        'btc': 43000,
-        'eth': 2300,
-        'usdt': 1,
-        'bnb': 300,
-        'sol': 100,
-        'usdc': 1,
-        'xrp': 0.5,
-        'doge': 0.08,
-        'shib': 0.000008,
-        'ltc': 70
-      };
-      currentRate = defaultRates[assetLower] || 1;
+      currentRate = 1; // Fallback
     }
 
     // Generate a unique reference for this deposit session
@@ -20710,18 +20703,66 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
     // Rate expiry (15 minutes from now)
     const rateExpiry = Date.now() + 15 * 60 * 1000;
 
+    // Get network info
+    const networkInfo = ASSET_NETWORK_MAP[assetUpper] || { network: 'Unknown', explorer: '' };
+
+    // Generate QR code data
+    let qrCodeData = null;
+    try {
+      const QRCode = require('qrcode');
+      qrCodeData = await QRCode.toDataURL(addressData.address, {
+        errorCorrectionLevel: 'H',
+        margin: 2,
+        width: 256
+      });
+    } catch (qrError) {
+      console.warn('QR code generation failed:', qrError.message);
+      qrCodeData = null;
+    }
+
+    // Store deposit address in database
+    let depositAddress = await DepositAddress.findOne({
+      userId: userId !== 'system' ? userId : null,
+      asset: assetLower,
+      isActive: true
+    });
+
+    if (!depositAddress) {
+      depositAddress = new DepositAddress({
+        userId: userId !== 'system' ? userId : null,
+        asset: assetLower,
+        address: addressData.address,
+        derivationPath: addressData.derivationPath,
+        publicKey: addressData.publicKey,
+        isActive: true,
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+      });
+      await depositAddress.save();
+    }
+
     res.status(200).json({
       status: 'success',
       data: {
         asset: assetLower,
-        address: depositAddresses[assetLower],
-        network: getNetworkName(assetLower),
+        address: addressData.address,
+        network: networkInfo.network || platformWallet.getNetworkName(assetUpper),
         rate: currentRate,
         rateChange24h: rateChange24h,
         rateExpiry: rateExpiry,
         reference: reference,
         minDeposit: 50, // Minimum $50 USD
-        qrCode: `${assetLower}:${depositAddresses[assetLower]}`
+        qrCode: qrCodeData || `${assetLower}:${addressData.address}`,
+        derivationPath: addressData.derivationPath,
+        publicKey: addressData.publicKey,
+        expiresAt: depositAddress.expiresAt,
+        explorerUrl: networkInfo.explorer ? `${networkInfo.explorer}${addressData.address}` : null,
+        metadata: {
+          assetType: platformWallet.networkProviders[assetUpper]?.type || 'unknown',
+          isERC20: !!platformWallet.networkProviders[assetUpper]?.contract,
+          contractAddress: platformWallet.networkProviders[assetUpper]?.contract || null,
+          chainId: platformWallet.networkProviders[assetUpper]?.chainId || null
+        }
       }
     });
 
@@ -20734,6 +20775,42 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
     });
   }
 });
+
+// Helper function for 24h price change
+async function get24hPriceChange(asset) {
+  try {
+    const assetLower = asset.toLowerCase();
+    const response = await axios.get(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${assetLower}&vs_currencies=usd&include_24hr_change=true`,
+      { timeout: 3000 }
+    );
+    if (response.data && response.data[assetLower]) {
+      return response.data[assetLower].usd_24h_change || 0;
+    }
+    return 0;
+  } catch (err) {
+    console.warn(`Could not fetch 24h change for ${asset}:`, err.message);
+    return 0;
+  }
+}
+
+// Helper function to get network name
+function getNetworkName(asset) {
+  const networks = {
+    'btc': 'Bitcoin',
+    'eth': 'Ethereum (ERC20)',
+    'usdt': 'Ethereum (ERC20)',
+    'bnb': 'BSC (BEP20)',
+    'sol': 'Solana',
+    'usdc': 'Ethereum (ERC20)',
+    'xrp': 'Ripple',
+    'doge': 'Dogecoin',
+    'shib': 'Ethereum (ERC20)',
+    'ltc': 'Litecoin',
+    'trx': 'TRON (TRC20)'
+  };
+  return networks[asset.toLowerCase()] || 'Unknown Network';
+}
 
 // Request deposit (create deposit record)
 app.post('/api/deposits/request', protect, async (req, res) => {
