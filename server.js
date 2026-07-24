@@ -34381,54 +34381,53 @@ app.post('/api/deposit/monitor', protect, async (req, res) => {
 
 // =============================================
 // 7. GET /api/prices/:asset - Get current price
+
+// =============================================
+// GET /api/prices/:asset - Get current price (for initial load only)
+// Uses the same getCryptoPrice system as WebSocket
 // =============================================
 app.get('/api/prices/:asset', protect, async (req, res) => {
     try {
         const { asset } = req.params;
         const assetUpper = asset.toUpperCase();
         
-        // Get price from cache or API
+        console.log(`📊 [REST] Fetching price for: ${assetUpper}`);
+        
+        // Use the existing getCryptoPrice function
         const price = await getCryptoPrice(assetUpper);
         
         if (!price || price <= 0) {
+            console.error(`❌ [REST] Price not available for ${assetUpper}`);
             return res.status(404).json({
                 status: 'fail',
-                message: `Price not available for ${assetUpper}`
+                message: `Price not available for ${assetUpper}`,
+                data: {
+                    asset: assetUpper,
+                    price: 0
+                }
             });
         }
-
-        // Get 24h change
-        let change24h = 0;
-        try {
-            const response = await axios.get(
-                `https://api.coingecko.com/api/v3/simple/price?ids=${assetUpper.toLowerCase()}&vs_currencies=usd&include_24hr_change=true`,
-                { timeout: 3000 }
-            );
-            if (response.data && response.data[assetUpper.toLowerCase()]) {
-                change24h = response.data[assetUpper.toLowerCase()].usd_24h_change || 0;
-            }
-        } catch (err) {
-            console.warn(`Could not fetch 24h change for ${assetUpper}:`, err.message);
-        }
-
+        
+        console.log(`✅ [REST] Price for ${assetUpper}: $${price}`);
+        
         res.status(200).json({
             status: 'success',
             data: {
                 asset: assetUpper,
                 price: price,
-                change24h: change24h,
                 timestamp: new Date().toISOString()
             }
         });
-
+        
     } catch (err) {
-        console.error('Get price error:', err);
+        console.error('[REST] Get price error:', err);
         res.status(500).json({
             status: 'error',
             message: err.message || 'Failed to fetch price'
         });
     }
 });
+
 
 // =============================================
 // 8. POST /api/withdrawals/spot - Spot withdrawal with gas fee
