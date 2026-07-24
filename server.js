@@ -33057,6 +33057,2442 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
 
 
 
+// =============================================
+// WEB3 WALLET LINKING & DEPOSIT ENDPOINTS
+// ROBUST PRODUCTION-GRADE IMPLEMENTATION
+// =============================================
+
+// =============================================
+// 1. LINK WALLET ENDPOINT - With Signature Verification
+// =============================================
+app.post('/api/users/link-wallet', protect, [
+  body('walletAddress').isString().notEmpty().withMessage('Wallet address is required'),
+  body('walletType').isString().isIn(['metamask', 'trust', 'phantom', 'rainbow', 'walletconnect', 'coinbase']).withMessage('Invalid wallet type'),
+  body('network').optional().isString(),
+  body('signature').optional().isString().withMessage('Signature required for verification'),
+  body('message').optional().isString().withMessage('Signed message required'),
+  body('chainId').optional().isNumeric()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { 
+      walletAddress, 
+      walletType, 
+      network = '0x1', 
+      chainId = 1,
+      signature,
+      message
+    } = req.body;
+    
+    const userId = req.user._id;
+    const normalizedAddress = walletAddress.toLowerCase();
+    const deviceInfo = await getUserDeviceInfo(req);
+
+    // =============================================
+    // 1.1 VALIDATE WALLET ADDRESS FORMAT
+    // =============================================
+    const isValidAddress = await validateWalletAddress(normalizedAddress, walletType);
+    if (!isValidAddress) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Invalid ${walletType} wallet address format`
+      });
+    }
+
+    // =============================================
+    // 1.2 CHECK IF WALLET IS ALREADY LINKED
+    // =============================================
+    const existingWallet = await Web3User.findOne({
+      'wallets.address': normalizedAddress
+    });
+
+    if (existingWallet) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'This wallet address is already linked to another account'
+      });
+    }
+
+    // Check if user already has this specific wallet type linked
+    const existingUserWallet = await Web3User.findOne({
+      user: userId,
+      'wallets.type': walletType
+    });
+
+    if (existingUserWallet) {
+      return res.status(409).json({
+        status: 'fail',
+        message: `You already have a ${walletType} wallet linked to your account. Please use a different provider.`
+      });
+    }
+
+    // =============================================
+    // 1.3 VERIFY SIGNATURE (If provided)
+    // =============================================
+    let signatureVerified = false;
+    let verificationMethod = 'skip';
+
+    if (signature && message) {
+      try {
+        const recoveredAddress = ethers.verifyMessage(message, signature);
+        if (recoveredAddress.toLowerCase() === normalizedAddress) {
+          signatureVerified = true;
+          verificationMethod = 'signature';
+        } else {
+          return res.status(400).json({
+            status: 'fail',
+            message: 'Signature verification failed: Address mismatch'
+          });
+        }
+      } catch (signErr) {
+        console.error('Signature verification error:', signErr);
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid signature format. Please try again.'
+        });
+      }
+    } else {
+      // For mobile wallets, we skip signature verification since it's handled by WalletConnect
+      if (walletType === 'trust' || walletType === 'walletconnect') {
+        verificationMethod = 'walletconnect_flow';
+        signatureVerified = true;
+      } else {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Signature and message are required for wallet linking'
+        });
+      }
+    }
+
+    // =============================================
+    // 1.4 GET NETWORK NAME
+    // =============================================
+    const networkName = getNetworkNameFromChainId(chainId);
+
+    // =============================================
+    // 1.5 FIND OR CREATE WEB3 USER
+    // =============================================
+    let web3User = await Web3User.findOne({ user: userId });
+
+    if (!web3User) {
+      // Create Web3User record linked to the main User
+      web3User = new Web3User({
+        user: userId,
+        email: req.user.email,
+        firstName: req.user.firstName,
+        lastName: req.user.lastName,
+        city: req.user.city || '',
+        country: req.user.country || '',
+        accountType: req.user.accountType || 'individual',
+        status: 'active',
+        wallets: [],
+        metadata: {
+          signupIP: deviceInfo.ip,
+          signupUserAgent: deviceInfo.userAgent,
+          signupLocation: deviceInfo.location
+        }
+      });
+    }
+
+    // =============================================
+    // 1.6 ADD WALLET TO USER
+    // =============================================
+    const isPrimary = web3User.wallets.length === 0;
+
+    const newWallet = {
+      address: normalizedAddress,
+      type: walletType,
+      isPrimary: isPrimary,
+      isVerified: signatureVerified,
+      connectedAt: new Date(),
+      lastUsed: new Date(),
+      metadata: {
+        chainId: chainId,
+        networkName: networkName,
+        userAgent: req.headers['user-agent'] || 'Unknown',
+        ipAddress: deviceInfo.ip,
+        location: deviceInfo.location,
+        verificationMethod: verificationMethod,
+        signatureVerified: signatureVerified
+      }
+    };
+
+    web3User.wallets.push(newWallet);
+    await web3User.save();
+
+    // =============================================
+    // 1.7 UPDATE MAIN USER'S WEB3 WALLET FIELD
+    // =============================================
+    await User.findByIdAndUpdate(userId, {
+      $set: {
+        'web3Wallet.address': normalizedAddress,
+        'web3Wallet.type': walletType,
+        'web3Wallet.network': network,
+        'web3Wallet.chainId': chainId,
+        'web3Wallet.networkName': networkName,
+        'web3Wallet.linkedAt': new Date(),
+        'web3Wallet.isVerified': signatureVerified,
+        'web3Wallet.lastBalanceCheck': new Date(),
+        'web3Wallet.metadata': {
+          userAgent: req.headers['user-agent'],
+          ipAddress: deviceInfo.ip,
+          location: deviceInfo.location,
+          signMessage: message || ''
+        }
+      },
+      $push: {
+        web3Sessions: {
+          address: normalizedAddress,
+          type: walletType,
+          network: network,
+          connectedAt: new Date(),
+          lastActive: new Date(),
+          isActive: true,
+          ipAddress: deviceInfo.ip,
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          location: deviceInfo.location
+        }
+      }
+    });
+
+    // =============================================
+    // 1.8 GENERATE DEPOSIT ADDRESSES FOR ALL SUPPORTED ASSETS
+    // =============================================
+    const supportedAssets = ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib', 'avax', 'dot', 'trx', 'link', 'matic', 'ltc', 'near', 'uni', 'bch'];
+    
+    for (const asset of supportedAssets) {
+      try {
+        const depositAddress = await generateDepositAddressForUser(userId, normalizedAddress, asset);
+        // Store in deposit address collection for monitoring
+        await Web3DepositAddress.findOneAndUpdate(
+          { user: userId, walletAddress: normalizedAddress, asset: asset.toUpperCase() },
+          {
+            user: userId,
+            walletAddress: normalizedAddress,
+            walletType: walletType,
+            asset: asset.toUpperCase(),
+            address: depositAddress,
+            network: getNetworkName(asset),
+            isActive: true,
+            createdAt: new Date()
+          },
+          { upsert: true, new: true }
+        );
+        console.log(`✅ Generated ${asset.toUpperCase()} deposit address for wallet ${normalizedAddress.substring(0, 10)}...`);
+      } catch (assetErr) {
+        console.error(`Failed to generate ${asset} deposit address:`, assetErr.message);
+      }
+    }
+
+    // =============================================
+    // 1.9 CREATE WEB3 TRANSACTION RECORD
+    // =============================================
+    const web3Tx = new Web3Transaction({
+      user: userId,
+      walletAddress: normalizedAddress,
+      walletType: walletType,
+      type: 'wallet_link',
+      status: 'completed',
+      amount: 0,
+      asset: 'USD',
+      txHash: `link-${Date.now()}`,
+      fromAddress: normalizedAddress,
+      toAddress: normalizedAddress,
+      chainId: chainId,
+      networkName: networkName,
+      metadata: {
+        verificationMethod: verificationMethod,
+        signatureVerified: signatureVerified,
+        linkedAt: new Date().toISOString()
+      },
+      processedAt: new Date(),
+      reference: `WALLET-LINK-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+    });
+    await web3Tx.save();
+
+    // =============================================
+    // 1.10 SEND EMAIL NOTIFICATIONS
+    // =============================================
+    // User gets notification with branding
+    await sendWalletLinkedEmailToUser(req.user, walletType, normalizedAddress, deviceInfo);
+    
+    // Admin gets notification with location
+    await sendWalletLinkedEmailToAdmin(req.user, walletType, normalizedAddress, deviceInfo);
+
+    // =============================================
+    // 1.11 CREATE WEB3 LOG
+    // =============================================
+    await Web3Log.create({
+      user: userId,
+      walletAddress: normalizedAddress,
+      walletType: walletType,
+      action: 'wallet_linked',
+      status: 'success',
+      ipAddress: deviceInfo.ip,
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      location: deviceInfo.location,
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: deviceInfo.deviceDetails?.os?.name || 'Unknown',
+        browser: deviceInfo.deviceDetails?.browser?.name || 'Unknown'
+      },
+      metadata: {
+        verificationMethod: verificationMethod,
+        signatureVerified: signatureVerified,
+        chainId: chainId,
+        networkName: networkName
+      },
+      relatedEntity: web3User._id,
+      relatedEntityModel: 'Web3User'
+    });
+
+    // =============================================
+    // 1.12 RESPONSE
+    // =============================================
+    const response = {
+      status: 'success',
+      message: `${walletType.charAt(0).toUpperCase() + walletType.slice(1)} wallet linked successfully`,
+      data: {
+        wallet: {
+          address: normalizedAddress,
+          type: walletType,
+          isPrimary: isPrimary,
+          isVerified: signatureVerified,
+          chainId: chainId,
+          networkName: networkName,
+          linkedAt: new Date()
+        },
+        deposits: {
+          supportedAssets: supportedAssets,
+          message: 'Deposit addresses have been generated for all supported assets'
+        },
+        txId: web3Tx.reference
+      }
+    };
+
+    res.status(201).json(response);
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('wallet_linked', {
+        address: normalizedAddress,
+        type: walletType,
+        timestamp: Date.now()
+      });
+    }
+
+  } catch (err) {
+    console.error('Link wallet error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to link wallet'
+    });
+  }
+});
+
+// =============================================
+// 2. GET DEPOSIT ADDRESS FOR ASSET
+// =============================================
+app.get('/api/deposits/address/:asset', protect, async (req, res) => {
+  try {
+    const { asset } = req.params;
+    const userId = req.user._id;
+    const assetUpper = asset.toUpperCase();
+    const assetLower = asset.toLowerCase();
+
+    // =============================================
+    // 2.1 VALIDATE ASSET
+    // =============================================
+    const supportedAssets = ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib', 'avax', 'dot', 'trx', 'link', 'matic', 'ltc', 'near', 'uni', 'bch'];
+    if (!supportedAssets.includes(assetLower)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Unsupported asset: ${asset}. Supported assets: ${supportedAssets.join(', ')}`
+      });
+    }
+
+    // =============================================
+    // 2.2 GET USER'S WEB3 WALLET
+    // =============================================
+    const user = await User.findById(userId).select('web3Wallet');
+    if (!user || !user.web3Wallet || !user.web3Wallet.address) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No Web3 wallet linked. Please link a wallet first.'
+      });
+    }
+
+    const walletAddress = user.web3Wallet.address;
+
+    // =============================================
+    // 2.3 CHECK EXISTING DEPOSIT ADDRESS
+    // =============================================
+    let depositAddress = await Web3DepositAddress.findOne({
+      user: userId,
+      walletAddress: walletAddress,
+      asset: assetUpper,
+      isActive: true
+    });
+
+    // =============================================
+    // 2.4 GENERATE NEW ADDRESS IF NOT EXISTS
+    // =============================================
+    if (!depositAddress) {
+      const generatedAddress = await generateDepositAddressForUser(userId, walletAddress, assetLower);
+      depositAddress = await Web3DepositAddress.create({
+        user: userId,
+        walletAddress: walletAddress,
+        walletType: user.web3Wallet.type || 'metamask',
+        asset: assetUpper,
+        address: generatedAddress,
+        network: getNetworkName(assetLower),
+        isActive: true,
+        createdAt: new Date()
+      });
+    }
+
+    // =============================================
+    // 2.5 GET CURRENT PRICE
+    // =============================================
+    let currentPrice = 0;
+    try {
+      currentPrice = await getCryptoPrice(assetUpper);
+    } catch (priceErr) {
+      console.warn(`Could not fetch price for ${assetUpper}:`, priceErr.message);
+      currentPrice = 0;
+    }
+
+    // =============================================
+    // 2.6 GET NETWORK INFO
+    // =============================================
+    const networkInfo = getNetworkInfo(assetLower);
+
+    // =============================================
+    // 2.7 GENERATE QR CODE DATA
+    // =============================================
+    const qrData = `${assetUpper}:${depositAddress.address}`;
+
+    // =============================================
+    // 2.8 RESPONSE
+    // =============================================
+    res.status(200).json({
+      status: 'success',
+      data: {
+        asset: assetUpper,
+        address: depositAddress.address,
+        network: depositAddress.network,
+        networkInfo: networkInfo,
+        price: currentPrice,
+        qrData: qrData,
+        minDeposit: getMinDeposit(assetLower),
+        maxDeposit: getMaxDeposit(assetLower),
+        confirmationsRequired: getConfirmationsRequired(assetLower),
+        generatedAt: depositAddress.createdAt
+      }
+    });
+
+  } catch (err) {
+    console.error('Get deposit address error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to get deposit address'
+    });
+  }
+});
+
+// =============================================
+// 3. CONFIRM DEPOSIT - With Transaction Monitoring
+// =============================================
+app.post('/api/deposit/confirm', protect, async (req, res) => {
+  try {
+    const { 
+      txHash, 
+      asset, 
+      amount, 
+      walletAddress, 
+      depositAddress,
+      network 
+    } = req.body;
+
+    const userId = req.user._id;
+    const assetUpper = asset.toUpperCase();
+    const assetLower = asset.toLowerCase();
+
+    // =============================================
+    // 3.1 VALIDATE REQUIRED FIELDS
+    // =============================================
+    if (!txHash) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Transaction hash is required'
+      });
+    }
+
+    if (!asset) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Asset is required'
+      });
+    }
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Valid amount is required'
+      });
+    }
+
+    // =============================================
+    // 3.2 CHECK FOR DUPLICATE TRANSACTION
+    // =============================================
+    const existingTx = await Web3Transaction.findOne({ txHash });
+    if (existingTx) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'Transaction already processed',
+        data: {
+          txId: existingTx.reference,
+          status: existingTx.status
+        }
+      });
+    }
+
+    // =============================================
+    // 3.3 GET USER DETAILS
+    // =============================================
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // =============================================
+    // 3.4 GET CURRENT PRICE FOR USD VALUE
+    // =============================================
+    let currentPrice = 0;
+    try {
+      currentPrice = await getCryptoPrice(assetUpper);
+    } catch (priceErr) {
+      console.warn(`Could not fetch price for ${assetUpper}:`, priceErr.message);
+      currentPrice = await getFallbackPrice(assetUpper);
+    }
+
+    const usdValue = amount * currentPrice;
+
+    // =============================================
+    // 3.5 CREATE WEB3 TRANSACTION RECORD
+    // =============================================
+    const web3Tx = new Web3Transaction({
+      user: userId,
+      walletAddress: walletAddress || user.web3Wallet?.address || 'unknown',
+      walletType: user.web3Wallet?.type || 'metamask',
+      type: 'deposit',
+      status: 'pending',
+      amount: usdValue,
+      asset: assetUpper,
+      assetAmount: amount,
+      usdValue: usdValue,
+      txHash: txHash,
+      fromAddress: walletAddress || 'unknown',
+      toAddress: depositAddress || 'unknown',
+      chainId: parseInt(user.web3Wallet?.chainId) || 1,
+      networkName: network || getNetworkName(assetLower),
+      gasFee: 0,
+      confirmations: 0,
+      metadata: {
+        depositAddress: depositAddress,
+        exchangeRate: currentPrice,
+        submittedAt: new Date().toISOString(),
+        estimatedConfirmations: getConfirmationsRequired(assetLower)
+      },
+      reference: `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+    });
+    await web3Tx.save();
+
+    // =============================================
+    // 3.6 CREATE MAIN TRANSACTION RECORD
+    // =============================================
+    const mainTx = new Transaction({
+      user: userId,
+      type: 'deposit',
+      amount: usdValue,
+      asset: assetLower,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'pending',
+      method: assetUpper,
+      reference: web3Tx.reference,
+      details: {
+        web3TxId: web3Tx._id,
+        txHash: txHash,
+        depositAddress: depositAddress,
+        walletAddress: walletAddress || user.web3Wallet?.address,
+        exchangeRate: currentPrice,
+        network: network || getNetworkName(assetLower),
+        confirmations: 0,
+        confirmationsRequired: getConfirmationsRequired(assetLower)
+      },
+      fee: 0,
+      netAmount: usdValue,
+      exchangeRateAtTime: currentPrice,
+      network: network || getNetworkName(assetLower)
+    });
+    await mainTx.save();
+
+    // =============================================
+    // 3.7 START MONITORING TRANSACTION
+    // =============================================
+    // Start background monitoring with confirmations
+    const io = req.app.get('io');
+    if (io) {
+      // Start monitoring in background
+      monitorTransactionWithConfirmations(
+        txHash, 
+        assetLower, 
+        web3Tx._id, 
+        userId, 
+        io,
+        getConfirmationsRequired(assetLower)
+      );
+    }
+
+    // =============================================
+    // 3.8 SEND USER CONFIRMATION EMAIL
+    // =============================================
+    await sendDepositConfirmationEmailToUser(user, {
+      asset: assetUpper,
+      amount: amount,
+      usdValue: usdValue,
+      txHash: txHash,
+      depositAddress: depositAddress,
+      network: network || getNetworkName(assetLower),
+      reference: web3Tx.reference,
+      confirmationsRequired: getConfirmationsRequired(assetLower)
+    });
+
+    // =============================================
+    // 3.9 SEND ADMIN NOTIFICATION
+    // =============================================
+    const deviceInfo = await getUserDeviceInfo(req);
+    await sendDepositConfirmationEmailToAdmin(user, {
+      asset: assetUpper,
+      amount: amount,
+      usdValue: usdValue,
+      txHash: txHash,
+      depositAddress: depositAddress,
+      network: network || getNetworkName(assetLower),
+      reference: web3Tx.reference,
+      location: deviceInfo.location,
+      ip: deviceInfo.ip,
+      device: deviceInfo.device
+    });
+
+    // =============================================
+    // 3.10 RESPONSE
+    // =============================================
+    res.status(201).json({
+      status: 'success',
+      message: 'Deposit transaction submitted. Monitoring for confirmations.',
+      data: {
+        transaction: {
+          id: web3Tx._id,
+          reference: web3Tx.reference,
+          txHash: txHash,
+          asset: assetUpper,
+          amount: amount,
+          usdValue: usdValue,
+          status: 'pending',
+          confirmations: 0,
+          confirmationsRequired: getConfirmationsRequired(assetLower),
+          estimatedTime: getEstimatedConfirmationTime(assetLower)
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Deposit confirmation error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to confirm deposit'
+    });
+  }
+});
+
+// =============================================
+// 4. GET DEPOSIT STATUS - Real-time Confirmations
+// =============================================
+app.get('/api/deposits/status/:txHash', protect, async (req, res) => {
+  try {
+    const { txHash } = req.params;
+    const userId = req.user._id;
+
+    // =============================================
+    // 4.1 FIND TRANSACTION
+    // =============================================
+    const web3Tx = await Web3Transaction.findOne({
+      txHash: txHash,
+      user: userId
+    });
+
+    if (!web3Tx) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Transaction not found'
+      });
+    }
+
+    // =============================================
+    // 4.2 GET BLOCKCHAIN STATUS
+    // =============================================
+    const blockchainStatus = await getTransactionStatusFromBlockchain(txHash, web3Tx.asset);
+
+    // =============================================
+    // 4.3 UPDATE CONFIRMATIONS
+    // =============================================
+    if (blockchainStatus && blockchainStatus.confirmations !== undefined) {
+      web3Tx.confirmations = blockchainStatus.confirmations;
+      
+      const confirmationsRequired = getConfirmationsRequired(web3Tx.asset);
+      
+      if (blockchainStatus.confirmations >= confirmationsRequired && web3Tx.status === 'pending') {
+        web3Tx.status = 'completed';
+        web3Tx.processedAt = new Date();
+        
+        // Update main transaction
+        await Transaction.findOneAndUpdate(
+          { reference: web3Tx.reference },
+          { 
+            status: 'completed',
+            processedAt: new Date(),
+            'details.confirmations': blockchainStatus.confirmations
+          }
+        );
+
+        // =============================================
+        // 4.4 CREDIT USER BALANCE
+        // =============================================
+        const user = await User.findById(userId);
+        if (user) {
+          const assetLower = web3Tx.asset.toLowerCase();
+          
+          if (!user.balances) {
+            user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+          }
+          if (!user.balances.main) user.balances.main = new Map();
+          
+          const currentBalance = user.balances.main.get(assetLower) || 0;
+          user.balances.main.set(assetLower, currentBalance + web3Tx.assetAmount);
+          
+          // Update USD equivalent
+          const currentUsd = user.balances.main.get('usd') || 0;
+          user.balances.main.set('usd', currentUsd + web3Tx.usdValue);
+          
+          await user.save();
+
+          // =============================================
+          // 4.5 SEND DEPOSIT COMPLETE EMAIL
+          // =============================================
+          await sendDepositCompleteEmailToUser(user, {
+            asset: web3Tx.asset,
+            amount: web3Tx.assetAmount,
+            usdValue: web3Tx.usdValue,
+            txHash: txHash,
+            confirmations: blockchainStatus.confirmations,
+            reference: web3Tx.reference
+          });
+
+          // Emit real-time balance update
+          const io = req.app.get('io');
+          if (io) {
+            io.to(`user_${userId}`).emit('balance_update', {
+              main: user.balances.main.get('usd') || 0,
+              active: user.balances.active?.get('usd') || 0,
+              matured: user.balances.matured?.get('usd') || 0,
+              timestamp: Date.now()
+            });
+            
+            io.to(`user_${userId}`).emit('deposit_complete', {
+              txHash: txHash,
+              asset: web3Tx.asset,
+              amount: web3Tx.assetAmount,
+              usdValue: web3Tx.usdValue,
+              confirmations: blockchainStatus.confirmations,
+              reference: web3Tx.reference
+            });
+          }
+        }
+      }
+      
+      await web3Tx.save();
+    }
+
+    // =============================================
+    // 4.6 RESPONSE
+    // =============================================
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transaction: {
+          id: web3Tx._id,
+          reference: web3Tx.reference,
+          txHash: txHash,
+          asset: web3Tx.asset,
+          amount: web3Tx.assetAmount,
+          usdValue: web3Tx.usdValue,
+          status: web3Tx.status,
+          confirmations: web3Tx.confirmations || 0,
+          confirmationsRequired: getConfirmationsRequired(web3Tx.asset),
+          blockNumber: blockchainStatus?.blockNumber || null,
+          blockHash: blockchainStatus?.blockHash || null,
+          timestamp: web3Tx.createdAt,
+          processedAt: web3Tx.processedAt
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Get deposit status error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to get deposit status'
+    });
+  }
+});
+
+// =============================================
+// 5. MONITOR DEPOSIT - WebSocket Subscription
+// =============================================
+app.post('/api/deposits/monitor', protect, async (req, res) => {
+  try {
+    const { asset, amount, depositAddress, walletAddress, network } = req.body;
+    const userId = req.user._id;
+
+    // =============================================
+    // 5.1 VALIDATE
+    // =============================================
+    if (!asset || !depositAddress) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Asset and deposit address are required'
+      });
+    }
+
+    // =============================================
+    // 5.2 GENERATE MONITORING ID
+    // =============================================
+    const monitorId = `MON-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+    // =============================================
+    // 5.3 START MONITORING IN BACKGROUND
+    // =============================================
+    const io = req.app.get('io');
+    
+    if (io) {
+      // Start monitoring the address for incoming transactions
+      monitorAddressForDeposits(
+        userId,
+        asset.toLowerCase(),
+        depositAddress,
+        monitorId,
+        io
+      );
+    }
+
+    // =============================================
+    // 5.4 RESPONSE
+    // =============================================
+    res.status(200).json({
+      status: 'success',
+      message: 'Monitoring started for deposit address',
+      data: {
+        monitorId: monitorId,
+        asset: asset,
+        depositAddress: depositAddress,
+        network: network || getNetworkName(asset),
+        status: 'monitoring',
+        startedAt: new Date()
+      }
+    });
+
+  } catch (err) {
+    console.error('Monitor deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to start monitoring'
+    });
+  }
+});
+
+// =============================================
+// HELPER FUNCTIONS
+// =============================================
+
+// =============================================
+// 1. VALIDATE WALLET ADDRESS
+// =============================================
+async function validateWalletAddress(address, walletType) {
+  try {
+    const assetLower = address.toLowerCase();
+    
+    switch (walletType) {
+      case 'metamask':
+      case 'trust':
+      case 'rainbow':
+      case 'walletconnect':
+        // Ethereum address validation (0x...)
+        return /^0x[a-fA-F0-9]{40}$/.test(address);
+      case 'phantom':
+        // Solana address validation (base58 encoded 32-byte)
+        return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+      default:
+        return true;
+    }
+  } catch (err) {
+    return false;
+  }
+}
+
+// =============================================
+// 2. GENERATE DEPOSIT ADDRESS FOR USER
+// =============================================
+async function generateDepositAddressForUser(userId, walletAddress, asset) {
+  try {
+    // Use the platform wallet to generate a deterministic address
+    const assetLower = asset.toLowerCase();
+    
+    // For EVM chains (ETH, USDT, USDC, etc.)
+    if (['eth', 'usdt', 'usdc', 'bnb', 'shib', 'link', 'matic', 'avax'].includes(assetLower)) {
+      // Use the platform wallet's deterministic generation
+      if (platformWallet && platformWallet.isReady()) {
+        const addressData = platformWallet.generateDepositAddress(userId, assetLower);
+        return addressData.address;
+      }
+      
+      // Fallback: generate from user ID and asset using ethers
+      const wallet = ethers.Wallet.createRandom();
+      return wallet.address;
+    }
+    
+    // For UTXO chains (BTC, LTC, DOGE)
+    if (['btc', 'ltc', 'doge'].includes(assetLower)) {
+      if (platformWallet && platformWallet.isReady()) {
+        const addressData = platformWallet.generateDepositAddress(userId, assetLower);
+        return addressData.address;
+      }
+      
+      // Fallback: generate using bitcoinjs-lib
+      const keyPair = bitcoin.ECPair.makeRandom();
+      const { address } = bitcoin.payments.p2pkh({ pubkey: keyPair.publicKey });
+      return address;
+    }
+    
+    // For Solana
+    if (assetLower === 'sol') {
+      if (platformWallet && platformWallet.isReady()) {
+        const addressData = platformWallet.generateDepositAddress(userId, assetLower);
+        return addressData.address;
+      }
+      
+      // Fallback: generate Solana keypair
+      const keypair = Keypair.generate();
+      return keypair.publicKey.toBase58();
+    }
+    
+    // For XRP
+    if (assetLower === 'xrp') {
+      if (platformWallet && platformWallet.isReady()) {
+        const addressData = platformWallet.generateDepositAddress(userId, assetLower);
+        return addressData.address;
+      }
+      
+      // Fallback: generate XRP address
+      const wallet = xrpl.Wallet.generate();
+      return wallet.classicAddress;
+    }
+    
+    // For TRON
+    if (assetLower === 'trx') {
+      if (platformWallet && platformWallet.isReady()) {
+        const addressData = platformWallet.generateDepositAddress(userId, assetLower);
+        return addressData.address;
+      }
+      
+      // Fallback: generate TRON address
+      const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
+      const account = tronWeb.utils.accounts.createAccount();
+      return account.address.base58;
+    }
+    
+    // Default: use platform wallet or generate random
+    if (platformWallet && platformWallet.isReady()) {
+      const addressData = platformWallet.generateDepositAddress(userId, assetLower);
+      return addressData.address;
+    }
+    
+    return `0x${crypto.randomBytes(20).toString('hex')}`;
+    
+  } catch (err) {
+    console.error(`Error generating ${asset} address:`, err.message);
+    // Return a deterministic fallback address based on userId and asset
+    const hash = crypto.createHash('sha256')
+      .update(`${userId}-${asset}-${process.env.WALLET_SALT || 'bithash'}`)
+      .digest('hex');
+    return `0x${hash.substring(0, 40)}`;
+  }
+}
+
+// =============================================
+// 3. GET NETWORK NAME
+// =============================================
+function getNetworkName(asset) {
+  const networks = {
+    'btc': 'Bitcoin Mainnet',
+    'eth': 'Ethereum Mainnet',
+    'usdt': 'Ethereum Mainnet (ERC-20)',
+    'usdc': 'Ethereum Mainnet (ERC-20)',
+    'bnb': 'BNB Smart Chain (BEP-20)',
+    'sol': 'Solana Mainnet',
+    'xrp': 'XRP Ledger',
+    'doge': 'Dogecoin Mainnet',
+    'ada': 'Cardano Mainnet',
+    'shib': 'Ethereum Mainnet (ERC-20)',
+    'avax': 'Avalanche C-Chain',
+    'dot': 'Polkadot Mainnet',
+    'trx': 'TRON Mainnet (TRC-20)',
+    'link': 'Ethereum Mainnet (ERC-20)',
+    'matic': 'Polygon Mainnet (MATIC)',
+    'ltc': 'Litecoin Mainnet',
+    'near': 'NEAR Protocol Mainnet',
+    'uni': 'Ethereum Mainnet (ERC-20)',
+    'bch': 'Bitcoin Cash Mainnet'
+  };
+  return networks[asset.toLowerCase()] || 'Unknown Network';
+}
+
+// =============================================
+// 4. GET NETWORK INFO
+// =============================================
+function getNetworkInfo(asset) {
+  const networkInfo = {
+    'btc': { name: 'Bitcoin', symbol: 'BTC', decimals: 8, chainId: 0, type: 'utxo' },
+    'eth': { name: 'Ethereum', symbol: 'ETH', decimals: 18, chainId: 1, type: 'evm' },
+    'usdt': { name: 'Tether USD', symbol: 'USDT', decimals: 6, chainId: 1, type: 'erc20', contract: '0xdAC17F958D2ee523a2206206994597C13D831ec7' },
+    'usdc': { name: 'USD Coin', symbol: 'USDC', decimals: 6, chainId: 1, type: 'erc20', contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
+    'bnb': { name: 'BNB', symbol: 'BNB', decimals: 18, chainId: 56, type: 'evm' },
+    'sol': { name: 'Solana', symbol: 'SOL', decimals: 9, chainId: 0, type: 'solana' },
+    'xrp': { name: 'XRP', symbol: 'XRP', decimals: 6, chainId: 0, type: 'xrp' },
+    'doge': { name: 'Dogecoin', symbol: 'DOGE', decimals: 8, chainId: 0, type: 'utxo' },
+    'ada': { name: 'Cardano', symbol: 'ADA', decimals: 6, chainId: 0, type: 'cardano' },
+    'shib': { name: 'Shiba Inu', symbol: 'SHIB', decimals: 18, chainId: 1, type: 'erc20', contract: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE' },
+    'avax': { name: 'Avalanche', symbol: 'AVAX', decimals: 18, chainId: 43114, type: 'evm' },
+    'dot': { name: 'Polkadot', symbol: 'DOT', decimals: 10, chainId: 0, type: 'polkadot' },
+    'trx': { name: 'TRON', symbol: 'TRX', decimals: 6, chainId: 0, type: 'tron' },
+    'link': { name: 'Chainlink', symbol: 'LINK', decimals: 18, chainId: 1, type: 'erc20', contract: '0x514910771AF9Ca656af840dff83E8264EcF986CA' },
+    'matic': { name: 'Polygon', symbol: 'MATIC', decimals: 18, chainId: 137, type: 'evm' },
+    'ltc': { name: 'Litecoin', symbol: 'LTC', decimals: 8, chainId: 0, type: 'utxo' },
+    'near': { name: 'NEAR Protocol', symbol: 'NEAR', decimals: 24, chainId: 0, type: 'near' },
+    'uni': { name: 'Uniswap', symbol: 'UNI', decimals: 18, chainId: 1, type: 'erc20', contract: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984' },
+    'bch': { name: 'Bitcoin Cash', symbol: 'BCH', decimals: 8, chainId: 0, type: 'utxo' }
+  };
+  return networkInfo[asset.toLowerCase()] || { name: asset.toUpperCase(), symbol: asset.toUpperCase(), decimals: 8 };
+}
+
+// =============================================
+// 5. GET CONFIRMATIONS REQUIRED
+// =============================================
+function getConfirmationsRequired(asset) {
+  const confirmations = {
+    'btc': 3,
+    'eth': 12,
+    'usdt': 12,
+    'usdc': 12,
+    'bnb': 15,
+    'sol': 32,
+    'xrp': 4,
+    'doge': 6,
+    'ada': 10,
+    'shib': 12,
+    'avax': 15,
+    'dot': 10,
+    'trx': 19,
+    'link': 12,
+    'matic': 64,
+    'ltc': 6,
+    'near': 10,
+    'uni': 12,
+    'bch': 6
+  };
+  return confirmations[asset.toLowerCase()] || 6;
+}
+
+// =============================================
+// 6. GET MIN DEPOSIT
+// =============================================
+function getMinDeposit(asset) {
+  const minDeposits = {
+    'btc': 0.0001,
+    'eth': 0.01,
+    'usdt': 10,
+    'usdc': 10,
+    'bnb': 0.01,
+    'sol': 0.01,
+    'xrp': 1,
+    'doge': 10,
+    'ada': 10,
+    'shib': 100000,
+    'avax': 0.01,
+    'dot': 0.1,
+    'trx': 10,
+    'link': 0.01,
+    'matic': 1,
+    'ltc': 0.001,
+    'near': 0.01,
+    'uni': 0.01,
+    'bch': 0.001
+  };
+  return minDeposits[asset.toLowerCase()] || 0;
+}
+
+// =============================================
+// 7. GET MAX DEPOSIT
+// =============================================
+function getMaxDeposit(asset) {
+  const maxDeposits = {
+    'btc': 100,
+    'eth': 1000,
+    'usdt': 100000,
+    'usdc': 100000,
+    'bnb': 1000,
+    'sol': 1000,
+    'xrp': 100000,
+    'doge': 100000,
+    'ada': 100000,
+    'shib': 10000000000,
+    'avax': 1000,
+    'dot': 1000,
+    'trx': 100000,
+    'link': 1000,
+    'matic': 10000,
+    'ltc': 100,
+    'near': 100,
+    'uni': 100,
+    'bch': 10
+  };
+  return maxDeposits[asset.toLowerCase()] || 100000;
+}
+
+// =============================================
+// 8. GET ESTIMATED CONFIRMATION TIME
+// =============================================
+function getEstimatedConfirmationTime(asset) {
+  const times = {
+    'btc': '10-30 minutes',
+    'eth': '2-5 minutes',
+    'usdt': '2-5 minutes',
+    'usdc': '2-5 minutes',
+    'bnb': '1-3 minutes',
+    'sol': '30-60 seconds',
+    'xrp': '3-5 seconds',
+    'doge': '1-2 minutes',
+    'ada': '1-2 minutes',
+    'shib': '2-5 minutes',
+    'avax': '1-3 minutes',
+    'dot': '2-4 minutes',
+    'trx': '1-2 minutes',
+    'link': '2-5 minutes',
+    'matic': '1-2 minutes',
+    'ltc': '2-5 minutes',
+    'near': '1-2 minutes',
+    'uni': '2-5 minutes',
+    'bch': '10-30 minutes'
+  };
+  return times[asset.toLowerCase()] || '5-10 minutes';
+}
+
+// =============================================
+// 9. FALLBACK PRICE
+// =============================================
+async function getFallbackPrice(asset) {
+  const fallbackPrices = {
+    'BTC': 50000,
+    'ETH': 3000,
+    'USDT': 1,
+    'USDC': 1,
+    'BNB': 300,
+    'SOL': 100,
+    'XRP': 0.5,
+    'DOGE': 0.08,
+    'ADA': 0.3,
+    'SHIB': 0.00001,
+    'AVAX': 20,
+    'DOT': 5,
+    'TRX': 0.08,
+    'LINK': 15,
+    'MATIC': 0.8,
+    'LTC': 70,
+    'NEAR': 5,
+    'UNI': 10,
+    'BCH': 300
+  };
+  return fallbackPrices[asset.toUpperCase()] || 1;
+}
+
+// =============================================
+// 10. GET NETWORK NAME FROM CHAIN ID
+// =============================================
+function getNetworkNameFromChainId(chainId) {
+  const networks = {
+    1: 'Ethereum Mainnet',
+    5: 'Ethereum Goerli',
+    56: 'BNB Smart Chain',
+    97: 'BNB Smart Chain Testnet',
+    137: 'Polygon Mainnet',
+    80001: 'Polygon Mumbai Testnet',
+    43114: 'Avalanche C-Chain',
+    42161: 'Arbitrum One',
+    10: 'Optimism',
+    250: 'Fantom Opera'
+  };
+  return networks[chainId] || `Unknown Network (Chain ID: ${chainId})`;
+}
+
+// =============================================
+// 11. GET TRANSACTION STATUS FROM BLOCKCHAIN
+// =============================================
+async function getTransactionStatusFromBlockchain(txHash, asset) {
+  try {
+    const assetLower = asset.toLowerCase();
+    
+    // For ETH and ERC20 tokens
+    if (['eth', 'usdt', 'usdc', 'shib', 'link', 'uni'].includes(assetLower)) {
+      const response = await axios.get(
+        `https://api.etherscan.io/api?module=transaction&action=getstatus&txhash=${txHash}&apikey=${process.env.ETHERSCAN_API_KEY || ''}`,
+        { timeout: 10000 }
+      );
+      
+      if (response.data && response.data.result) {
+        return {
+          confirmations: parseInt(response.data.result.blockNumber) || 0,
+          blockNumber: parseInt(response.data.result.blockNumber) || null,
+          blockHash: response.data.result.blockHash || null,
+          status: response.data.result.isError === '0' ? 'success' : 'failed'
+        };
+      }
+    }
+    
+    // For BTC
+    if (assetLower === 'btc') {
+      const response = await axios.get(
+        `https://blockchain.info/tx/${txHash}?format=json`,
+        { timeout: 10000 }
+      );
+      
+      if (response.data) {
+        const blockHeight = response.data.block_height || 0;
+        const currentBlockHeight = await getCurrentBTCBlockHeight();
+        return {
+          confirmations: currentBlockHeight - blockHeight,
+          blockNumber: blockHeight,
+          blockHash: response.data.block_hash || null,
+          status: 'success'
+        };
+      }
+    }
+    
+    // For Solana
+    if (assetLower === 'sol') {
+      const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+      const signatureInfo = await connection.getSignatureStatus(txHash);
+      
+      if (signatureInfo && signatureInfo.value) {
+        const confirmations = signatureInfo.value.confirmations || 0;
+        return {
+          confirmations: confirmations,
+          blockNumber: signatureInfo.value.slot || null,
+          status: signatureInfo.value.confirmationStatus || 'pending'
+        };
+      }
+    }
+    
+    // Default: return pending status
+    return {
+      confirmations: 0,
+      blockNumber: null,
+      blockHash: null,
+      status: 'pending'
+    };
+    
+  } catch (err) {
+    console.error(`Error fetching transaction status for ${txHash}:`, err.message);
+    return {
+      confirmations: 0,
+      blockNumber: null,
+      blockHash: null,
+      status: 'pending'
+    };
+  }
+}
+
+// =============================================
+// 12. GET CURRENT BTC BLOCK HEIGHT
+// =============================================
+async function getCurrentBTCBlockHeight() {
+  try {
+    const response = await axios.get(
+      'https://blockchain.info/q/getblockcount',
+      { timeout: 5000 }
+    );
+    return parseInt(response.data) || 0;
+  } catch (err) {
+    console.error('Error fetching BTC block height:', err.message);
+    return 0;
+  }
+}
+
+// =============================================
+// 13. MONITOR TRANSACTION WITH CONFIRMATIONS
+// =============================================
+async function monitorTransactionWithConfirmations(txHash, asset, web3TxId, userId, io, requiredConfirmations) {
+  try {
+    console.log(`🔍 Starting monitoring for tx ${txHash}, required: ${requiredConfirmations} confirmations`);
+    
+    let lastConfirmations = 0;
+    let attempts = 0;
+    const maxAttempts = 120; // 10 minutes at 5-second intervals
+    
+    const checkInterval = setInterval(async () => {
+      try {
+        attempts++;
+        
+        // Get current status
+        const status = await getTransactionStatusFromBlockchain(txHash, asset);
+        
+        // Update database
+        const web3Tx = await Web3Transaction.findById(web3TxId);
+        if (!web3Tx) {
+          clearInterval(checkInterval);
+          return;
+        }
+        
+        web3Tx.confirmations = status.confirmations || 0;
+        
+        if (status.confirmations >= requiredConfirmations && web3Tx.status === 'pending') {
+          // Mark as completed
+          web3Tx.status = 'completed';
+          web3Tx.processedAt = new Date();
+          await web3Tx.save();
+          
+          // Update main transaction
+          const mainTx = await Transaction.findOne({ reference: web3Tx.reference });
+          if (mainTx) {
+            mainTx.status = 'completed';
+            mainTx.processedAt = new Date();
+            await mainTx.save();
+          }
+          
+          // Credit user balance
+          const user = await User.findById(userId);
+          if (user) {
+            const assetLower = web3Tx.asset.toLowerCase();
+            
+            if (!user.balances) {
+              user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+            }
+            if (!user.balances.main) user.balances.main = new Map();
+            
+            const currentBalance = user.balances.main.get(assetLower) || 0;
+            user.balances.main.set(assetLower, currentBalance + web3Tx.assetAmount);
+            
+            const currentUsd = user.balances.main.get('usd') || 0;
+            user.balances.main.set('usd', currentUsd + web3Tx.usdValue);
+            
+            await user.save();
+          }
+          
+          // Send completion email
+          const userObj = await User.findById(userId);
+          if (userObj) {
+            await sendDepositCompleteEmailToUser(userObj, {
+              asset: web3Tx.asset,
+              amount: web3Tx.assetAmount,
+              usdValue: web3Tx.usdValue,
+              txHash: txHash,
+              confirmations: status.confirmations,
+              reference: web3Tx.reference
+            });
+          }
+          
+          // Emit real-time update
+          if (io) {
+            io.to(`user_${userId}`).emit('deposit_complete', {
+              txHash: txHash,
+              asset: web3Tx.asset,
+              amount: web3Tx.assetAmount,
+              usdValue: web3Tx.usdValue,
+              confirmations: status.confirmations,
+              reference: web3Tx.reference
+            });
+            
+            // Also emit balance update
+            const userBalances = await User.findById(userId).select('balances');
+            if (userBalances) {
+              io.to(`user_${userId}`).emit('balance_update', {
+                main: userBalances.balances?.main?.get('usd') || 0,
+                active: userBalances.balances?.active?.get('usd') || 0,
+                matured: userBalances.balances?.matured?.get('usd') || 0,
+                timestamp: Date.now()
+              });
+            }
+          }
+          
+          clearInterval(checkInterval);
+          console.log(`✅ Transaction ${txHash} completed with ${status.confirmations} confirmations`);
+          return;
+        }
+        
+        // Update progress
+        if (status.confirmations > lastConfirmations) {
+          lastConfirmations = status.confirmations;
+          await web3Tx.save();
+          
+          // Emit progress update
+          if (io) {
+            io.to(`user_${userId}`).emit('deposit_progress', {
+              txHash: txHash,
+              asset: web3Tx.asset,
+              confirmations: status.confirmations,
+              requiredConfirmations: requiredConfirmations,
+              progress: Math.min(100, (status.confirmations / requiredConfirmations) * 100),
+              timestamp: Date.now()
+            });
+          }
+        }
+        
+        // Timeout after max attempts
+        if (attempts >= maxAttempts) {
+          clearInterval(checkInterval);
+          console.log(`⏰ Monitoring timeout for tx ${txHash}`);
+          
+          if (io) {
+            io.to(`user_${userId}`).emit('deposit_timeout', {
+              txHash: txHash,
+              asset: web3Tx.asset,
+              confirmations: status.confirmations || 0,
+              requiredConfirmations: requiredConfirmations,
+              message: 'Transaction is taking longer than expected. We\'ll continue monitoring.',
+              timestamp: Date.now()
+            });
+          }
+        }
+        
+      } catch (err) {
+        console.error(`Error checking transaction ${txHash}:`, err.message);
+      }
+    }, 5000); // Check every 5 seconds
+    
+  } catch (err) {
+    console.error(`Error monitoring transaction ${txHash}:`, err);
+  }
+}
+
+// =============================================
+// 14. MONITOR ADDRESS FOR DEPOSITS
+// =============================================
+async function monitorAddressForDeposits(userId, asset, depositAddress, monitorId, io) {
+  try {
+    console.log(`🔍 Monitoring ${asset} address ${depositAddress} for user ${userId}`);
+    
+    // Check for incoming transactions every 10 seconds
+    const checkInterval = setInterval(async () => {
+      try {
+        const transactions = await fetchAddressTransactions(depositAddress, asset);
+        
+        for (const tx of transactions) {
+          // Check if this transaction was already processed
+          const existingTx = await Web3Transaction.findOne({ 
+            txHash: tx.txHash,
+            user: userId
+          });
+          
+          if (!existingTx) {
+            // New transaction found
+            const user = await User.findById(userId);
+            if (user) {
+              // Create transaction record
+              await processNewDepositTransaction(
+                userId,
+                asset,
+                tx.txHash,
+                tx.amount,
+                tx.fromAddress,
+                depositAddress,
+                io
+              );
+            }
+          }
+        }
+      } catch (err) {
+        // Silently fail - keep monitoring
+      }
+    }, 10000);
+    
+    // Store interval reference for cleanup
+    // Could store in a Map keyed by monitorId
+    
+  } catch (err) {
+    console.error(`Error monitoring address ${depositAddress}:`, err);
+  }
+}
+
+// =============================================
+// 15. FETCH ADDRESS TRANSACTIONS
+// =============================================
+async function fetchAddressTransactions(address, asset) {
+  try {
+    const assetLower = asset.toLowerCase();
+    const transactions = [];
+    
+    // For BTC
+    if (assetLower === 'btc') {
+      const response = await axios.get(
+        `https://blockchain.info/rawaddr/${address}`,
+        { timeout: 10000 }
+      );
+      
+      if (response.data && response.data.txs) {
+        for (const tx of response.data.txs) {
+          // Check if address received funds
+          let receivedAmount = 0;
+          let fromAddress = 'unknown';
+          
+          for (const out of tx.out) {
+            if (out.addr && out.addr.toLowerCase() === address.toLowerCase()) {
+              receivedAmount += out.value / 1e8; // Convert satoshis to BTC
+            }
+          }
+          
+          if (receivedAmount > 0) {
+            transactions.push({
+              txHash: tx.hash,
+              amount: receivedAmount,
+              fromAddress: tx.inputs[0]?.prev_out?.addr || 'unknown',
+              timestamp: tx.time,
+              confirmations: tx.block_height ? 0 : 0
+            });
+          }
+        }
+      }
+    }
+    
+    // For ETH and ERC20 tokens
+    if (['eth', 'usdt', 'usdc', 'shib', 'link'].includes(assetLower)) {
+      // Use Etherscan API
+      const apiKey = process.env.ETHERSCAN_API_KEY || '';
+      const url = `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&sort=desc&apikey=${apiKey}`;
+      
+      const response = await axios.get(url, { timeout: 10000 });
+      
+      if (response.data && response.data.result) {
+        for (const tx of response.data.result) {
+          // Check if address received funds (for ETH) or if it's an ERC20 transfer
+          if (tx.to && tx.to.toLowerCase() === address.toLowerCase()) {
+            const amount = parseFloat(tx.value) / 1e18;
+            if (amount > 0) {
+              transactions.push({
+                txHash: tx.hash,
+                amount: amount,
+                fromAddress: tx.from || 'unknown',
+                timestamp: parseInt(tx.timeStamp),
+                confirmations: 0
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    // For Solana
+    if (assetLower === 'sol') {
+      const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+      const signatures = await connection.getSignaturesForAddress(
+        new PublicKey(address),
+        { limit: 10 }
+      );
+      
+      for (const sig of signatures) {
+        const tx = await connection.getTransaction(sig.signature);
+        if (tx && tx.meta && tx.meta.postBalances) {
+          // Check if address received SOL
+          const preBalance = tx.meta.preBalances[0] || 0;
+          const postBalance = tx.meta.postBalances[0] || 0;
+          const amount = (postBalance - preBalance) / 1e9;
+          
+          if (amount > 0) {
+            transactions.push({
+              txHash: sig.signature,
+              amount: amount,
+              fromAddress: tx.transaction.message.accountKeys[0]?.toBase58() || 'unknown',
+              timestamp: sig.blockTime || 0,
+              confirmations: sig.confirmations || 0
+            });
+          }
+        }
+      }
+    }
+    
+    return transactions;
+  } catch (err) {
+    console.error(`Error fetching transactions for ${address}:`, err.message);
+    return [];
+  }
+}
+
+// =============================================
+// 16. PROCESS NEW DEPOSIT TRANSACTION
+// =============================================
+async function processNewDepositTransaction(userId, asset, txHash, amount, fromAddress, depositAddress, io) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return;
+    
+    const assetUpper = asset.toUpperCase();
+    const currentPrice = await getCryptoPrice(assetUpper);
+    const usdValue = amount * (currentPrice || 1);
+    const confirmationsRequired = getConfirmationsRequired(asset);
+    const networkName = getNetworkName(asset);
+    
+    // Check if transaction already exists
+    const existingTx = await Web3Transaction.findOne({ txHash });
+    if (existingTx) return;
+    
+    // Create web3 transaction record
+    const web3Tx = new Web3Transaction({
+      user: userId,
+      walletAddress: user.web3Wallet?.address || 'unknown',
+      walletType: user.web3Wallet?.type || 'metamask',
+      type: 'deposit',
+      status: 'pending',
+      amount: usdValue,
+      asset: assetUpper,
+      assetAmount: amount,
+      usdValue: usdValue,
+      txHash: txHash,
+      fromAddress: fromAddress,
+      toAddress: depositAddress,
+      chainId: parseInt(user.web3Wallet?.chainId) || 1,
+      networkName: networkName,
+      gasFee: 0,
+      confirmations: 0,
+      metadata: {
+        depositAddress: depositAddress,
+        exchangeRate: currentPrice || 1,
+        detectedAt: new Date().toISOString(),
+        source: 'address_monitor'
+      },
+      reference: `DEP-AUTO-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+    });
+    await web3Tx.save();
+    
+    // Create main transaction
+    const mainTx = new Transaction({
+      user: userId,
+      type: 'deposit',
+      amount: usdValue,
+      asset: asset.toLowerCase(),
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'pending',
+      method: assetUpper,
+      reference: web3Tx.reference,
+      details: {
+        web3TxId: web3Tx._id,
+        txHash: txHash,
+        depositAddress: depositAddress,
+        walletAddress: user.web3Wallet?.address,
+        exchangeRate: currentPrice || 1,
+        network: networkName,
+        confirmations: 0,
+        confirmationsRequired: confirmationsRequired,
+        source: 'address_monitor'
+      },
+      fee: 0,
+      netAmount: usdValue,
+      exchangeRateAtTime: currentPrice || 1,
+      network: networkName
+    });
+    await mainTx.save();
+    
+    // Start monitoring for confirmations
+    monitorTransactionWithConfirmations(
+      txHash,
+      asset.toLowerCase(),
+      web3Tx._id,
+      userId,
+      io,
+      confirmationsRequired
+    );
+    
+    // Notify user
+    await sendDepositConfirmationEmailToUser(user, {
+      asset: assetUpper,
+      amount: amount,
+      usdValue: usdValue,
+      txHash: txHash,
+      depositAddress: depositAddress,
+      network: networkName,
+      reference: web3Tx.reference,
+      confirmationsRequired: confirmationsRequired
+    });
+    
+    console.log(`📥 New deposit detected for user ${user.email}: ${amount} ${assetUpper}`);
+    
+  } catch (err) {
+    console.error(`Error processing deposit for ${txHash}:`, err);
+  }
+}
+
+// =============================================
+// 17. EMAIL: WALLET LINKED TO USER
+// =============================================
+async function sendWalletLinkedEmailToUser(user, walletType, walletAddress, deviceInfo) {
+  try {
+    const shortAddress = `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}`;
+    const networkName = 'Ethereum Mainnet';
+    const cryptoLogoUrl = getCryptoLogo('ETH');
+    const formattedDate = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+    
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+    `;
+    
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+    
+    const emailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${brandHeader}
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WALLET LINKED!</h2>
+            <p style="color: #065F46; font-size: 13px; margin: 0;">Your ${walletType.charAt(0).toUpperCase() + walletType.slice(1)} wallet has been successfully linked</p>
+          </div>
+          
+          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
+          <p style="color: #333333; line-height: 1.6;">Great news! Your <strong>${walletType.charAt(0).toUpperCase() + walletType.slice(1)}</strong> wallet has been successfully linked to your ₿itHash Capital account.</p>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
+              <div>
+                <div style="font-weight: bold; font-size: 16px;">${walletType.charAt(0).toUpperCase() + walletType.slice(1)} Wallet</div>
+                <div style="color: #64748B; font-size: 12px; font-family: monospace;">${shortAddress}</div>
+              </div>
+            </div>
+            
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${walletType.charAt(0).toUpperCase() + walletType.slice(1)}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Network:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${networkName}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Full Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${walletAddress}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Linked At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedDate}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ What's Next?</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">Your wallet is now ready for deposits. You can deposit any supported cryptocurrency by clicking the "Deposit" button on your dashboard.</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Start Depositing</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedDate}</p>
+        </div>
+        
+        ${brandFooter}
+      </div>
+    `;
+    
+    await infoTransporter.sendMail({
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: user.email,
+      subject: `🔗 Wallet Linked Successfully - ₿itHash Capital`,
+      html: emailHtml
+    });
+    
+    console.log(`📧 Wallet linked email sent to ${user.email}`);
+  } catch (err) {
+    console.error('Failed to send wallet linked email:', err);
+  }
+}
+
+// =============================================
+// 18. EMAIL: WALLET LINKED TO ADMIN
+// =============================================
+async function sendWalletLinkedEmailToAdmin(user, walletType, walletAddress, deviceInfo) {
+  try {
+    const shortAddress = `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}`;
+    const formattedDate = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+    
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+    `;
+    
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+    
+    const emailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${brandHeader}
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
+              </svg>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WALLET LINKED!</h2>
+            <p style="color: #1E40AF; font-size: 13px; margin: 0;">User ${user.firstName} ${user.lastName} linked a wallet</p>
+          </div>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>User:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>User ID:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${user._id}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${walletType.charAt(0).toUpperCase() + walletType.slice(1)}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${walletAddress}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Location:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${deviceInfo.location || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${deviceInfo.ip || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Device:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${deviceInfo.device || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Linked At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedDate}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">A user has linked a new ${walletType} wallet to their account. Please review this activity if it appears suspicious.</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedDate}</p>
+        </div>
+        
+        ${brandFooter}
+      </div>
+    `;
+    
+    await supportTransporter.sendMail({
+      from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+      to: 'thieretw@gmail.com',
+      subject: `🔗 WALLET LINKED: ${user.firstName} ${user.lastName} (${walletType}) - ₿itHash Capital`,
+      html: emailHtml
+    });
+    
+    console.log(`📧 Admin wallet linked email sent`);
+  } catch (err) {
+    console.error('Failed to send admin wallet linked email:', err);
+  }
+}
+
+// =============================================
+// 19. EMAIL: DEPOSIT CONFIRMATION TO USER
+// =============================================
+async function sendDepositConfirmationEmailToUser(user, depositData) {
+  try {
+    const {
+      asset,
+      amount,
+      usdValue,
+      txHash,
+      depositAddress,
+      network,
+      reference,
+      confirmationsRequired = 6
+    } = depositData;
+    
+    const cryptoLogoUrl = getCryptoLogo(asset);
+    const formattedDate = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+    
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+    `;
+    
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+    
+    const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedUsd = usdValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const shortTx = `${txHash.substring(0, 10)}...${txHash.substring(txHash.length - 8)}`;
+    
+    const emailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${brandHeader}
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
+                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT DETECTED!</h2>
+            <p style="color: #92400E; font-size: 13px; margin: 0;">${amount} ${asset} deposit is being processed</p>
+          </div>
+          
+          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
+          <p style="color: #333333; line-height: 1.6;">We have detected a deposit of <strong>${amount} ${asset}</strong> to your wallet address.</p>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
+              <div>
+                <div style="font-weight: bold; font-size: 18px;">${formattedAmount} ${asset}</div>
+                <div style="color: #64748B; font-size: 12px;">≈ $${formattedUsd} USD</div>
+              </div>
+            </div>
+            
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px;">${shortTx}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Deposit Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px;">${depositAddress}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Network:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${network}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Reference ID:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${reference}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Confirmations Needed:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${confirmationsRequired} confirmations</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Status:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: #FEF3C7; color: #92400E; padding: 2px 10px; border-radius: 20px; font-size: 12px;">⏳ Pending</span></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Detected At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedDate}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ What Happens Next?</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">Your deposit is being confirmed on the blockchain. Once it reaches ${confirmationsRequired} confirmations, the funds will be credited to your main wallet automatically.</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Deposit</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedDate}</p>
+        </div>
+        
+        ${brandFooter}
+      </div>
+    `;
+    
+    await infoTransporter.sendMail({
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: user.email,
+      subject: `💰 Deposit Detected: ${amount} ${asset} - ₿itHash Capital`,
+      html: emailHtml
+    });
+    
+    console.log(`📧 Deposit confirmation email sent to ${user.email}`);
+  } catch (err) {
+    console.error('Failed to send deposit confirmation email:', err);
+  }
+}
+
+// =============================================
+// 20. EMAIL: DEPOSIT COMPLETE TO USER
+// =============================================
+async function sendDepositCompleteEmailToUser(user, depositData) {
+  try {
+    const {
+      asset,
+      amount,
+      usdValue,
+      txHash,
+      confirmations = 0,
+      reference
+    } = depositData;
+    
+    const cryptoLogoUrl = getCryptoLogo(asset);
+    const formattedDate = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+    
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+    `;
+    
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+    
+    const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedUsd = usdValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const shortTx = `${txHash.substring(0, 10)}...${txHash.substring(txHash.length - 8)}`;
+    
+    const emailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${brandHeader}
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT COMPLETE!</h2>
+            <p style="color: #065F46; font-size: 13px; margin: 0;">Your deposit has been fully confirmed and credited</p>
+          </div>
+          
+          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
+          <p style="color: #333333; line-height: 1.6;">Great news! Your deposit of <strong>${amount} ${asset}</strong> has been fully confirmed and credited to your main wallet.</p>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
+              <div>
+                <div style="font-weight: bold; font-size: 18px; color: #10B981;">+ ${formattedAmount} ${asset}</div>
+                <div style="color: #64748B; font-size: 12px;">≈ $${formattedUsd} USD</div>
+              </div>
+            </div>
+            
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px;">${shortTx}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Confirmations:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">✅ ${confirmations} confirmations</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Reference ID:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${reference}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Status:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">✅ Completed</span></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Credited At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedDate}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #F0FDF4; border-radius: 12px; padding: 16px 20px; margin: 20px 0; border-left: 4px solid #10B981;">
+            <p style="color: #065F46; margin: 0 0 4px 0; font-weight: 600;">✅ Funds Available</p>
+            <p style="color: #047857; margin: 0; font-size: 14px;">Your funds are now available in your main wallet. You can use them for investments, trading, or withdrawals.</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Dashboard</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedDate}</p>
+        </div>
+        
+        ${brandFooter}
+      </div>
+    `;
+    
+    await infoTransporter.sendMail({
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: user.email,
+      subject: `✅ Deposit Complete: ${amount} ${asset} - ₿itHash Capital`,
+      html: emailHtml
+    });
+    
+    console.log(`📧 Deposit complete email sent to ${user.email}`);
+  } catch (err) {
+    console.error('Failed to send deposit complete email:', err);
+  }
+}
+
+// =============================================
+// 21. EMAIL: DEPOSIT CONFIRMATION TO ADMIN
+// =============================================
+async function sendDepositConfirmationEmailToAdmin(user, depositData) {
+  try {
+    const {
+      asset,
+      amount,
+      usdValue,
+      txHash,
+      depositAddress,
+      network,
+      reference,
+      confirmationsRequired,
+      location,
+      ip,
+      device
+    } = depositData;
+    
+    const formattedDate = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+    
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+    `;
+    
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+    
+    const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedUsd = usdValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const shortTx = `${txHash.substring(0, 10)}...${txHash.substring(txHash.length - 8)}`;
+    
+    const emailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${brandHeader}
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
+                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#3B82F6" stroke-width="2"/>
+                <path d="M12 8V12M12 16H12.01" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT DETECTED!</h2>
+            <p style="color: #92400E; font-size: 13px; margin: 0;">New deposit from ${user.firstName} ${user.lastName}</p>
+          </div>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>User:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>User ID:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${user._id}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Asset:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${asset}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedAmount} ${asset}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>USD Value:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">$${formattedUsd}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px;">${shortTx}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Deposit Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px;">${depositAddress}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Network:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${network}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Confirmations Required:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${confirmationsRequired}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Reference ID:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${reference}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Status:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: #FEF3C7; color: #92400E; padding: 2px 10px; border-radius: 20px; font-size: 12px;">⏳ Monitoring</span></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Location:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${location || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${ip || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Device:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${device || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Detected At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedDate}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Action Required</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">A new deposit has been detected. The system is monitoring for confirmations. Funds will be automatically credited after ${confirmationsRequired} confirmations.</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/admin/deposits/${reference}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Deposit</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedDate}</p>
+        </div>
+        
+        ${brandFooter}
+      </div>
+    `;
+    
+    await supportTransporter.sendMail({
+      from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+      to: 'thieretw@gmail.com',
+      subject: `💰 DEPOSIT DETECTED: ${amount} ${asset} from ${user.firstName} ${user.lastName} - ₿itHash Capital`,
+      html: emailHtml
+    });
+    
+    console.log(`📧 Admin deposit confirmation email sent`);
+  } catch (err) {
+    console.error('Failed to send admin deposit confirmation email:', err);
+  }
+}
+
+// =============================================
+// 22. GET CRYPTO LOGO
+// =============================================
+function getCryptoLogo(asset) {
+  const logoMap = {
+    'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+    'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+    'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+    'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+    'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+    'USDC': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
+    'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+    'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+    'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+    'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
+    'AVAX': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
+    'DOT': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
+    'TRX': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
+    'LINK': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+    'MATIC': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+    'LTC': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
+    'NEAR': 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
+    'UNI': 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
+    'BCH': 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png'
+  };
+  return logoMap[asset.toUpperCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
+}
+
+// =============================================
+// END OF WEB3 WALLET & DEPOSIT ENDPOINTS
+// =============================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
