@@ -57,7 +57,6 @@ const session = require('express-session');
 const bullmq = require('bullmq');
 const binance = require('node-binance-api');
 const openai = require('openai');
-const socketClient = require('socket.io-client');
 const cardano = require('@cardano-sdk/core');
 const polkadotApi = require('@polkadot/api');
 const polkadotCrypto = require('@polkadot/util-crypto');
