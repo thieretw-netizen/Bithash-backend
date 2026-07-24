@@ -63,7 +63,6 @@ const socketClient = require('socket.io-client');
 const cardano = require('@cardano-sdk/core');
 const polkadotApi = require('@polkadot/api');
 const polkadotCrypto = require('@polkadot/util-crypto');
-const sharp = require('sharp');
 const app = express();
 const { createServer } = require('http');
 const { Server } = require('socket.io');
