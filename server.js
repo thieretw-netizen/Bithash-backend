@@ -33775,16 +33775,344 @@ app.delete('/api/users/wallets/remove', protect, async (req, res) => {
 
 
 // =============================================
-// GENERATE DEPOSIT ADDRESS - CORRECTED & ROBUST
+// COMPLETE REWRITE - GENERATE DEPOSIT ADDRESS
+// Fetches contract addresses from MULTIPLE on-chain data sources
+// Returns data in the EXACT format frontend expects
+// =============================================
+
+// =============================================
+// CONFIGURATION
+// =============================================
+const CHAIN_CONFIGS = {
+    1: { name: 'Ethereum', rpc: process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io/v3/2e692d39dad941d799bb09fa90bf2881', explorer: 'https://etherscan.io/tx/', chainId: 1 },
+    56: { name: 'BNB Smart Chain', rpc: 'https://bsc-dataseed.binance.org/', explorer: 'https://bscscan.com/tx/', chainId: 56 },
+    137: { name: 'Polygon', rpc: 'https://polygon-rpc.com/', explorer: 'https://polygonscan.com/tx/', chainId: 137 },
+    42161: { name: 'Arbitrum', rpc: 'https://arb1.arbitrum.io/rpc', explorer: 'https://arbiscan.io/tx/', chainId: 42161 },
+    10: { name: 'Optimism', rpc: 'https://mainnet.optimism.io', explorer: 'https://optimistic.etherscan.io/tx/', chainId: 10 },
+    43114: { name: 'Avalanche', rpc: 'https://api.avax.network/ext/bc/C/rpc', explorer: 'https://snowtrace.io/tx/', chainId: 43114 }
+};
+
+// Token contract address cache (in-memory with TTL)
+const TOKEN_CACHE = new Map();
+const TOKEN_CACHE_TTL = 3600000; // 1 hour
+const TOKEN_VERIFICATION_CACHE = new Map();
+const VERIFICATION_CACHE_TTL = 86400000; // 24 hours
+
+// =============================================
+// MULTI-SOURCE CONTRACT ADDRESS RESOLUTION
+// =============================================
+
+/**
+ * Fetch contract address from multiple sources in order of reliability
+ * Returns: { contractAddress, decimals, name, symbol, source, verified }
+ */
+async function resolveTokenContractAddress(assetSymbol, chainId = 1) {
+    const assetUpper = assetSymbol.toUpperCase();
+    const cacheKey = `${assetUpper}_${chainId}`;
+    
+    // Check cache first
+    if (TOKEN_CACHE.has(cacheKey)) {
+        const cached = TOKEN_CACHE.get(cacheKey);
+        if (Date.now() - cached.timestamp < TOKEN_CACHE_TTL) {
+            console.log(`📦 Cache hit for ${assetUpper} on chain ${chainId}`);
+            return cached.data;
+        }
+    }
+
+    console.log(`🔍 Resolving contract address for ${assetUpper} on chain ${chainId}...`);
+
+    // =============================================
+    // SOURCE 1: CoinGecko API (Most reliable)
+    // =============================================
+    try {
+        const response = await axios.get(
+            `https://api.coingecko.com/api/v3/coins/${assetUpper.toLowerCase()}`,
+            { 
+                timeout: 8000,
+                headers: { 'Accept': 'application/json' }
+            }
+        );
+        
+        if (response.data && response.data.platforms) {
+            const platforms = response.data.platforms;
+            
+            // Map chain IDs to CoinGecko platform names
+            const platformMap = {
+                '1': 'ethereum',
+                '56': 'binance-smart-chain',
+                '137': 'polygon-pos',
+                '42161': 'arbitrum-one',
+                '10': 'optimistic-ethereum',
+                '43114': 'avalanche'
+            };
+            
+            const platformKey = platformMap[chainId.toString()] || 'ethereum';
+            const contractAddress = platforms[platformKey];
+            
+            if (contractAddress) {
+                const result = {
+                    contractAddress: contractAddress,
+                    decimals: response.data.detail_platforms?.[platformKey]?.decimal_place || 18,
+                    name: response.data.name,
+                    symbol: response.data.symbol.toUpperCase(),
+                    source: 'CoinGecko',
+                    verified: true
+                };
+                
+                // Cache the result
+                TOKEN_CACHE.set(cacheKey, {
+                    data: result,
+                    timestamp: Date.now()
+                });
+                
+                console.log(`✅ ${assetUpper} resolved via CoinGecko: ${contractAddress.substring(0, 10)}...`);
+                return result;
+            }
+        }
+    } catch (err) {
+        console.warn(`⚠️ CoinGecko failed for ${assetUpper}:`, err.message);
+    }
+
+    // =============================================
+    // SOURCE 2: 1inch API
+    // =============================================
+    try {
+        const response = await axios.get(
+            `https://api.1inch.io/v5.0/${chainId}/token/${assetUpper}`,
+            { timeout: 8000 }
+        );
+        
+        if (response.data && response.data.address) {
+            const result = {
+                contractAddress: response.data.address,
+                decimals: response.data.decimals || 18,
+                name: response.data.name || assetUpper,
+                symbol: response.data.symbol || assetUpper,
+                source: '1inch',
+                verified: true
+            };
+            
+            TOKEN_CACHE.set(cacheKey, {
+                data: result,
+                timestamp: Date.now()
+            });
+            
+            console.log(`✅ ${assetUpper} resolved via 1inch: ${result.contractAddress.substring(0, 10)}...`);
+            return result;
+        }
+    } catch (err) {
+        console.warn(`⚠️ 1inch failed for ${assetUpper}:`, err.message);
+    }
+
+    // =============================================
+    // SOURCE 3: Etherscan API (Ethereum only)
+    // =============================================
+    if (chainId === 1 || chainId === '1') {
+        try {
+            const response = await axios.get(
+                `https://api.etherscan.io/api?module=token&action=tokeninfo&contractaddress=${assetUpper}`,
+                { timeout: 8000 }
+            );
+            
+            if (response.data && response.data.status === '1' && response.data.result && response.data.result.length > 0) {
+                const tokenInfo = response.data.result[0];
+                const result = {
+                    contractAddress: tokenInfo.contractAddress,
+                    decimals: parseInt(tokenInfo.decimals) || 18,
+                    name: tokenInfo.name || assetUpper,
+                    symbol: tokenInfo.symbol || assetUpper,
+                    source: 'Etherscan',
+                    verified: true
+                };
+                
+                TOKEN_CACHE.set(cacheKey, {
+                    data: result,
+                    timestamp: Date.now()
+                });
+                
+                console.log(`✅ ${assetUpper} resolved via Etherscan: ${result.contractAddress.substring(0, 10)}...`);
+                return result;
+            }
+        } catch (err) {
+            console.warn(`⚠️ Etherscan failed for ${assetUpper}:`, err.message);
+        }
+    }
+
+    // =============================================
+    // SOURCE 4: BSCScan API (BSC only)
+    // =============================================
+    if (chainId === 56 || chainId === '56') {
+        try {
+            const response = await axios.get(
+                `https://api.bscscan.com/api?module=token&action=tokeninfo&contractaddress=${assetUpper}`,
+                { timeout: 8000 }
+            );
+            
+            if (response.data && response.data.status === '1' && response.data.result && response.data.result.length > 0) {
+                const tokenInfo = response.data.result[0];
+                const result = {
+                    contractAddress: tokenInfo.contractAddress,
+                    decimals: parseInt(tokenInfo.decimals) || 18,
+                    name: tokenInfo.name || assetUpper,
+                    symbol: tokenInfo.symbol || assetUpper,
+                    source: 'BSCScan',
+                    verified: true
+                };
+                
+                TOKEN_CACHE.set(cacheKey, {
+                    data: result,
+                    timestamp: Date.now()
+                });
+                
+                console.log(`✅ ${assetUpper} resolved via BSCScan: ${result.contractAddress.substring(0, 10)}...`);
+                return result;
+            }
+        } catch (err) {
+            console.warn(`⚠️ BSCScan failed for ${assetUpper}:`, err.message);
+        }
+    }
+
+    // =============================================
+    // SOURCE 5: PolygonScan API (Polygon only)
+    // =============================================
+    if (chainId === 137 || chainId === '137') {
+        try {
+            const response = await axios.get(
+                `https://api.polygonscan.com/api?module=token&action=tokeninfo&contractaddress=${assetUpper}`,
+                { timeout: 8000 }
+            );
+            
+            if (response.data && response.data.status === '1' && response.data.result && response.data.result.length > 0) {
+                const tokenInfo = response.data.result[0];
+                const result = {
+                    contractAddress: tokenInfo.contractAddress,
+                    decimals: parseInt(tokenInfo.decimals) || 18,
+                    name: tokenInfo.name || assetUpper,
+                    symbol: tokenInfo.symbol || assetUpper,
+                    source: 'PolygonScan',
+                    verified: true
+                };
+                
+                TOKEN_CACHE.set(cacheKey, {
+                    data: result,
+                    timestamp: Date.now()
+                });
+                
+                console.log(`✅ ${assetUpper} resolved via PolygonScan: ${result.contractAddress.substring(0, 10)}...`);
+                return result;
+            }
+        } catch (err) {
+            console.warn(`⚠️ PolygonScan failed for ${assetUpper}:`, err.message);
+        }
+    }
+
+    // =============================================
+    // SOURCE 6: Try fetching from the blockchain directly
+    // =============================================
+    try {
+        const chainConfig = CHAIN_CONFIGS[chainId] || CHAIN_CONFIGS[1];
+        const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+        
+        // Try to get the token info using the address if it looks like a contract
+        if (assetUpper.length === 42 && assetUpper.startsWith('0x')) {
+            const contract = new ethers.Contract(
+                assetUpper,
+                [
+                    'function name() view returns (string)',
+                    'function symbol() view returns (string)',
+                    'function decimals() view returns (uint8)'
+                ],
+                provider
+            );
+            
+            const [name, symbol, decimals] = await Promise.all([
+                contract.name().catch(() => null),
+                contract.symbol().catch(() => null),
+                contract.decimals().catch(() => 18)
+            ]);
+            
+            if (name) {
+                const result = {
+                    contractAddress: assetUpper,
+                    decimals: decimals || 18,
+                    name: name || assetUpper,
+                    symbol: symbol || assetUpper,
+                    source: 'On-Chain',
+                    verified: true
+                };
+                
+                TOKEN_CACHE.set(cacheKey, {
+                    data: result,
+                    timestamp: Date.now()
+                });
+                
+                console.log(`✅ ${assetUpper} resolved via On-Chain: ${result.contractAddress.substring(0, 10)}...`);
+                return result;
+            }
+        }
+    } catch (err) {
+        console.warn(`⚠️ On-chain lookup failed for ${assetUpper}:`, err.message);
+    }
+
+    // =============================================
+    // SOURCE 7: Well-known tokens fallback (LAST RESORT)
+    // =============================================
+    const WELL_KNOWN_TOKENS = {
+        'USDT': { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6, name: 'Tether USD', symbol: 'USDT' },
+        'USDC': { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6, name: 'USD Coin', symbol: 'USDC' },
+        'SHIB': { address: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', decimals: 18, name: 'Shiba Inu', symbol: 'SHIB' },
+        'LINK': { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', decimals: 18, name: 'Chainlink', symbol: 'LINK' },
+        'WBTC': { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', decimals: 8, name: 'Wrapped Bitcoin', symbol: 'WBTC' },
+        'DAI': { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals: 18, name: 'Dai Stablecoin', symbol: 'DAI' },
+        'UNI': { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', decimals: 18, name: 'Uniswap', symbol: 'UNI' },
+        'AAVE': { address: '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9', decimals: 18, name: 'Aave', symbol: 'AAVE' },
+        'CRV': { address: '0xD533a949740bb3306d119CC777fa900bA034cd52', decimals: 18, name: 'Curve DAO', symbol: 'CRV' },
+        'MKR': { address: '0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2', decimals: 18, name: 'Maker', symbol: 'MKR' },
+        'SNX': { address: '0xC011a73ee8576Fb46F5E1c5751cA3B9Fe0af2a6F', decimals: 18, name: 'Synthetix', symbol: 'SNX' },
+        'COMP': { address: '0xc00e94Cb662C3520282E6f5717214004A7f26888', decimals: 18, name: 'Compound', symbol: 'COMP' },
+        'LDO': { address: '0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32', decimals: 18, name: 'Lido DAO', symbol: 'LDO' }
+    };
+
+    if (WELL_KNOWN_TOKENS[assetUpper]) {
+        const token = WELL_KNOWN_TOKENS[assetUpper];
+        const result = {
+            contractAddress: token.address,
+            decimals: token.decimals,
+            name: token.name,
+            symbol: token.symbol,
+            source: 'Well-Known',
+            verified: true,
+            fallback: true
+        };
+        
+        TOKEN_CACHE.set(cacheKey, {
+            data: result,
+            timestamp: Date.now()
+        });
+        
+        console.log(`✅ ${assetUpper} resolved via Well-Known tokens (fallback): ${result.contractAddress.substring(0, 10)}...`);
+        return result;
+    }
+
+    // =============================================
+    // NOT FOUND - Return null
+    // =============================================
+    console.error(`❌ Could not resolve contract address for ${assetUpper} on chain ${chainId}`);
+    return null;
+}
+
+// =============================================
+// MAIN ENDPOINT - COMPLETE REWRITE
 // =============================================
 app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     try {
         const { asset } = req.params;
         const assetLower = asset.toLowerCase();
         const assetUpper = asset.toUpperCase();
-        const userId = req.user._id; // Use the authenticated user's ID
+        const userId = req.user._id;
+        
+        // Get the authenticated user
         const user = await User.findById(userId);
-
         if (!user) {
             return res.status(404).json({
                 status: 'fail',
@@ -33792,27 +34120,36 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             });
         }
 
-        // 1. Check if platform wallet supports the asset
+        // =============================================
+        // 1. CHECK IF PLATFORM WALLET SUPPORTS THE ASSET
+        // =============================================
         if (!platformWallet.isAssetSupported(assetUpper)) {
+            // Get list of supported assets from the platform wallet
+            const supportedAssets = platformWallet.getSupportedAssets().map(a => a.symbol);
+            
             return res.status(400).json({
                 status: 'fail',
                 message: `Asset ${assetUpper} is not supported`,
-                supportedAssets: platformWallet.getSupportedAssets().map(a => a.symbol)
+                supportedAssets: supportedAssets,
+                data: {
+                    requestedAsset: assetUpper,
+                    isSupported: false
+                }
             });
         }
 
-        // 2. Check if an address already exists for this user and asset
+        // =============================================
+        // 2. GET OR GENERATE DEPOSIT ADDRESS
+        // =============================================
         let depositAddress = await DepositAddress.findOne({
             userId: userId,
             asset: assetLower,
             isActive: true
         });
 
-        // 3. If no address exists, generate a new one
         if (!depositAddress) {
-            // Generate the address using the platform wallet
             const addressData = platformWallet.generateDepositAddress(
-                userId.toString(), // Pass user ID as string for deterministic path generation
+                userId.toString(),
                 assetUpper
             );
 
@@ -33823,7 +34160,6 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
                 });
             }
 
-            // Create a new deposit address record
             depositAddress = new DepositAddress({
                 userId: userId,
                 asset: assetLower,
@@ -33832,46 +34168,259 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
                 publicKey: addressData.publicKey,
                 isActive: true,
                 createdAt: new Date(),
-                expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year expiry
+                expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
             });
 
-            // Save to database. The unique index on 'address' will prevent duplicates.
             await depositAddress.save();
         }
 
-        // 4. Get the current price for the asset
-        const currentPrice = await getCryptoPrice(assetUpper);
-        const networkInfo = ASSET_NETWORK_MAP[assetUpper] || { network: 'Unknown', explorer: '' };
+        // =============================================
+        // 3. DYNAMICALLY RESOLVE CONTRACT ADDRESS
+        // =============================================
+        const chainId = 1; // Default to Ethereum mainnet
+        let contractInfo = await resolveTokenContractAddress(assetUpper, chainId);
+        
+        // If not found on default chain, try other chains
+        if (!contractInfo) {
+            const chainsToTry = [56, 137, 42161, 10, 43114];
+            for (const chain of chainsToTry) {
+                const result = await resolveTokenContractAddress(assetUpper, chain);
+                if (result) {
+                    contractInfo = result;
+                    break;
+                }
+            }
+        }
 
-        // 5. Prepare the response (QR code generation can be done on the frontend)
+        // =============================================
+        // 4. VERIFY CONTRACT ON-CHAIN (if found)
+        // =============================================
+        let isVerified = false;
+        let verificationError = null;
+        let onChainData = null;
+
+        if (contractInfo && contractInfo.contractAddress) {
+            try {
+                const chainConfig = CHAIN_CONFIGS[chainId] || CHAIN_CONFIGS[1];
+                const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+                
+                // Check if contract exists
+                const code = await provider.getCode(contractInfo.contractAddress);
+                if (code !== '0x') {
+                    isVerified = true;
+                    
+                    // Try to get on-chain data for verification
+                    try {
+                        const contract = new ethers.Contract(
+                            contractInfo.contractAddress,
+                            [
+                                'function name() view returns (string)',
+                                'function symbol() view returns (string)',
+                                'function decimals() view returns (uint8)',
+                                'function totalSupply() view returns (uint256)'
+                            ],
+                            provider
+                        );
+                        
+                        const [name, symbol, decimals, totalSupply] = await Promise.all([
+                            contract.name().catch(() => null),
+                            contract.symbol().catch(() => null),
+                            contract.decimals().catch(() => null),
+                            contract.totalSupply().catch(() => null)
+                        ]);
+                        
+                        onChainData = {
+                            name: name || contractInfo.name,
+                            symbol: symbol || contractInfo.symbol,
+                            decimals: decimals || contractInfo.decimals,
+                            totalSupply: totalSupply ? totalSupply.toString() : null
+                        };
+                    } catch (dataErr) {
+                        // Non-critical, continue
+                        console.warn('Could not fetch full on-chain data:', dataErr.message);
+                    }
+                } else {
+                    verificationError = 'Contract address has no bytecode';
+                    isVerified = false;
+                }
+            } catch (verifyErr) {
+                console.error('Contract verification error:', verifyErr.message);
+                verificationError = verifyErr.message;
+                isVerified = false;
+            }
+        }
+
+        // =============================================
+        // 5. GET CURRENT PRICE
+        // =============================================
+        let currentPrice = 0;
+        try {
+            currentPrice = await getCryptoPrice(assetUpper);
+        } catch (priceErr) {
+            console.warn(`Could not fetch price for ${assetUpper}:`, priceErr.message);
+        }
+
+        // =============================================
+        // 6. PREPARE RESPONSE WITH ALL DATA
+        // =============================================
+        const networkInfo = platformWallet.getNetworkName(assetUpper);
+        const networkConfig = CHAIN_CONFIGS[chainId] || CHAIN_CONFIGS[1];
+
         const responseData = {
             status: 'success',
             data: {
+                // Core deposit address data
                 address: depositAddress.address,
                 asset: assetUpper,
-                network: networkInfo.network || platformWallet.getNetworkName(assetUpper),
-                chainId: networkInfo.chainId || 1,
+                network: networkInfo || networkConfig.name,
+                chainId: chainId,
+                
+                // Derived path and keys
                 derivationPath: depositAddress.derivationPath,
                 publicKey: depositAddress.publicKey,
+                
+                // Contract data (for ERC20 tokens)
+                contractAddress: contractInfo?.contractAddress || null,
+                decimals: contractInfo?.decimals || 18,
+                isERC20: !!contractInfo?.contractAddress,
+                tokenName: contractInfo?.name || assetUpper,
+                tokenSymbol: contractInfo?.symbol || assetUpper,
+                
+                // Verification status
+                contractVerified: isVerified,
+                verificationSource: contractInfo?.source || null,
+                verificationError: verificationError,
+                onChainData: onChainData,
+                
+                // Price data
                 currentPrice: currentPrice || 0,
+                priceSource: currentPrice ? 'API' : 'Not Available',
+                
+                // Timestamps
                 expiresAt: depositAddress.expiresAt,
                 createdAt: depositAddress.createdAt.toISOString(),
-                explorerUrl: networkInfo.explorer ? `${networkInfo.explorer}${depositAddress.address}` : null,
+                verifiedAt: isVerified ? new Date().toISOString() : null,
+                
+                // Explorer URL
+                explorerUrl: networkConfig.explorer ? `${networkConfig.explorer}${depositAddress.address}` : null,
+                
+                // Additional metadata for frontend
+                metadata: {
+                    assetType: contractInfo?.contractAddress ? 'ERC20' : 'Native',
+                    isSupported: true,
+                    requiresApproval: !!contractInfo?.contractAddress,
+                    depositMethod: contractInfo?.contractAddress ? 'contract_transfer' : 'native_transfer',
+                    gasEstimate: contractInfo?.contractAddress ? 'standard' : 'standard'
+                }
             }
         };
+
+        // Log the resolution for debugging
+        console.log(`📊 Deposit address response for ${assetUpper}:`);
+        console.log(`   Address: ${depositAddress.address.substring(0, 10)}...`);
+        console.log(`   Contract: ${contractInfo?.contractAddress ? contractInfo.contractAddress.substring(0, 10) + '...' : 'N/A'}`);
+        console.log(`   Verified: ${isVerified}`);
+        console.log(`   Source: ${contractInfo?.source || 'N/A'}`);
 
         res.status(200).json(responseData);
 
     } catch (err) {
         console.error('Generate deposit address error:', err);
+        
+        // Return a structured error response
         res.status(500).json({
             status: 'error',
-            message: err.message || 'Failed to generate deposit address'
+            message: err.message || 'Failed to generate deposit address',
+            error: process.env.NODE_ENV === 'development' ? {
+                message: err.message,
+                stack: err.stack,
+                name: err.name
+            } : undefined,
+            data: {
+                asset: req.params.asset,
+                timestamp: new Date().toISOString(),
+                retryAfter: 30
+            }
         });
     }
 });
 
+// =============================================
+// ADMIN ENDPOINT: Refresh token cache
+// =============================================
+app.post('/api/admin/tokens/refresh-cache', adminProtect, async (req, res) => {
+    try {
+        const { asset, chainId } = req.body;
+        
+        if (asset) {
+            // Refresh specific token
+            const cacheKey = `${asset.toUpperCase()}_${chainId || 1}`;
+            TOKEN_CACHE.delete(cacheKey);
+            const result = await resolveTokenContractAddress(asset.toUpperCase(), chainId || 1);
+            
+            return res.status(200).json({
+                status: 'success',
+                message: `Cache refreshed for ${asset}`,
+                data: result
+            });
+        } else {
+            // Clear entire cache
+            TOKEN_CACHE.clear();
+            return res.status(200).json({
+                status: 'success',
+                message: 'Token cache cleared',
+                data: {
+                    cacheSize: TOKEN_CACHE.size,
+                    clearedAt: new Date().toISOString()
+                }
+            });
+        }
+    } catch (err) {
+        console.error('Refresh cache error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to refresh cache'
+        });
+    }
+});
 
+// =============================================
+// HEALTH CHECK: Verify token resolution
+// =============================================
+app.get('/api/admin/tokens/verify/:asset', adminProtect, async (req, res) => {
+    try {
+        const { asset } = req.params;
+        const { chainId = 1 } = req.query;
+        
+        const result = await resolveTokenContractAddress(asset.toUpperCase(), parseInt(chainId));
+        
+        if (result) {
+            return res.status(200).json({
+                status: 'success',
+                data: result,
+                verified: true
+            });
+        } else {
+            return res.status(404).json({
+                status: 'fail',
+                message: `Could not resolve contract for ${asset}`,
+                data: null,
+                verified: false
+            });
+        }
+    } catch (err) {
+        console.error('Token verification error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to verify token'
+        });
+    }
+});
+
+console.log('✅ Dynamic deposit address endpoint loaded');
+console.log('   - Resolves contract addresses from: CoinGecko, 1inch, Etherscan, BSCScan, PolygonScan, On-Chain');
+console.log('   - Cache TTL: 1 hour');
+console.log('   - Supports multiple chains: Ethereum, BSC, Polygon, Arbitrum, Optimism, Avalanche');
 
 
 
