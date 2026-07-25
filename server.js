@@ -192,7 +192,7 @@ const apiLimiter = rateLimit({
     sendCommand: (...args) => redis.call(...args)
   }),
   windowMs: 15 * 60 * 1000,
-  max: 1000,
+  max: 1000000,  // ← CHANGED TO 1,000,000
   message: 'Too many requests from this IP, please try again later',
   keyGenerator: (req) => {
     return getRealClientIP(req);
