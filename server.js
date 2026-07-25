@@ -33685,9 +33685,12 @@ app.delete('/api/users/wallets/remove', protect, async (req, res) => {
     }
 });
 
+
+
 // =============================================
-// 4. GET /api/deposits/address/:asset - Generate deposit address
-// PURE ADDRESS GENERATION - NO RPC CALLS
+// GET /api/deposits/address/:asset - Generate UNIQUE deposit address per user per crypto
+// ENSURES: Every user gets their own unique address for each cryptocurrency
+// NO DUPLICATE ADDRESSES - Each address is unique per user per asset
 // =============================================
 app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     try {
@@ -33695,8 +33698,11 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         const assetLower = asset.toLowerCase();
         const assetUpper = asset.toUpperCase();
         const userId = req.user._id;
-        const user = await User.findById(userId);
         
+        // =============================================
+        // 1. VALIDATE USER
+        // =============================================
+        const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({
                 status: 'fail',
@@ -33704,6 +33710,9 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             });
         }
 
+        // =============================================
+        // 2. VALIDATE WEB3 WALLET IS LINKED
+        // =============================================
         if (!user.web3Wallet || !user.web3Wallet.address) {
             return res.status(400).json({
                 status: 'fail',
@@ -33712,6 +33721,9 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             });
         }
 
+        // =============================================
+        // 3. VALIDATE ASSET IS SUPPORTED
+        // =============================================
         if (!platformWallet.isAssetSupported(assetUpper)) {
             return res.status(400).json({
                 status: 'fail',
@@ -33721,28 +33733,37 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         }
 
         // =============================================
-        // GENERATE DEPOSIT ADDRESS - PURE FUNCTION - NO RPC CALLS
+        // 4. GET OR CREATE UNIQUE ADDRESS FOR THIS USER + ASSET
+        // IMPORTANT: Each user gets their OWN unique address per crypto
+        // The address is DETERMINISTIC - same user + same asset = same address
+        // This ensures consistency and prevents duplicate key errors
         // =============================================
-        const addressData = platformWallet.generateDepositAddress(
-            userId.toString(),
-            assetUpper
-        );
-
-        if (!addressData || !addressData.address) {
-            return res.status(500).json({
-                status: 'error',
-                message: 'Failed to generate deposit address'
-            });
-        }
-
-        // Store in database
+        
+        // First, check if an active address already exists for this user and asset
         let depositAddress = await DepositAddress.findOne({
             userId: userId,
             asset: assetLower,
             isActive: true
         });
 
+        // If no address exists, generate and save a new one
         if (!depositAddress) {
+            console.log(`🆕 Generating NEW ${assetUpper} address for user ${userId}`);
+            
+            // Generate the address using platform wallet
+            const addressData = platformWallet.generateDepositAddress(
+                userId.toString(),
+                assetUpper
+            );
+
+            if (!addressData || !addressData.address) {
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Failed to generate deposit address'
+                });
+            }
+
+            // Create new deposit address record
             depositAddress = new DepositAddress({
                 userId: userId,
                 asset: assetLower,
@@ -33751,24 +33772,35 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
                 publicKey: addressData.publicKey,
                 isActive: true,
                 createdAt: new Date(),
-                expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+                expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year expiry
             });
+
+            // Save to database
             await depositAddress.save();
+            
+            console.log(`✅ NEW ${assetUpper} address saved for user ${userId}: ${addressData.address}`);
+        } else {
+            console.log(`♻️ Using EXISTING ${assetUpper} address for user ${userId}: ${depositAddress.address}`);
         }
 
-        // Get price (uses cache/API, not RPC)
+        // =============================================
+        // 5. GET CURRENT PRICE FOR THE ASSET
+        // =============================================
         const currentPrice = await getCryptoPrice(assetUpper);
         const priceChange24h = await get24hPriceChange(assetUpper);
         const networkInfo = ASSET_NETWORK_MAP[assetUpper] || { network: 'Unknown', explorer: '' };
         
+        // Calculate min/max deposit amounts in asset units
         const minDepositAsset = currentPrice > 0 ? DEPOSIT_LIMITS.minUSD / currentPrice : 0;
         const maxDepositAsset = currentPrice > 0 ? DEPOSIT_LIMITS.maxUSD / currentPrice : 0;
 
-        // QR code (pure function)
+        // =============================================
+        // 6. GENERATE QR CODE FOR THE ADDRESS
+        // =============================================
         let qrCodeData = null;
         try {
             const QRCode = require('qrcode');
-            qrCodeData = await QRCode.toDataURL(addressData.address, {
+            qrCodeData = await QRCode.toDataURL(depositAddress.address, {
                 errorCorrectionLevel: 'H',
                 margin: 2,
                 width: 256
@@ -33777,42 +33809,61 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             console.warn('QR code generation failed:', qrError.message);
         }
 
+        // =============================================
+        // 7. BUILD RESPONSE
+        // =============================================
         const responseData = {
             status: 'success',
             data: {
-                address: addressData.address,
+                // Unique address for this user + asset
+                address: depositAddress.address,
                 asset: assetUpper,
                 network: networkInfo.network || platformWallet.getNetworkName(assetUpper),
                 chainId: networkInfo.chainId || 1,
-                derivationPath: addressData.derivationPath,
-                publicKey: addressData.publicKey,
+                derivationPath: depositAddress.derivationPath,
+                publicKey: depositAddress.publicKey,
+                
+                // Price information
                 currentPrice: currentPrice || 0,
                 priceChange24h: priceChange24h || 0,
                 minDeposit: minDepositAsset || 0.0001,
                 maxDeposit: maxDepositAsset || 10000,
                 minDepositUSD: DEPOSIT_LIMITS.minUSD,
                 maxDepositUSD: DEPOSIT_LIMITS.maxUSD,
+                
+                // Address metadata
                 expiresAt: depositAddress.expiresAt,
                 qrCode: qrCodeData,
                 reference: `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
                 createdAt: new Date().toISOString(),
-                explorerUrl: networkInfo.explorer ? `${networkInfo.explorer}${addressData.address}` : null,
+                explorerUrl: networkInfo.explorer ? `${networkInfo.explorer}${depositAddress.address}` : null,
+                
+                // Additional metadata
                 metadata: {
                     assetType: platformWallet.networkProviders[assetUpper]?.type || 'unknown',
                     isERC20: !!platformWallet.networkProviders[assetUpper]?.contract,
                     contractAddress: platformWallet.networkProviders[assetUpper]?.contract || null,
                     chainId: platformWallet.networkProviders[assetUpper]?.chainId || null,
-                    network: networkInfo.network
+                    network: networkInfo.network,
+                    // Flag to indicate if this is a new or existing address
+                    isNewAddress: depositAddress.createdAt.getTime() > Date.now() - 5000
                 }
             }
         };
 
+        // =============================================
+        // 8. LOG ACTIVITY
+        // =============================================
         await logActivity('deposit_address_generated', 'DepositAddress', depositAddress._id, userId, 'User', req, {
             asset: assetUpper,
-            address: addressData.address,
-            network: networkInfo.network || platformWallet.getNetworkName(assetUpper)
+            address: depositAddress.address,
+            network: networkInfo.network || platformWallet.getNetworkName(assetUpper),
+            isNew: depositAddress.createdAt.getTime() > Date.now() - 5000
         });
 
+        // =============================================
+        // 9. SEND RESPONSE
+        // =============================================
         res.status(200).json(responseData);
 
     } catch (err) {
@@ -33823,6 +33874,14 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
+
+
 
 // =============================================
 // 5. POST /api/deposit/confirm - Confirm deposit after user confirms in wallet
