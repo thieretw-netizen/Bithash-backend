@@ -285,10 +285,22 @@ const googleClient = new OAuth2Client({
   redirectUri: process.env.GOOGLE_REDIRECT_URI
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+// =============================================
+// JWT CONFIGURATION - PRODUCTION READY
+// =============================================
+
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('❌ FATAL: JWT_SECRET is not set in environment variables!');
+  console.error('❌ Please add JWT_SECRET to your environment variables.');
+  console.error('❌ Generate one with: node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"');
+  process.exit(1);
+}
+
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s';
 const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083;
 
+console.log('✅ JWT Configuration loaded successfully');
 const UserSchema = new mongoose.Schema({
   firstName: { 
     type: String, 
