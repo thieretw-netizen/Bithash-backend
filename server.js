@@ -4356,11 +4356,7 @@ const SystemLogSchema = new mongoose.Schema({
       'websocket', 'cron_job', 'price_feed', 'market_data', 'order', 'trade',
       'position', 'orderbook', 'ticker', 'candle', 'asset_info', 'pair_limit',
       'user_preference', 'user_log', 'system_log', 'notification_preference',
-      'announcement', 'message', 'restriction', 'platform_revenue', 'commission_setting''otp',   
-        'User',          
-        'AccountRestrictions', 
-        'Transaction',   
-        'DepositAddress' ,
+      'announcement', 'message', 'restriction', 'platform_revenue', 'commission_setting'  'otp',  'User', 'AccountRestrictions', 'Transaction', 'DepositAddress'
     ],
     index: true
   },
