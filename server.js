@@ -101,7 +101,7 @@ app.use(helmet({
 
 app.use(cors({
   origin: [
-    'https://www.bithashcapital.live', 'https://bithash-backend-kg7j.onrender.com',
+    'https://www.bithashcapital.live', 'https://bithash-backend-kg7j.onrender.com', 'https://bithash-backend-ycuf.onrender.com',
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
