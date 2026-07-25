@@ -33688,17 +33688,16 @@ app.delete('/api/users/wallets/remove', protect, async (req, res) => {
 
 
 // =============================================
-// GET /api/deposits/address/:asset - Generate deposit address
-// FIXED: Handles concurrent requests properly with atomic operations
+// GENERATE DEPOSIT ADDRESS - CORRECTED & ROBUST
 // =============================================
 app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     try {
         const { asset } = req.params;
         const assetLower = asset.toLowerCase();
         const assetUpper = asset.toUpperCase();
-        const userId = req.user._id;
+        const userId = req.user._id; // Use the authenticated user's ID
         const user = await User.findById(userId);
-        
+
         if (!user) {
             return res.status(404).json({
                 status: 'fail',
@@ -33706,14 +33705,7 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             });
         }
 
-        if (!user.web3Wallet || !user.web3Wallet.address) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'No web3 wallet linked. Please link a wallet first.',
-                data: { action: 'link_wallet' }
-            });
-        }
-
+        // 1. Check if platform wallet supports the asset
         if (!platformWallet.isAssetSupported(assetUpper)) {
             return res.status(400).json({
                 status: 'fail',
@@ -33722,130 +33714,49 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             });
         }
 
-        // =============================================
-        // FIX: ATOMIC "GET OR CREATE" WITH RETRY LOGIC
-        // =============================================
-        let depositAddress = null;
-        let maxRetries = 3;
-        let retryCount = 0;
+        // 2. Check if an address already exists for this user and asset
+        let depositAddress = await DepositAddress.findOne({
+            userId: userId,
+            asset: assetLower,
+            isActive: true
+        });
 
-        while (retryCount < maxRetries && !depositAddress) {
-            try {
-                // STEP 1: Try to find existing address
-                depositAddress = await DepositAddress.findOne({
-                    userId: userId,
-                    asset: assetLower,
-                    isActive: true
-                });
-
-                // STEP 2: If found, return it immediately
-                if (depositAddress) {
-                    console.log(`♻️ Using EXISTING ${assetUpper} address for user ${userId}: ${depositAddress.address}`);
-                    break;
-                }
-
-                // STEP 3: No address found - generate a new one
-                console.log(`🆕 Generating NEW ${assetUpper} address for user ${userId} (Attempt ${retryCount + 1})`);
-                
-                const addressData = platformWallet.generateDepositAddress(
-                    userId.toString(),
-                    assetUpper
-                );
-
-                if (!addressData || !addressData.address) {
-                    throw new Error('Failed to generate deposit address');
-                }
-
-                // STEP 4: Try to insert with atomic operation
-                // Use findOneAndUpdate with upsert to handle concurrency
-                const result = await DepositAddress.findOneAndUpdate(
-                    {
-                        userId: userId,
-                        asset: assetLower,
-                        isActive: true
-                    },
-                    {
-                        $setOnInsert: {
-                            address: addressData.address,
-                            derivationPath: addressData.derivationPath,
-                            publicKey: addressData.publicKey,
-                            isActive: true,
-                            createdAt: new Date(),
-                            expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
-                        }
-                    },
-                    {
-                        upsert: true,
-                        new: true,
-                        setDefaultsOnInsert: true,
-                        lean: true
-                    }
-                );
-
-                // If we got a result, we're done
-                if (result) {
-                    depositAddress = result;
-                    console.log(`✅ NEW ${assetUpper} address saved for user ${userId}: ${result.address}`);
-                    break;
-                }
-
-            } catch (error) {
-                // STEP 5: Handle duplicate key error specially
-                if (error.code === 11000) {
-                    console.warn(`⚠️ Duplicate key detected for ${assetUpper}, retrying... (${retryCount + 1}/${maxRetries})`);
-                    retryCount++;
-                    
-                    // Wait a bit before retrying
-                    if (retryCount < maxRetries) {
-                        await new Promise(resolve => setTimeout(resolve, 100 * retryCount));
-                    }
-                    continue;
-                }
-                
-                // Re-throw other errors
-                throw error;
-            }
-        }
-
-        // STEP 6: If we still don't have an address after retries, fetch one more time
+        // 3. If no address exists, generate a new one
         if (!depositAddress) {
-            depositAddress = await DepositAddress.findOne({
+            // Generate the address using the platform wallet
+            const addressData = platformWallet.generateDepositAddress(
+                userId.toString(), // Pass user ID as string for deterministic path generation
+                assetUpper
+            );
+
+            if (!addressData || !addressData.address) {
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Failed to generate deposit address'
+                });
+            }
+
+            // Create a new deposit address record
+            depositAddress = new DepositAddress({
                 userId: userId,
                 asset: assetLower,
-                isActive: true
+                address: addressData.address,
+                derivationPath: addressData.derivationPath,
+                publicKey: addressData.publicKey,
+                isActive: true,
+                createdAt: new Date(),
+                expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year expiry
             });
-            
-            if (!depositAddress) {
-                throw new Error('Failed to create or retrieve deposit address after multiple attempts');
-            }
+
+            // Save to database. The unique index on 'address' will prevent duplicates.
+            await depositAddress.save();
         }
 
-        // =============================================
-        // GET PRICE AND OTHER DATA
-        // =============================================
+        // 4. Get the current price for the asset
         const currentPrice = await getCryptoPrice(assetUpper);
-        const priceChange24h = await get24hPriceChange(assetUpper);
         const networkInfo = ASSET_NETWORK_MAP[assetUpper] || { network: 'Unknown', explorer: '' };
-        
-        const minDepositAsset = currentPrice > 0 ? DEPOSIT_LIMITS.minUSD / currentPrice : 0;
-        const maxDepositAsset = currentPrice > 0 ? DEPOSIT_LIMITS.maxUSD / currentPrice : 0;
 
-        // Generate QR code
-        let qrCodeData = null;
-        try {
-            const QRCode = require('qrcode');
-            qrCodeData = await QRCode.toDataURL(depositAddress.address, {
-                errorCorrectionLevel: 'H',
-                margin: 2,
-                width: 256
-            });
-        } catch (qrError) {
-            console.warn('QR code generation failed:', qrError.message);
-        }
-
-        // =============================================
-        // BUILD RESPONSE
-        // =============================================
+        // 5. Prepare the response (QR code generation can be done on the frontend)
         const responseData = {
             status: 'success',
             data: {
@@ -33856,36 +33767,11 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
                 derivationPath: depositAddress.derivationPath,
                 publicKey: depositAddress.publicKey,
                 currentPrice: currentPrice || 0,
-                priceChange24h: priceChange24h || 0,
-                minDeposit: minDepositAsset || 0.0001,
-                maxDeposit: maxDepositAsset || 10000,
-                minDepositUSD: DEPOSIT_LIMITS.minUSD,
-                maxDepositUSD: DEPOSIT_LIMITS.maxUSD,
                 expiresAt: depositAddress.expiresAt,
-                qrCode: qrCodeData,
-                reference: `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                createdAt: new Date().toISOString(),
+                createdAt: depositAddress.createdAt.toISOString(),
                 explorerUrl: networkInfo.explorer ? `${networkInfo.explorer}${depositAddress.address}` : null,
-                metadata: {
-                    assetType: platformWallet.networkProviders[assetUpper]?.type || 'unknown',
-                    isERC20: !!platformWallet.networkProviders[assetUpper]?.contract,
-                    contractAddress: platformWallet.networkProviders[assetUpper]?.contract || null,
-                    chainId: platformWallet.networkProviders[assetUpper]?.chainId || null,
-                    network: networkInfo.network,
-                    isNewAddress: depositAddress.createdAt.getTime() > Date.now() - 5000,
-                    retryCount: retryCount
-                }
             }
         };
-
-        // Log activity
-        await logActivity('deposit_address_generated', 'DepositAddress', depositAddress._id, userId, 'User', req, {
-            asset: assetUpper,
-            address: depositAddress.address,
-            network: networkInfo.network || platformWallet.getNetworkName(assetUpper),
-            isNew: depositAddress.createdAt.getTime() > Date.now() - 5000,
-            retryCount: retryCount
-        });
 
         res.status(200).json(responseData);
 
@@ -33893,13 +33779,7 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         console.error('Generate deposit address error:', err);
         res.status(500).json({
             status: 'error',
-            message: err.message || 'Failed to generate deposit address',
-            // Include more details for debugging
-            details: process.env.NODE_ENV === 'development' ? {
-                error: err.message,
-                stack: err.stack,
-                code: err.code
-            } : undefined
+            message: err.message || 'Failed to generate deposit address'
         });
     }
 });
