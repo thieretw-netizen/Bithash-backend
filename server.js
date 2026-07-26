@@ -2067,7 +2067,7 @@ const Web3TransactionSchema = new mongoose.Schema({
   },
   walletType: {
     type: String,
-    enum: ['metamask', 'trust', 'phantom', 'coinbase'],
+    enum: ['metamask', 'trust', 'phantom', 'rainbow', 'coinbase'],
     required: true
   },
   type: {
