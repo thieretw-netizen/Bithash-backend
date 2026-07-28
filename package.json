@@ -77,7 +77,7 @@
     "socket.io": "^4.7.2",
     "socket.io-client": "^4.7.2",
     "speakeasy": "^2.0.0",
-    "tronweb": "^6.1.0",
+    "tronweb": "^6.0.4",
     "uuid": "^9.0.1",
     "validator": "^13.11.0",
     "ws": "^8.17.0",
