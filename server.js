@@ -1529,7 +1529,7 @@ const DepositAddressSchema = new mongoose.Schema({
     asset: {
         type: String,
         required: true,
-        enum: ['btc', 'eth', 'doge', 'ltc', 'sol', 'bch', 'wbtc',  'xrp', 'trx', 'ada', 'dot', 'matic', 'avax', 'usdt', 'usdc', 'bnb', 'shib', 'link'],
+        enum: ['btc', 'eth', 'doge', 'ltc', 'sol','uni', 'bch', 'wbtc',  'xrp', 'trx', 'ada', 'dot', 'matic', 'avax', 'usdt', 'usdc', 'bnb', 'shib', 'link'],
         index: true
     },
     address: {
