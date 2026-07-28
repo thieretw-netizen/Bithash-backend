@@ -33995,7 +33995,7 @@ async function resolveTokenContractAddress(assetSymbol, chainId = 1) {
 }
 
 // =============================================
-// MAIN ENDPOINT - COMPLETE REWRITE
+// MAIN ENDPOINT - COMPLETE REWRITE WITH ALL FIXES
 // =============================================
 app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     try {
@@ -34056,10 +34056,11 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             await depositAddress.save();
         }
 
-        // 3. RESOLVE CONTRACT ADDRESS
+        // 3. RESOLVE CONTRACT ADDRESS WITH PROPER DECIMALS
         const chainId = 1;
         let contractInfo = await resolveTokenContractAddress(assetUpper, chainId);
         
+        // FIX: For tokens that might be on multiple chains, try all
         if (!contractInfo) {
             const chainsToTry = [56, 137, 42161, 10, 43114];
             for (const chain of chainsToTry) {
@@ -34080,9 +34081,11 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             console.warn(`Could not fetch price for ${assetUpper}:`, priceErr.message);
         }
 
-        // 5. VERIFY CONTRACT ON-CHAIN
+        // 5. VERIFY CONTRACT ON-CHAIN AND GET ACCURATE DECIMALS
         let isVerified = false;
         let onChainData = null;
+        let verifiedDecimals = null;
+        let verifiedSymbol = null;
 
         if (contractInfo?.contractAddress) {
             try {
@@ -34110,10 +34113,14 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
                             contract.decimals().catch(() => null)
                         ]);
                         
+                        // FIX: Use verified decimals from on-chain if available
+                        verifiedDecimals = decimals !== null && decimals !== undefined ? Number(decimals) : null;
+                        verifiedSymbol = symbol || contractInfo.symbol;
+                        
                         onChainData = {
                             name: name || contractInfo.name,
-                            symbol: symbol || contractInfo.symbol,
-                            decimals: decimals || contractInfo.decimals
+                            symbol: verifiedSymbol,
+                            decimals: verifiedDecimals
                         };
                     } catch (dataErr) {
                         console.warn('Could not fetch full on-chain data:', dataErr.message);
@@ -34124,7 +34131,62 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             }
         }
 
-        // 6. BUILD RESPONSE - SAFELY SERIALIZED
+        // 6. DETERMINE CORRECT DECIMALS FOR THE ASSET
+        // =============================================
+        // CRITICAL FIX: Each token has specific decimals
+        // =============================================
+        let decimals = 18; // default
+        
+        // FIX 1: USDT uses 6 decimals on Ethereum and most chains
+        if (assetUpper === 'USDT') {
+            decimals = 6;
+            // USDT on BSC is also 18, so we need to check chain
+            if (chainId === 56) {
+                decimals = 18; // BSC USDT is actually 18 decimals
+            }
+        } 
+        // FIX 2: USDC uses 6 decimals on all chains
+        else if (assetUpper === 'USDC') {
+            decimals = 6;
+        }
+        // FIX 3: BNB uses 18 decimals on BSC
+        else if (assetUpper === 'BNB') {
+            decimals = 18;
+        }
+        // FIX 4: WBTC uses 8 decimals on Ethereum
+        else if (assetUpper === 'WBTC') {
+            decimals = 8;
+        }
+        // FIX 5: SHIB uses 18 decimals on Ethereum
+        else if (assetUpper === 'SHIB') {
+            decimals = 18;
+        }
+        // FIX 6: LINK uses 18 decimals on Ethereum
+        else if (assetUpper === 'LINK') {
+            decimals = 18;
+        }
+        // FIX 7: MATIC uses 18 decimals on Polygon
+        else if (assetUpper === 'MATIC') {
+            decimals = 18;
+        }
+        // FIX 8: AVAX uses 18 decimals on Avalanche C-Chain
+        else if (assetUpper === 'AVAX') {
+            decimals = 18;
+        }
+        // FIX 9: UNI uses 18 decimals on Ethereum
+        else if (assetUpper === 'UNI') {
+            decimals = 18;
+        }
+        // FIX 10: Use on-chain verified decimals if available
+        else if (verifiedDecimals !== null) {
+            decimals = verifiedDecimals;
+        }
+        // FIX 11: Use contract info decimals if available
+        else if (contractInfo?.decimals) {
+            decimals = contractInfo.decimals;
+        }
+
+        // 7. BUILD RESPONSE - SAFELY SERIALIZED
         const networkInfo = platformWallet.getNetworkName(assetUpper);
         const networkConfig = CHAIN_CONFIGS[chainId] || CHAIN_CONFIGS[1];
         const isERC20 = !!contractInfo?.contractAddress;
@@ -34138,7 +34200,12 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
             derivationPath: depositAddress.derivationPath,
             publicKey: depositAddress.publicKey,
             contractAddress: contractInfo?.contractAddress || null,
-            decimals: contractInfo?.decimals || 18,
+            // FIX: Use the correctly determined decimals
+            decimals: decimals,
+            // FIX: Add token decimals info for frontend
+            tokenDecimals: decimals,
+            // FIX: Add token type info
+            tokenType: assetUpper === 'USDT' || assetUpper === 'USDC' ? 'stablecoin' : 'crypto',
             isERC20: isERC20,
             tokenName: contractInfo?.name || assetUpper,
             tokenSymbol: contractInfo?.symbol || assetUpper,
@@ -34156,7 +34223,11 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
                 isSupported: true,
                 requiresApproval: isERC20,
                 depositMethod: isERC20 ? 'contract_transfer' : 'native_transfer',
-                gasEstimate: 'standard'
+                gasEstimate: 'standard',
+                // FIX: Add decimals info for frontend
+                decimals: decimals,
+                // FIX: Add token category
+                tokenCategory: assetUpper === 'USDT' || assetUpper === 'USDC' ? 'stablecoin' : 'crypto'
             }
         };
 
@@ -34170,6 +34241,8 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         console.log(`   Address: ${safeData.address.substring(0, 10)}...`);
         console.log(`   Contract: ${safeData.contractAddress ? safeData.contractAddress.substring(0, 10) + '...' : 'N/A'}`);
         console.log(`   ERC20: ${safeData.isERC20}`);
+        console.log(`   Decimals: ${safeData.decimals}`);
+        console.log(`   Token Type: ${safeData.tokenType || 'crypto'}`);
         console.log(`   Price: $${safeData.currentPrice}`);
 
         res.status(200).json({
@@ -34192,6 +34265,132 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         });
     }
 });
+
+// =============================================
+// HELPER: SAFE SERIALIZE FOR BigInt
+// =============================================
+function safeSerialize(obj) {
+    if (obj === null || obj === undefined) return obj;
+    
+    if (typeof obj === 'bigint') {
+        return Number(obj);
+    }
+    
+    if (Array.isArray(obj)) {
+        return obj.map(item => safeSerialize(item));
+    }
+    
+    if (typeof obj === 'object') {
+        const result = {};
+        for (const [key, value] of Object.entries(obj)) {
+            result[key] = safeSerialize(value);
+        }
+        return result;
+    }
+    
+    return obj;
+}
+
+// =============================================
+// HELPER: GET CORRECT DECIMALS FOR ANY ASSET
+// =============================================
+function getAssetDecimals(assetSymbol, chainId = 1) {
+    const decimalsMap = {
+        // Stablecoins (6 decimals on most chains)
+        'USDT': { default: 6, overrides: { 56: 18, 137: 6, 42161: 6, 10: 6, 43114: 6 } },
+        'USDC': { default: 6, overrides: { 56: 18, 137: 6, 42161: 6, 10: 6, 43114: 6 } },
+        'DAI': { default: 18, overrides: {} },
+        'BUSD': { default: 18, overrides: { 56: 18 } },
+        'UST': { default: 18, overrides: {} },
+        'USTC': { default: 18, overrides: {} },
+        'TUSD': { default: 18, overrides: {} },
+        'USDP': { default: 18, overrides: {} },
+        'GUSD': { default: 18, overrides: {} },
+        'PAX': { default: 18, overrides: {} },
+        'BUSD': { default: 18, overrides: {} },
+        
+        // Major tokens (18 decimals usually)
+        'ETH': { default: 18, overrides: {} },
+        'WETH': { default: 18, overrides: {} },
+        'BTC': { default: 8, overrides: {} },
+        'WBTC': { default: 8, overrides: {} },
+        'BNB': { default: 18, overrides: {} },
+        'MATIC': { default: 18, overrides: {} },
+        'AVAX': { default: 18, overrides: {} },
+        'SOL': { default: 9, overrides: {} },
+        'XRP': { default: 6, overrides: {} },
+        'ADA': { default: 6, overrides: {} },
+        'DOT': { default: 10, overrides: {} },
+        'LINK': { default: 18, overrides: {} },
+        'UNI': { default: 18, overrides: {} },
+        'AAVE': { default: 18, overrides: {} },
+        'MKR': { default: 18, overrides: {} },
+        'CRV': { default: 18, overrides: {} },
+        'SNX': { default: 18, overrides: {} },
+        'COMP': { default: 18, overrides: {} },
+        'YFI': { default: 18, overrides: {} },
+        'SUSHI': { default: 18, overrides: {} },
+        'BAL': { default: 18, overrides: {} },
+        'ZRX': { default: 18, overrides: {} },
+        'BAT': { default: 18, overrides: {} },
+        'ENJ': { default: 18, overrides: {} },
+        'MANA': { default: 18, overrides: {} },
+        'SAND': { default: 18, overrides: {} },
+        'AXS': { default: 18, overrides: {} },
+        'LRC': { default: 18, overrides: {} },
+        '1INCH': { default: 18, overrides: {} },
+        'CRO': { default: 8, overrides: {} },
+        'VET': { default: 18, overrides: {} },
+        'THETA': { default: 18, overrides: {} },
+        'FTM': { default: 18, overrides: {} },
+        'ATOM': { default: 6, overrides: {} },
+        'NEAR': { default: 24, overrides: {} },
+        'ALGO': { default: 6, overrides: {} },
+        'FIL': { default: 18, overrides: {} },
+        'ICP': { default: 8, overrides: {} },
+        'HBAR': { default: 8, overrides: {} },
+        'ETC': { default: 18, overrides: {} },
+        'XLM': { default: 7, overrides: {} },
+        'DOGE': { default: 8, overrides: {} },
+        'SHIB': { default: 18, overrides: {} },
+        'APE': { default: 18, overrides: {} },
+        'MASK': { default: 18, overrides: {} },
+        'RNDR': { default: 18, overrides: {} },
+        'INJ': { default: 18, overrides: {} },
+        'OP': { default: 18, overrides: {} },
+        'ARB': { default: 18, overrides: {} },
+        'LDO': { default: 18, overrides: {} },
+        'RPL': { default: 18, overrides: {} },
+        'FXS': { default: 18, overrides: {} },
+        'CVX': { default: 18, overrides: {} },
+        'OHM': { default: 9, overrides: {} },
+        'GNO': { default: 18, overrides: {} },
+        'ENS': { default: 18, overrides: {} },
+        'QNT': { default: 18, overrides: {} },
+        'KNC': { default: 18, overrides: {} },
+        'OCEAN': { default: 18, overrides: {} },
+        'FET': { default: 18, overrides: {} },
+        'AGIX': { default: 18, overrides: {} },
+        'OCEAN': { default: 18, overrides: {} },
+        'FET': { default: 18, overrides: {} },
+        'AGIX': { default: 18, overrides: {} },
+        'CHZ': { default: 18, overrides: {} },
+        'AMP': { default: 18, overrides: {} },
+        'XCN': { default: 18, overrides: {} }
+    };
+
+    const assetConfig = decimalsMap[assetSymbol];
+    if (!assetConfig) {
+        return 18; // Default fallback
+    }
+
+    // Check if there's a chain-specific override
+    if (assetConfig.overrides && assetConfig.overrides[chainId]) {
+        return assetConfig.overrides[chainId];
+    }
+
+    return assetConfig.default;
+}
 
 // =============================================
 // ADMIN ENDPOINT: Refresh token cache
