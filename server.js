@@ -35236,11 +35236,17 @@ console.log('   - GET /api/admin/wallet/* (admin endpoints)');
 // ERROR HANDLING MIDDLEWARE
 // =============================================
 app.use((err, req, res, next) => {
-  console.error('Global error handler:', err);
-  res.status(500).json({
+  console.error('========================');
+  console.error('GLOBAL ERROR');
+  console.error(err);
+  console.error(err.stack);
+  console.error('========================');
+
+  res.status(err.status || 500).json({
     status: 'error',
-    message: 'Something went wrong on the server',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    message: err.message,
+    stack: err.stack,
+    name: err.name
   });
 });
 
