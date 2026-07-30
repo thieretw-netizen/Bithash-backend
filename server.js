@@ -4383,10 +4383,10 @@ const SystemLogSchema = new mongoose.Schema({
     index: true
   },
   performedByModel: { 
-    type: String, 
-    enum: ['User', 'Admin', 'System', 'CronJob', 'Webhook', 'API'],
-    default: 'System'
-  },
+  type: String, 
+  enum: ['User', 'Admin', 'CronJob', 'Webhook', 'API'],  // 'System' removed
+  default: 'User'  // or 'Admin'
+},
   performedByEmail: { type: String, index: true },
   performedByName: { type: String },
   
