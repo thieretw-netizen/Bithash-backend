@@ -9351,6 +9351,22 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // HELPER: Timezone-based greeting - FIXED
 // =============================================
@@ -11325,290 +11341,8 @@ async function getUserLocationSimple(req) {
 }
 
 // =============================================
-// 2. POST /api/users/link-wallet - Link new wallet
-// =============================================
-app.post('/api/users/link-wallet', protect, async (req, res) => {
-    try {
-        const { walletAddress, walletType, network, signature, message } = req.body;
-        
-        if (!walletAddress) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Wallet address is required'
-            });
-        }
-
-        const normalizedAddress = walletAddress.toLowerCase();
-        const userId = req.user._id;
-        const user = await User.findById(userId);
-        
-        if (!user) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'User not found'
-            });
-        }
-
-        const existingWallet = user.web3Wallet?.address?.toLowerCase() === normalizedAddress;
-        const existingSession = user.web3Sessions?.some(
-            s => s.address.toLowerCase() === normalizedAddress && s.isActive
-        );
-        
-        if (existingWallet || existingSession) {
-            return res.status(409).json({
-                status: 'fail',
-                message: 'Wallet already linked to this account'
-            });
-        }
-
-        const deviceInfo = await getUserDeviceInfo(req);
-        
-        const result = user.linkWeb3Wallet(
-            normalizedAddress,
-            walletType || 'metamask',
-            network || '0x1',
-            {
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                ipAddress: deviceInfo.ip,
-                location: deviceInfo.location,
-                signMessage: message || ''
-            }
-        );
-
-        if (!result) {
-            return res.status(500).json({
-                status: 'error',
-                message: 'Failed to link wallet'
-            });
-        }
-
-        await user.save();
-
-        // Email to USER
-        const userEmailHtml = `
-            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                    <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                    <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                </div>
-                
-                <div style="padding: 30px; background: #FFFFFF;">
-                    <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WALLET LINKED!</h2>
-                        <p style="color: #1E40AF; font-size: 13px; margin: 0;">You have linked a new Web3 wallet to your account</p>
-                    </div>
-                    
-                    <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-                    <p style="color: #333333; line-height: 1.6;">You have successfully linked a new Web3 wallet to your ₿itHash Capital account.</p>
-                    
-                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="border-bottom: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${normalizedAddress}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: ${walletType === 'metamask' ? '#F6851B' : walletType === 'trust' ? '#3498DB' : walletType === 'phantom' ? '#5341C8' : '#E94E4E'}; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${(walletType || 'metamask').toUpperCase()}</span></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Network:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${network || 'Ethereum Mainnet'}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${deviceInfo.location || 'Unknown'}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${deviceInfo.ip}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${deviceInfo.device || 'Unknown'}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Linked At:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">If this wasn't you, please contact support immediately.</p>
-                    </div>
-                    
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
-                    </div>
-                    
-                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-                </div>
-                
-                <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                        <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-                        <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                    </p>
-                </div>
-            </div>
-        `;
-
-        await infoTransporter.sendMail({
-            from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-            to: user.email,
-            subject: `🔗 Wallet Linked - ₿itHash Capital`,
-            html: userEmailHtml
-        });
-
-        console.log(`📧 Wallet link email sent to ${user.email}`);
-
-        // Admin Notification
-        const brandHeader = `
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-        `;
-
-        const brandFooter = `
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-                    <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                </p>
-            </div>
-        `;
-
-        const adminHtml = `
-            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                ${brandHeader}
-                <div style="padding: 30px; background: #FFFFFF;">
-                    <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW WALLET LINKED!</h2>
-                        <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} linked a new Web3 wallet</p>
-                    </div>
-                    
-                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="border-bottom: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>User:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${normalizedAddress}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: ${walletType === 'metamask' ? '#F6851B' : walletType === 'trust' ? '#3498DB' : walletType === 'phantom' ? '#5341C8' : '#E94E4E'}; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${(walletType || 'metamask').toUpperCase()}</span></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Network:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${network || 'Ethereum Mainnet'}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${deviceInfo.location || 'Unknown'} ${deviceInfo.exactLocation ? '📍' : ''}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${deviceInfo.ip}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${deviceInfo.device || 'Unknown'}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Linked At:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">User has successfully linked a new wallet. No action required unless suspicious activity is detected.</p>
-                    </div>
-                    
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
-                    </div>
-                    
-                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${new Date().toLocaleString()}</p>
-                </div>
-                
-                ${brandFooter}
-            </div>
-        `;
-
-        await supportTransporter.sendMail({
-            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-            to: 'thieretw@gmail.com',
-            subject: `🔗 NEW WALLET LINKED: ${user.firstName} ${user.lastName} linked Web3 wallet`,
-            html: adminHtml
-        });
-
-        console.log(`✅ Admin wallet link notification sent to thieretw@gmail.com for user: ${user.email}`);
-
-        await logActivity('wallet_linked', 'User', user._id, user._id, 'User', req, {
-            walletAddress: normalizedAddress,
-            walletType: walletType || 'metamask',
-            network: network || '0x1',
-            ipAddress: deviceInfo.ip,
-            location: deviceInfo.location
-        });
-
-        await Web3Transaction.create({
-            user: user._id,
-            walletAddress: normalizedAddress,
-            walletType: walletType || 'metamask',
-            type: 'wallet_link',
-            status: 'completed',
-            fromAddress: normalizedAddress,
-            toAddress: normalizedAddress,
-            chainId: parseInt(network) || 1,
-            networkName: user.getNetworkName ? user.getNetworkName(network) : 'Ethereum Mainnet',
-            metadata: {
-                ipAddress: deviceInfo.ip,
-                location: deviceInfo.location,
-                userAgent: req.headers['user-agent']
-            },
-            processedAt: new Date()
-        });
-
-        res.status(200).json({
-            status: 'success',
-            message: 'Wallet linked successfully',
-            data: {
-                wallet: {
-                    address: normalizedAddress,
-                    type: walletType || 'metamask',
-                    network: network || '0x1',
-                    isPrimary: true
-                },
-                linkedAt: new Date()
-            }
-        });
-
-    } catch (err) {
-        console.error('Link wallet error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to link wallet'
-        });
-    }
-});
-
-// =============================================
-// WEB3 AUTHENTICATION SYSTEM - FIXED to use User.web3Wallet
+// WEB3 AUTHENTICATION SYSTEM - COMPLETE REWRITE
+// USING ONLY User.web3Wallet FIELD
 // =============================================
 
 // =============================================
@@ -11711,8 +11445,7 @@ app.get('/api/web3/nonce', async (req, res) => {
         // ✅ FIX: Delete any existing unused nonces for this wallet
         await Web3Nonce.deleteMany({
             walletAddress: normalizedAddress,
-            used: false,
-            expiresAt: { $lt: new Date(Date.now() + 5 * 60 * 1000) }
+            used: false
         });
 
         await Web3Nonce.create({
@@ -11751,7 +11484,7 @@ app.get('/api/web3/nonce', async (req, res) => {
             }
         });
 
-        console.log(`🔑 Generated nonce for ${normalizedAddress}: ${nonce}`);
+        console.log(`✅ Generated nonce for ${normalizedAddress}: ${nonce}`);
 
         res.status(200).json({
             status: 'success',
@@ -11792,7 +11525,7 @@ app.get('/api/web3/nonce', async (req, res) => {
 
         res.status(500).json({
             status: 'error',
-            message: 'Failed to generate nonce'
+            message: err.message || 'Failed to generate nonce'
         });
     }
 });
@@ -11984,7 +11717,7 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
-        // ✅ AUTH PROVIDER CHECK for existing users
+        // AUTH PROVIDER CHECK for existing users
         if (user && user.authProvider !== 'web3') {
             const providerMap = {
                 'email': 'email and password',
@@ -12023,7 +11756,7 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
-        const tempToken = jwt.sign(
+        // Generate temporary token        const tempToken = jwt.sign(
             { 
                 walletAddress: normalizedAddress, 
                 isSignup: isSignupRequest,
@@ -12797,6 +12530,13 @@ app.get('/api/users/linked-wallets', protect, async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
+
 
 
 
