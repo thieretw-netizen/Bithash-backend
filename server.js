@@ -4365,9 +4365,9 @@ const SystemLogSchema = new mongoose.Schema({
       'balance', 'commission', 'downline', 'withdrawal_request', 'deposit_request',
       'kyc_document', 'kyc_verification', 'two_factor', 'password_reset', 'email',
       'websocket', 'cron_job', 'price_feed', 'market_data', 'order', 'trade',
-      'position', 'orderbook', 'ticker', 'candle', 'asset_info', 'pair_limit',
+      'position', 'orderbook', 'ticker', 'candle','Web3Nonce',  'asset_info', 'pair_limit',
       'user_preference', 'user_log', 'system_log', 'notification_preference',
-      'announcement', 'message', 'restriction', 'platform_revenue', 'commission_setting',  'otp',  'User', 'AccountRestrictions', 'Transaction', 'DepositAddress'
+      'announcement', 'message', 'restriction', 'platform_revenue', 'commission_setting',  'OTP',  'User', 'AccountRestrictions', 'Transaction', 'DepositAddress'
     ],
     index: true
   },
