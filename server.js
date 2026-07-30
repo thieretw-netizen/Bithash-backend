@@ -9349,18 +9349,22 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
 // Routes
 
 
-
-
-
 // =============================================
-// HELPER: Timezone-based greeting
+// HELPER: Timezone-based greeting - FIXED
 // =============================================
 function getGreetingByTimezone(offsetMinutes = 0) {
     const now = new Date();
     const utcHours = now.getUTCHours();
-    let localHour = (utcHours + offsetMinutes / 60) % 24;
+    const utcMinutes = now.getUTCMinutes();
+    
+    const offsetHours = offsetMinutes / 60;
+    let localHour = (utcHours + offsetHours) % 24;
     if (localHour < 0) localHour += 24;
+    
     const hour = Math.floor(localHour);
+    
+    console.log(`🕐 Greeting check - UTC: ${utcHours}:${utcMinutes}, Offset: ${offsetMinutes}min (${offsetHours}h), Local: ${hour}:${Math.floor((localHour - hour) * 60)}`);
+    
     if (hour >= 5 && hour < 12) return 'Good morning';
     if (hour >= 12 && hour < 17) return 'Good afternoon';
     if (hour >= 17 && hour < 22) return 'Good evening';
@@ -9502,13 +9506,14 @@ app.post('/api/auth/signup', [
                 }
             });
 
+            // ✅ FIX: Send greeting separately, NOT in the message
             return res.status(400).json({
                 status: 'fail',
-                message: `${greeting} ${existingUser.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
+                message: `You already have an account with ${truncatedEmail}. Please log in.`,
                 data: {
-                    greeting,
+                    greeting: greeting,
                     userName: existingUser.firstName,
-                    truncatedEmail,
+                    truncatedEmail: truncatedEmail,
                     action: 'login_suggested'
                 }
             });
@@ -9606,6 +9611,7 @@ app.post('/api/auth/signup', [
             userAgent: req.headers['user-agent']
         });
 
+        // ✅ ONLY SEND OTP EMAIL - NO duplicate welcome email (welcome email will be sent after OTP verification)
         await sendProfessionalEmail({
             email: originalEmail,
             template: 'otp',
@@ -9616,7 +9622,11 @@ app.post('/api/auth/signup', [
             }
         });
 
+        // =============================================
+        // GET DEVICE INFO AND FORMAT PROPERLY FOR SYSTEMLOG
+        // =============================================
         const rawDeviceInfo = await getUserDeviceInfo(req);
+        
         const formattedDeviceInfo = {
             type: getDeviceType(req),
             os: {
@@ -9631,7 +9641,7 @@ app.post('/api/auth/signup', [
             language: req.headers['accept-language'] || 'Unknown',
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
         };
-
+        
         const formattedLocation = {
             ip: rawDeviceInfo.ip,
             country: {
@@ -9652,32 +9662,7 @@ app.post('/api/auth/signup', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || userCity}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        // UserLog for user history
-        await UserLog.create({
-            user: newUser._id,
-            username: newUser.email,
-            email: newUser.email,
-            userFullName: `${newUser.firstName} ${newUser.lastName}`,
-            action: 'signup',
-            actionCategory: 'authentication',
-            ipAddress: rawDeviceInfo.ip,
-            userAgent: rawDeviceInfo.device,
-            deviceInfo: formattedDeviceInfo,
-            location: formattedLocation,
-            status: 'success',
-            metadata: {
-                email: originalEmail,
-                signupMethod: 'email_password',
-                referralCodeUsed: referralCode || null,
-                referredBy: referredByUser ? referredByUser.email : null,
-                accountType: userAccountType,
-                organizationName: organizationName || null,
-                city: userCity,
-                ipAddress: rawDeviceInfo.ip
-            }
-        });
-
-        // SystemLog for detailed audit
+        // ✅ SystemLog for detailed signup
         await SystemLog.create({
             action: 'user_registered',
             entity: 'User',
@@ -9712,7 +9697,9 @@ app.post('/api/auth/signup', [
             }
         });
 
-        // Admin notification
+        // =============================================
+        // SEND ADMIN NOTIFICATION EMAIL USING SUPPORT TRANSPORTER
+        // =============================================
         const formattedTimestamp = new Date().toLocaleString('en-US', {
             year: 'numeric',
             month: 'long',
@@ -9722,7 +9709,7 @@ app.post('/api/auth/signup', [
             second: '2-digit',
             timeZoneName: 'short'
         });
-
+        
         const brandHeader = `
             <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
                 <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
@@ -9730,7 +9717,7 @@ app.post('/api/auth/signup', [
                 <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
             </div>
         `;
-
+        
         const brandFooter = `
             <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
                 <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
@@ -9741,7 +9728,7 @@ app.post('/api/auth/signup', [
                 </p>
             </div>
         `;
-
+        
         const adminEmailHtml = `
             <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
                 ${brandHeader}
@@ -9760,7 +9747,7 @@ app.post('/api/auth/signup', [
                         <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW USER REGISTERED!</h2>
                         <p style="color: #065F46; font-size: 13px; margin: 0;">${newUser.firstName} ${newUser.lastName} just joined ₿itHash Capital</p>
                     </div>
-
+                    
                     <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
                         <table style="width: 100%; border-collapse: collapse;">
                             <tr style="border-bottom: 1px solid #E2E8F0;">
@@ -9809,22 +9796,22 @@ app.post('/api/auth/signup', [
                              </tr>
                         </table>
                     </div>
-
+                    
                     <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
                         <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Next Steps</p>
                         <p style="color: #78350F; margin: 0; font-size: 14px;">The user has been sent an OTP for email verification. Once verified, they will have full access to the platform.</p>
                     </div>
-
+                    
                     <div style="text-align: center; margin: 30px 0;">
                         <a href="https://www.bithashcapital.live/admin/users/${newUser._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
                     </div>
-
+                    
                     <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
                 </div>
                 ${brandFooter}
             </div>
         `;
-
+        
         try {
             await supportTransporter.sendMail({
                 from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
@@ -10078,6 +10065,7 @@ app.post('/api/auth/login', [
             userAgent: req.headers['user-agent']
         });
 
+        // ✅ ONLY SEND OTP EMAIL - NO login success email here (will be sent after OTP verification)
         await sendProfessionalEmail({
             email: email,
             template: 'otp',
@@ -10088,8 +10076,11 @@ app.post('/api/auth/login', [
             }
         });
 
+        // =============================================
+        // GET DEVICE INFO AND FORMAT PROPERLY FOR SYSTEMLOG
+        // =============================================
         const rawDeviceInfo = await getUserDeviceInfo(req);
-
+        
         const formattedDeviceInfo = {
             type: getDeviceType(req),
             os: {
@@ -10104,7 +10095,7 @@ app.post('/api/auth/login', [
             language: req.headers['accept-language'] || 'Unknown',
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
         };
-
+        
         const formattedLocation = {
             ip: rawDeviceInfo.ip,
             country: {
@@ -10125,30 +10116,7 @@ app.post('/api/auth/login', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || user.city}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        await UserLog.create({
-            user: user._id,
-            username: user.email,
-            email: user.email,
-            userFullName: `${user.firstName} ${user.lastName}`,
-            action: 'login_attempt',
-            actionCategory: 'authentication',
-            ipAddress: rawDeviceInfo.ip,
-            userAgent: rawDeviceInfo.device,
-            deviceInfo: formattedDeviceInfo,
-            location: formattedLocation,
-            status: 'pending',
-            metadata: {
-                email: email,
-                loginMethod: 'password',
-                otpSent: true,
-                rememberMe: rememberMe || false,
-                accountType: accountType || user.accountType,
-                authProvider: user.authProvider || 'email',
-                otpCreatedAt: new Date().toISOString(),
-                timezoneOffset: timezoneOffset
-            }
-        });
-
+        // ✅ SystemLog for login initiation
         await SystemLog.create({
             action: 'login_initiated',
             entity: 'User',
@@ -10181,7 +10149,9 @@ app.post('/api/auth/login', [
             }
         });
 
-        // Admin notification
+        // =============================================
+        // SEND ADMIN NOTIFICATION EMAIL
+        // =============================================
         const formattedTimestamp = new Date().toLocaleString('en-US', {
             year: 'numeric',
             month: 'long',
@@ -10191,7 +10161,7 @@ app.post('/api/auth/login', [
             second: '2-digit',
             timeZoneName: 'short'
         });
-
+        
         const brandHeader = `
             <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
                 <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
@@ -10199,7 +10169,7 @@ app.post('/api/auth/login', [
                 <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
             </div>
         `;
-
+        
         const brandFooter = `
             <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
                 <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
@@ -10210,7 +10180,7 @@ app.post('/api/auth/login', [
                 </p>
             </div>
         `;
-
+        
         const adminEmailHtml = `
             <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
                 ${brandHeader}
@@ -10229,7 +10199,7 @@ app.post('/api/auth/login', [
                         <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">USER LOGIN INITIATED!</h2>
                         <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated login to their account (awaiting OTP)</p>
                     </div>
-
+                    
                     <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
                         <table style="width: 100%; border-collapse: collapse;">
                             <tr style="border-bottom: 1px solid #E2E8F0;">
@@ -10266,23 +10236,23 @@ app.post('/api/auth/login', [
                             </tr>
                         </table>
                     </div>
-
+                    
                     <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
                         <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
                         <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Remember Me: ${rememberMe ? '✅ Yes' : '❌ No'}</p>
                         <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">Login success email will be sent after OTP verification.</p>
                     </div>
-
+                    
                     <div style="text-align: center; margin: 30px 0;">
                         <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Activity</a>
                     </div>
-
+                    
                     <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
                 </div>
                 ${brandFooter}
             </div>
         `;
-
+        
         try {
             await supportTransporter.sendMail({
                 from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
@@ -10449,6 +10419,7 @@ app.post('/api/auth/google', async (req, res) => {
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || 'Unknown'}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
+        // ✅ FIX: Get greeting but don't include it in the message
         const greeting = getGreetingByTimezone(timezoneOffset);
 
         let truncatedEmail = email;
@@ -10459,7 +10430,9 @@ app.post('/api/auth/google', async (req, res) => {
             truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
         }
 
-        // Case 1: Login attempt but user doesn't exist
+        // =============================================
+        // CASE 1: Login attempt but user doesn't exist
+        // =============================================
         if (isSignup === false && !user) {
             console.log('Login attempt with Google: User does not exist');
 
@@ -10482,9 +10455,10 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
+            // ✅ FIX: Send greeting separately, NOT in the message
             return res.status(404).json({
                 status: 'fail',
-                message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
+                message: `No account found for ${truncatedEmail}. Please sign up first.`,
                 data: {
                     greeting: greeting,
                     truncatedEmail: truncatedEmail,
@@ -10493,7 +10467,9 @@ app.post('/api/auth/google', async (req, res) => {
             });
         }
 
-        // Case 2: Signup attempt but user already exists
+        // =============================================
+        // CASE 2: Signup attempt but user already exists
+        // =============================================
         if (isSignup === true && user) {
             console.log('Signup attempt with Google: User already exists');
 
@@ -10520,63 +10496,10 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            const locationString = rawDeviceInfo.location || 'Unknown location';
-            const deviceString = rawDeviceInfo.device || 'Unknown device';
-            const ipAddress = rawDeviceInfo.ip || 'Unknown IP';
-            const attemptTime = new Date().toLocaleString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                timeZoneName: 'short'
-            });
-
-            try {
-                let cleanDevice = deviceString;
-                if (deviceString.includes('Chrome/')) cleanDevice = 'Google Chrome';
-                else if (deviceString.includes('Firefox/')) cleanDevice = 'Mozilla Firefox';
-                else if (deviceString.includes('Safari/') && !deviceString.includes('Chrome/')) cleanDevice = 'Safari';
-                else if (deviceString.includes('Edg/')) cleanDevice = 'Microsoft Edge';
-                else if (deviceString.includes('Opera/') || deviceString.includes('OPR/')) cleanDevice = 'Opera';
-
-                let cleanOS = 'Unknown';
-                if (deviceString.includes('Windows NT 10.0')) cleanOS = 'Windows 10/11';
-                else if (deviceString.includes('Windows NT 6.1')) cleanOS = 'Windows 7';
-                else if (deviceString.includes('Mac OS X')) cleanOS = 'macOS';
-                else if (deviceString.includes('Android')) cleanOS = 'Android';
-                else if (deviceString.includes('iPhone') || deviceString.includes('iPad')) cleanOS = 'iOS';
-                else if (deviceString.includes('Linux')) cleanOS = 'Linux';
-
-                await sendProfessionalEmail({
-                    email: email,
-                    template: 'default',
-                    data: {
-                        name: user.firstName,
-                        message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}).`,
-                        details: `
-                            <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                                <p style="margin: 0 0 10px 0;"><strong>Location:</strong> ${locationString}</p>
-                                <p style="margin: 0 0 10px 0;"><strong>Device:</strong> ${cleanDevice} on ${cleanOS}</p>
-                                <p style="margin: 0 0 10px 0;"><strong>IP Address:</strong> ${ipAddress}</p>
-                                <p style="margin: 0 0 0 0;"><strong>Time:</strong> ${attemptTime}</p>
-                            </div>
-                        `,
-                        actionRequired: 'If this was you, please log in to your existing account. If this was not you, please contact our support team immediately to secure your account.',
-                        buttonText: 'Login to Your Account',
-                        actionLink: 'https://www.bithashcapital.live/login',
-                        referenceId: `SEC-DUPLICATE-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-                    }
-                });
-                console.log(`Security email sent to ${email} about duplicate signup attempt from ${locationString}`);
-            } catch (emailError) {
-                console.error('Failed to send duplicate signup alert email:', emailError);
-            }
-
+            // ✅ FIX: Send greeting separately, NOT in the message
             return res.status(409).json({
                 status: 'fail',
-                message: `${greeting} ${user.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
+                message: `You already have an account with ${truncatedEmail}. Please log in.`,
                 data: {
                     greeting: greeting,
                     userName: user.firstName,
@@ -10591,6 +10514,7 @@ app.post('/api/auth/google', async (req, res) => {
         // =============================================
 
         if (!user) {
+            // Create new user with Google auth (SIGNUP scenario)
             try {
                 const referralCode = generateReferralCode();
                 user = await User.create({
@@ -10614,6 +10538,7 @@ app.post('/api/auth/google', async (req, res) => {
                 isNewUser = true;
                 console.log('New user created via Google SIGNUP:', originalEmail);
 
+                // ✅ SystemLog for Google signup success
                 await SystemLog.create({
                     action: 'google_signup_success',
                     entity: 'User',
@@ -10761,6 +10686,7 @@ app.post('/api/auth/google', async (req, res) => {
                 });
             }
         } else if (!user.googleId) {
+            // Existing user, add Google auth (linking accounts)
             try {
                 user.googleId = sub;
                 user.isVerified = true;
@@ -10857,30 +10783,7 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            await UserLog.create({
-                user: user._id,
-                username: user.email,
-                email: user.email,
-                userFullName: `${user.firstName} ${user.lastName}`,
-                action: isNewUser ? 'signup_attempt' : 'login_attempt',
-                actionCategory: 'authentication',
-                ipAddress: rawDeviceInfo.ip,
-                userAgent: rawDeviceInfo.device,
-                deviceInfo: formattedDeviceInfo,
-                location: formattedLocation,
-                status: 'pending',
-                metadata: {
-                    email: originalEmail,
-                    loginMethod: 'google',
-                    otpSent: true,
-                    isNewUser: isNewUser,
-                    isGoogleLogin: true,
-                    operation: isNewUser ? 'signup' : 'login',
-                    otpType: isNewUser ? 'signup' : 'login',
-                    timezoneOffset: timezoneOffset
-                }
-            });
-
+            // ✅ SystemLog for Google OTP sent
             await SystemLog.create({
                 action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
                 entity: 'User',
@@ -11048,6 +10951,7 @@ app.post('/api/auth/google', async (req, res) => {
             }
         });
 
+        // ✅ SystemLog for Google auth OTP sent
         try {
             await SystemLog.create({
                 action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
@@ -11108,7 +11012,7 @@ app.post('/api/auth/google', async (req, res) => {
 });
 
 // =============================================
-// OTP VERIFICATION ENDPOINT
+// OTP VERIFICATION ENDPOINT - All logs to SystemLog ONLY
 // =============================================
 app.post('/api/auth/verify-otp', [
     body('email').isEmail().withMessage('Please provide a valid email'),
@@ -11242,8 +11146,13 @@ app.post('/api/auth/verify-otp', [
             sameSite: 'strict'
         });
 
+        // =============================================
+        // ✅ SEND EMAILS ONLY ONCE - AFTER SUCCESSFUL OTP VERIFICATION
+        // =============================================
+        
         const deviceInfoForEmail = await getUserDeviceInfo(req);
-
+        
+        // For SIGNUP: Send welcome email (only after OTP verification)
         if (isSignupOtp && wasJustVerified) {
             try {
                 await sendAutomatedEmail(user, 'welcome', {
@@ -11255,7 +11164,8 @@ app.post('/api/auth/verify-otp', [
                 console.error('Failed to send welcome email:', emailError);
             }
         }
-
+        
+        // For LOGIN: Send login success email (only after OTP verification)
         if (isLoginOtp) {
             try {
                 await sendAutomatedEmail(user, 'login_success', {
@@ -11271,28 +11181,33 @@ app.post('/api/auth/verify-otp', [
             }
         }
 
-        await UserLog.findOneAndUpdate(
-            {
-                user: user._id,
-                action: isSignupOtp ? 'signup_attempt' : 'login_attempt',
-                status: 'pending',
-                'metadata.otpSent': true
-            },
-            {
-                $set: {
-                    status: 'success',
-                    'metadata.verifiedAt': new Date().toISOString(),
-                    'metadata.verificationMethod': 'otp',
-                    'metadata.otpType': otpRecord.type
-                }
-            },
-            { sort: { createdAt: -1 } }
-        );
+        // ✅ SystemLog for OTP verification success
+        await SystemLog.create({
+            action: 'otp_verified',
+            entity: 'OTP',
+            entityId: otpRecord._id,
+            performedBy: user._id,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'success',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                type: otpRecord.type,
+                isGoogleUser: !!user.googleId,
+                emailUsed: email,
+                exactMatch: true,
+                otpType: isSignupOtp ? 'signup' : 'login'
+            }
+        });
 
         res.status(200).json({
             status: 'success',
-            message: isSignupOtp
-                ? 'Email verified successfully! Welcome to ₿itHash Capital!'
+            message: isSignupOtp 
+                ? 'Email verified successfully! Welcome to ₿itHash Capital!' 
                 : 'Login successful! Redirecting to dashboard...',
             token: finalToken,
             data: {
@@ -11308,15 +11223,26 @@ app.post('/api/auth/verify-otp', [
             }
         });
 
-        await logActivity('otp_verified', 'otp', otpRecord._id, user._id, 'User', req, {
-            type: otpRecord.type,
-            isGoogleUser: !!user.googleId,
-            emailUsed: email,
-            exactMatch: true
-        });
-
     } catch (err) {
         console.error('Verify OTP error:', err);
+        
+        await SystemLog.create({
+            action: 'otp_verification_error',
+            entity: 'OTP',
+            performedBy: null,
+            performedByModel: 'System',
+            status: 'failed',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            errorMessage: err.message,
+            errorStack: err.stack,
+            metadata: {
+                email: req.body.email
+            }
+        });
+
         res.status(500).json({
             status: 'error',
             message: 'An error occurred during verification. Please try again.'
@@ -11342,8 +11268,6 @@ async function getUserLocationSimple(req) {
     }
     return { country: 'Unknown', city: 'Unknown', region: 'Unknown', formatted: 'Unknown' };
 }
-
-
 
 
 
