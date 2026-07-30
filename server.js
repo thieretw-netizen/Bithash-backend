@@ -9367,8 +9367,6 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
 
 
 
-
-
 // =============================================
 // HELPER: Timezone-based greeting - FIXED
 // =============================================
@@ -9618,13 +9616,14 @@ app.post('/api/auth/signup', [
             }
         });
 
-        // ✅ FIX: Delete existing OTPs before creating new one
+        // ✅ FIX: Delete any existing OTPs for this email before creating new one
         await OTP.deleteMany({ 
             email: originalEmail, 
             type: 'signup',
             used: false 
         });
 
+        // Generate OTP with exact email
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -9637,6 +9636,7 @@ app.post('/api/auth/signup', [
             userAgent: req.headers['user-agent']
         });
 
+        // ✅ ONLY SEND OTP EMAIL - NO duplicate welcome email (welcome email will be sent after OTP verification)
         await sendProfessionalEmail({
             email: originalEmail,
             template: 'otp',
@@ -9684,6 +9684,7 @@ app.post('/api/auth/signup', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || userCity}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
+        // ✅ SystemLog for detailed signup
         await SystemLog.create({
             action: 'user_registered',
             entity: 'User',
@@ -9719,7 +9720,7 @@ app.post('/api/auth/signup', [
         });
 
         // =============================================
-        // SEND ADMIN NOTIFICATION EMAIL
+        // SEND ADMIN NOTIFICATION EMAIL USING SUPPORT TRANSPORTER
         // =============================================
         const formattedTimestamp = new Date().toLocaleString('en-US', {
             year: 'numeric',
@@ -9845,6 +9846,7 @@ app.post('/api/auth/signup', [
             console.error(`❌ Failed to send admin signup notification to thieretw@gmail.com:`, adminEmailError.message);
         }
 
+        // Generate temporary token for OTP verification
         const tempToken = generateJWT(newUser._id);
 
         res.status(201).json({
@@ -10074,7 +10076,7 @@ app.post('/api/auth/login', [
             });
         }
 
-        // ✅ FIX: Delete existing OTPs before creating new one
+        // ✅ FIX: Delete any existing OTPs for this email before creating new one
         await OTP.deleteMany({ 
             email: email, 
             type: 'login',
@@ -10093,6 +10095,7 @@ app.post('/api/auth/login', [
             userAgent: req.headers['user-agent']
         });
 
+        // ✅ ONLY SEND OTP EMAIL - NO login success email here (will be sent after OTP verification)
         await sendProfessionalEmail({
             email: email,
             template: 'otp',
@@ -10140,6 +10143,7 @@ app.post('/api/auth/login', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || user.city}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
+        // ✅ SystemLog for login initiation
         await SystemLog.create({
             action: 'login_initiated',
             entity: 'User',
@@ -11077,7 +11081,7 @@ async function getUserLocationSimple(req) {
 }
 
 // =============================================
-// WEB3 AUTHENTICATION SYSTEM - COMPLETE REWRITE
+// WEB3 AUTHENTICATION SYSTEM - COMPLETE FIXED VERSION
 // =============================================
 
 // =============================================
@@ -11098,7 +11102,7 @@ app.get('/api/web3/nonce', async (req, res) => {
 
         const normalizedAddress = walletAddress.toLowerCase();
 
-        // Check if user exists with this wallet using web3Wallet field
+        // ✅ FIX: Use User schema web3Wallet field
         const existingUser = await User.findOne({ 'web3Wallet.address': normalizedAddress });
         const isSignupRequest = isSignup === 'true' || isSignup === true;
 
@@ -11181,7 +11185,7 @@ app.get('/api/web3/nonce', async (req, res) => {
 
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-        // ✅ FIX: Delete existing unused nonces
+        // ✅ FIX: Delete any existing unused nonces for this wallet
         await Web3Nonce.deleteMany({
             walletAddress: normalizedAddress,
             used: false
@@ -11324,7 +11328,7 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
-        // Verify signature using ethers
+        // ✅ FIX: Proper signature verification using ethers
         let recoveredAddress;
         try {
             recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
@@ -11390,7 +11394,7 @@ app.post('/api/web3/verify', async (req, res) => {
 
         const isSignupRequest = isSignup === true || isSignup === 'true';
 
-        // Check if user exists using web3Wallet field
+        // ✅ FIX: Check User schema web3Wallet field
         let user = await User.findOne({ 'web3Wallet.address': normalizedAddress });
         let isNewUser = false;
 
@@ -11459,7 +11463,7 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
-        // ✅ AUTH PROVIDER CHECK
+        // ✅ AUTH PROVIDER CHECK for existing users
         if (user && user.authProvider !== 'web3') {
             const providerMap = {
                 'email': 'email and password',
@@ -11635,7 +11639,7 @@ app.post('/api/web3/signup', async (req, res) => {
 
         const normalizedAddress = walletAddress.toLowerCase();
 
-        // Check if wallet already exists using web3Wallet field
+        // ✅ FIX: Check User schema web3Wallet field
         const existingUser = await User.findOne({ 'web3Wallet.address': normalizedAddress });
         if (existingUser) {
             return res.status(409).json({
@@ -11734,7 +11738,7 @@ app.post('/api/web3/signup', async (req, res) => {
             }
         });
 
-        // ✅ FIX: Delete existing OTPs
+        // ✅ FIX: Delete any existing OTPs for this email
         await OTP.deleteMany({ 
             email: email, 
             type: 'signup',
@@ -11920,7 +11924,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
             });
         }
 
-        // ✅ FIX: Delete existing OTPs
+        // ✅ FIX: Delete any existing OTPs for this email
         await OTP.deleteMany({ 
             email: email, 
             type: 'signup',
@@ -12148,7 +12152,7 @@ app.get('/api/web3/check-user', async (req, res) => {
 
         const normalizedAddress = walletAddress.toLowerCase();
 
-        // ✅ FIX: Check using web3Wallet field
+        // ✅ FIX: Check User schema web3Wallet field
         const user = await User.findOne({ 'web3Wallet.address': normalizedAddress })
             .select('firstName lastName email status isVerified authProvider web3Wallet');
 
@@ -12272,6 +12276,8 @@ app.get('/api/users/linked-wallets', protect, async (req, res) => {
         });
     }
 });
+
+
 
 
 
