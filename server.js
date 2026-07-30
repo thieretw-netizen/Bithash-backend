@@ -11460,7 +11460,7 @@ app.get('/api/web3/nonce', async (req, res) => {
             metadata: {
                 accountType: accountType || 'individual',
                 referralCode: referralCode || null,
-                isSignup: isSignupRequest,
+                isSignup: isSignupRequest,  // ✅ This now works - isSignupRequest is defined above
                 pageSource: req.headers.referer?.includes('signup') ? 'signup' : 'login',
                 timezoneOffset: timezoneOffset
             }
@@ -11529,7 +11529,6 @@ app.get('/api/web3/nonce', async (req, res) => {
         });
     }
 });
-
 // =============================================
 // 2. VERIFY SIGNATURE - FIXED
 // =============================================
