@@ -9352,7 +9352,9 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
 
 
 
-// Helper function for time-based greeting
+// =============================================
+// HELPER: Timezone-based greeting
+// =============================================
 function getGreetingByTimezone(offsetMinutes = 0) {
     const now = new Date();
     const utcHours = now.getUTCHours();
@@ -9400,7 +9402,6 @@ app.post('/api/auth/signup', [
     if (!errors.isEmpty()) {
         console.error('Signup validation errors:', errors.array());
 
-        // Log validation error to SystemLog
         await SystemLog.create({
             action: 'signup_validation_failed',
             entity: 'User',
@@ -9479,7 +9480,6 @@ app.post('/api/auth/signup', [
                 ? `${originalEmail.split('@')[0].substring(0, 3)}...${originalEmail.split('@')[0].substring(originalEmail.split('@')[0].length - 3)}@${originalEmail.split('@')[1]}`
                 : originalEmail;
 
-            // Log duplicate signup attempt
             await SystemLog.create({
                 action: 'signup_attempt_duplicate',
                 entity: 'User',
@@ -9569,7 +9569,6 @@ app.post('/api/auth/signup', [
         const newUser = await User.create(userData);
         console.log(`✅ New user created: ${newUser.email} (Account Type: ${newUser.accountType}, Auth Provider: email)`);
 
-        // Log successful signup to SystemLog
         await SystemLog.create({
             action: 'user_signup_success',
             entity: 'User',
@@ -9653,7 +9652,7 @@ app.post('/api/auth/signup', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || userCity}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        // Log to UserLog as well for user activity (keep existing UserLog for user-facing history)
+        // UserLog for user history
         await UserLog.create({
             user: newUser._id,
             username: newUser.email,
@@ -9678,7 +9677,7 @@ app.post('/api/auth/signup', [
             }
         });
 
-        // Log detailed signup to SystemLog
+        // SystemLog for detailed audit
         await SystemLog.create({
             action: 'user_registered',
             entity: 'User',
@@ -10150,7 +10149,6 @@ app.post('/api/auth/login', [
             }
         });
 
-        // Log successful login initiation to SystemLog
         await SystemLog.create({
             action: 'login_initiated',
             entity: 'User',
@@ -10484,26 +10482,6 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            await UserLog.create({
-                user: null,
-                username: email,
-                email: email,
-                userFullName: 'Unknown User',
-                action: 'login_attempt',
-                actionCategory: 'authentication',
-                ipAddress: rawDeviceInfo.ip,
-                userAgent: rawDeviceInfo.device,
-                deviceInfo: formattedDeviceInfo,
-                location: formattedLocation,
-                status: 'failed',
-                metadata: {
-                    email: email,
-                    loginMethod: 'google',
-                    error: 'User not found',
-                    isSignupAttempt: false
-                }
-            });
-
             return res.status(404).json({
                 status: 'fail',
                 message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
@@ -10539,27 +10517,6 @@ app.post('/api/auth/google', async (req, res) => {
                     signupAttempt: true,
                     timezoneOffset: timezoneOffset,
                     isSignup: true
-                }
-            });
-
-            await UserLog.create({
-                user: user._id,
-                username: user.email,
-                email: user.email,
-                userFullName: `${user.firstName} ${user.lastName}`,
-                action: 'signup_attempt',
-                actionCategory: 'authentication',
-                ipAddress: rawDeviceInfo.ip,
-                userAgent: rawDeviceInfo.device,
-                deviceInfo: formattedDeviceInfo,
-                location: formattedLocation,
-                status: 'failed',
-                metadata: {
-                    email: email,
-                    signupMethod: 'google',
-                    error: 'User already exists',
-                    isSignupAttempt: true,
-                    authProvider: user.authProvider
                 }
             });
 
@@ -10634,7 +10591,6 @@ app.post('/api/auth/google', async (req, res) => {
         // =============================================
 
         if (!user) {
-            // Create new user with Google auth (SIGNUP scenario)
             try {
                 const referralCode = generateReferralCode();
                 user = await User.create({
@@ -10805,7 +10761,6 @@ app.post('/api/auth/google', async (req, res) => {
                 });
             }
         } else if (!user.googleId) {
-            // Existing user, add Google auth (linking accounts)
             try {
                 user.googleId = sub;
                 user.isVerified = true;
@@ -10926,7 +10881,6 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            // Log Google OTP sent to SystemLog
             await SystemLog.create({
                 action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
                 entity: 'User',
@@ -11153,300 +11107,241 @@ app.post('/api/auth/google', async (req, res) => {
     }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// OTP Verification Endpoint - Sends emails ONLY after successful verification
+// =============================================
+// OTP VERIFICATION ENDPOINT
+// =============================================
 app.post('/api/auth/verify-otp', [
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
+    body('email').isEmail().withMessage('Please provide a valid email'),
+    body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
 ], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      message: 'Please enter a valid 6-digit OTP code'
-    });
-  }
-
-  try {
-    const { email, otp } = req.body;
-    const token = req.headers.authorization?.replace('Bearer ', '');
-
-    if (!token) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Authentication required. Please try logging in again.'
-      });
-    }
-
-    // Verify temporary token
-    let decoded;
-    try {
-      decoded = verifyJWT(token);
-    } catch (err) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Session expired. Please try logging in again.'
-      });
-    }
-
-    // Find user WITHOUT password selection to include Google users
-    const user = await User.findById(decoded.id).select('-password');
-    
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // Compare EXACT emails without any normalization
-    console.log('Email comparison (exact match):', {
-      userEmail: user.email,
-      inputEmail: email,
-      match: user.email === email
-    });
-
-    if (user.email !== email) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Email does not match user account'
-      });
-    }
-
-    // Look for OTP with EXACT email only
-    const otpRecord = await OTP.findOne({
-      email: email,
-      otp,
-      used: false,
-      expiresAt: { $gt: new Date() }
-    });
-
-    if (!otpRecord) {
-      // Increment attempts for exact email
-      await OTP.updateMany(
-        { email: email, otp, used: false },
-        { $inc: { attempts: 1 } }
-      );
-
-      // Check if max attempts reached for exact email
-      const failedAttempts = await OTP.countDocuments({
-        email: email,
-        used: false,
-        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-        attempts: { $gte: 5 }
-      });
-
-      if (failedAttempts >= 5) {
-        await User.findByIdAndUpdate(user._id, {
-          status: 'suspended',
-          suspensionLiftAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-        });
-
-        return res.status(429).json({
-          status: 'fail',
-          message: 'Too many failed attempts. Account suspended for 24 hours.'
-        });
-      }
-
-      // Check if OTP exists but is expired for exact email
-      const expiredOtp = await OTP.findOne({
-        email: email,
-        otp,
-        used: false,
-        expiresAt: { $lte: new Date() }
-      });
-
-      if (expiredOtp) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
         return res.status(400).json({
-          status: 'fail',
-          message: 'Verification code has expired. Please request a new one.'
+            status: 'fail',
+            message: 'Please enter a valid 6-digit OTP code'
         });
-      }
-
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid verification code. Please try again.'
-      });
     }
 
-    // Mark OTP as used
-    otpRecord.used = true;
-    await otpRecord.save();
+    try {
+        const { email, otp } = req.body;
+        const token = req.headers.authorization?.replace('Bearer ', '');
 
-    // Track if this is a signup or login
-    const isSignupOtp = otpRecord.type === 'signup';
-    const isLoginOtp = otpRecord.type === 'login';
-
-    // Update user verification status if this was for signup
-    let wasJustVerified = false;
-    if (isSignupOtp && !user.isVerified) {
-      user.isVerified = true;
-      wasJustVerified = true;
-      await user.save();
-    }
-
-    // Generate final JWT token
-    const finalToken = generateJWT(user._id);
-
-    // Update last login (only for login, not for signup)
-    if (isLoginOtp) {
-      user.lastLogin = new Date();
-      const deviceInfo = await getUserDeviceInfo(req);
-      user.loginHistory.push(deviceInfo);
-      await user.save();
-    } else if (wasJustVerified) {
-      // For signup, just update the user without adding to login history
-      await user.save();
-    }
-
-    // Set cookie
-    res.cookie('jwt', finalToken, {
-      expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    // =============================================
-    // ✅ SEND EMAILS ONLY ONCE - AFTER SUCCESSFUL OTP VERIFICATION
-    // =============================================
-    
-    const deviceInfoForEmail = await getUserDeviceInfo(req);
-    
-    // For SIGNUP: Send welcome email (only after OTP verification)
-    if (isSignupOtp && wasJustVerified) {
-      try {
-        await sendAutomatedEmail(user, 'welcome', {
-          name: user.firstName,
-          email: user.email
-        });
-        console.log(`📧 Welcome email sent to ${user.email} (after OTP verification)`);
-      } catch (emailError) {
-        console.error('Failed to send welcome email:', emailError);
-      }
-    }
-    
-    // For LOGIN: Send login success email (only after OTP verification)
-    if (isLoginOtp) {
-      try {
-        await sendAutomatedEmail(user, 'login_success', {
-          name: user.firstName,
-          device: deviceInfoForEmail.device || 'Unknown device',
-          location: deviceInfoForEmail.location || 'Unknown location',
-          ip: deviceInfoForEmail.ip || 'Unknown IP',
-          timestamp: new Date().toISOString()
-        });
-        console.log(`📧 Login success email sent to ${user.email} (after OTP verification)`);
-      } catch (emailError) {
-        console.error('Failed to send login success email:', emailError);
-      }
-    }
-
-    // =============================================
-    // UPDATE UserLog status from 'pending' to 'success'
-    // =============================================
-    await UserLog.findOneAndUpdate(
-      {
-        user: user._id,
-        action: isSignupOtp ? 'signup_attempt' : 'login_attempt',
-        status: 'pending',
-        'metadata.otpSent': true
-      },
-      {
-        $set: {
-          status: 'success',
-          'metadata.verifiedAt': new Date().toISOString(),
-          'metadata.verificationMethod': 'otp',
-          'metadata.otpType': otpRecord.type
+        if (!token) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Authentication required. Please try logging in again.'
+            });
         }
-      },
-      { sort: { createdAt: -1 } }
-    );
 
-    res.status(200).json({
-      status: 'success',
-      message: isSignupOtp 
-        ? 'Email verified successfully! Welcome to ₿itHash Capital!' 
-        : 'Login successful! Redirecting to dashboard...',
-      token: finalToken,
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          isVerified: user.isVerified,
-          hasGoogleAuth: !!user.googleId,
-          accountType: user.accountType
+        let decoded;
+        try {
+            decoded = verifyJWT(token);
+        } catch (err) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Session expired. Please try logging in again.'
+            });
         }
-      }
-    });
 
-    await logActivity('otp_verified', 'otp', otpRecord._id, user._id, 'User', req, {
-      type: otpRecord.type,
-      isGoogleUser: !!user.googleId,
-      emailUsed: email,
-      exactMatch: true
-    });
+        const user = await User.findById(decoded.id).select('-password');
 
-  } catch (err) {
-    console.error('Verify OTP error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during verification. Please try again.'
-    });
-  }
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        if (user.email !== email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email does not match user account'
+            });
+        }
+
+        const otpRecord = await OTP.findOne({
+            email: email,
+            otp,
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!otpRecord) {
+            await OTP.updateMany(
+                { email: email, otp, used: false },
+                { $inc: { attempts: 1 } }
+            );
+
+            const failedAttempts = await OTP.countDocuments({
+                email: email,
+                used: false,
+                createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+                attempts: { $gte: 5 }
+            });
+
+            if (failedAttempts >= 5) {
+                await User.findByIdAndUpdate(user._id, {
+                    status: 'suspended',
+                    suspensionLiftAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+                });
+
+                return res.status(429).json({
+                    status: 'fail',
+                    message: 'Too many failed attempts. Account suspended for 24 hours.'
+                });
+            }
+
+            const expiredOtp = await OTP.findOne({
+                email: email,
+                otp,
+                used: false,
+                expiresAt: { $lte: new Date() }
+            });
+
+            if (expiredOtp) {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'Verification code has expired. Please request a new one.'
+                });
+            }
+
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid verification code. Please try again.'
+            });
+        }
+
+        otpRecord.used = true;
+        await otpRecord.save();
+
+        const isSignupOtp = otpRecord.type === 'signup';
+        const isLoginOtp = otpRecord.type === 'login';
+
+        let wasJustVerified = false;
+        if (isSignupOtp && !user.isVerified) {
+            user.isVerified = true;
+            wasJustVerified = true;
+            await user.save();
+        }
+
+        const finalToken = generateJWT(user._id);
+
+        if (isLoginOtp) {
+            user.lastLogin = new Date();
+            const deviceInfo = await getUserDeviceInfo(req);
+            user.loginHistory.push(deviceInfo);
+            await user.save();
+        } else if (wasJustVerified) {
+            await user.save();
+        }
+
+        res.cookie('jwt', finalToken, {
+            expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict'
+        });
+
+        const deviceInfoForEmail = await getUserDeviceInfo(req);
+
+        if (isSignupOtp && wasJustVerified) {
+            try {
+                await sendAutomatedEmail(user, 'welcome', {
+                    name: user.firstName,
+                    email: user.email
+                });
+                console.log(`📧 Welcome email sent to ${user.email} (after OTP verification)`);
+            } catch (emailError) {
+                console.error('Failed to send welcome email:', emailError);
+            }
+        }
+
+        if (isLoginOtp) {
+            try {
+                await sendAutomatedEmail(user, 'login_success', {
+                    name: user.firstName,
+                    device: deviceInfoForEmail.device || 'Unknown device',
+                    location: deviceInfoForEmail.location || 'Unknown location',
+                    ip: deviceInfoForEmail.ip || 'Unknown IP',
+                    timestamp: new Date().toISOString()
+                });
+                console.log(`📧 Login success email sent to ${user.email} (after OTP verification)`);
+            } catch (emailError) {
+                console.error('Failed to send login success email:', emailError);
+            }
+        }
+
+        await UserLog.findOneAndUpdate(
+            {
+                user: user._id,
+                action: isSignupOtp ? 'signup_attempt' : 'login_attempt',
+                status: 'pending',
+                'metadata.otpSent': true
+            },
+            {
+                $set: {
+                    status: 'success',
+                    'metadata.verifiedAt': new Date().toISOString(),
+                    'metadata.verificationMethod': 'otp',
+                    'metadata.otpType': otpRecord.type
+                }
+            },
+            { sort: { createdAt: -1 } }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: isSignupOtp
+                ? 'Email verified successfully! Welcome to ₿itHash Capital!'
+                : 'Login successful! Redirecting to dashboard...',
+            token: finalToken,
+            data: {
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    isVerified: user.isVerified,
+                    hasGoogleAuth: !!user.googleId,
+                    accountType: user.accountType
+                }
+            }
+        });
+
+        await logActivity('otp_verified', 'otp', otpRecord._id, user._id, 'User', req, {
+            type: otpRecord.type,
+            isGoogleUser: !!user.googleId,
+            emailUsed: email,
+            exactMatch: true
+        });
+
+    } catch (err) {
+        console.error('Verify OTP error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'An error occurred during verification. Please try again.'
+        });
+    }
 });
 
 // Helper function for simple location
 async function getUserLocationSimple(req) {
-  try {
-    const ip = getRealClientIP(req);
-    const response = await axios.get(`https://ipapi.co/${ip}/json/`, { timeout: 3000 });
-    if (response.data && !response.data.error) {
-      return {
-        country: response.data.country_name || 'Unknown',
-        city: response.data.city || 'Unknown',
-        region: response.data.region || 'Unknown',
-        formatted: `${response.data.city || 'Unknown'}, ${response.data.region || 'Unknown'}, ${response.data.country_name || 'Unknown'}`
-      };
+    try {
+        const ip = getRealClientIP(req);
+        const response = await axios.get(`https://ipapi.co/${ip}/json/`, { timeout: 3000 });
+        if (response.data && !response.data.error) {
+            return {
+                country: response.data.country_name || 'Unknown',
+                city: response.data.city || 'Unknown',
+                region: response.data.region || 'Unknown',
+                formatted: `${response.data.city || 'Unknown'}, ${response.data.region || 'Unknown'}, ${response.data.country_name || 'Unknown'}`
+            };
+        }
+    } catch (err) {
+        // Silently fail
     }
-  } catch (err) {
-    // Silently fail
-  }
-  return { country: 'Unknown', city: 'Unknown', region: 'Unknown', formatted: 'Unknown' };
+    return { country: 'Unknown', city: 'Unknown', region: 'Unknown', formatted: 'Unknown' };
 }
-
-
 
 
 
