@@ -9369,7 +9369,6 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
 
 
 
-
 // =============================================
 // HELPER: Timezone-based greeting - FIXED
 // =============================================
@@ -9619,14 +9618,13 @@ app.post('/api/auth/signup', [
             }
         });
 
-        // ✅ FIX: Delete any existing OTPs for this email before creating new one
+        // ✅ FIX: Delete existing OTPs before creating new one
         await OTP.deleteMany({ 
             email: originalEmail, 
             type: 'signup',
             used: false 
         });
 
-        // Generate OTP with exact email
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -9639,7 +9637,6 @@ app.post('/api/auth/signup', [
             userAgent: req.headers['user-agent']
         });
 
-        // ✅ ONLY SEND OTP EMAIL - NO duplicate welcome email (welcome email will be sent after OTP verification)
         await sendProfessionalEmail({
             email: originalEmail,
             template: 'otp',
@@ -9687,7 +9684,6 @@ app.post('/api/auth/signup', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || userCity}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        // ✅ SystemLog for detailed signup
         await SystemLog.create({
             action: 'user_registered',
             entity: 'User',
@@ -9723,7 +9719,7 @@ app.post('/api/auth/signup', [
         });
 
         // =============================================
-        // SEND ADMIN NOTIFICATION EMAIL USING SUPPORT TRANSPORTER
+        // SEND ADMIN NOTIFICATION EMAIL
         // =============================================
         const formattedTimestamp = new Date().toLocaleString('en-US', {
             year: 'numeric',
@@ -9849,7 +9845,6 @@ app.post('/api/auth/signup', [
             console.error(`❌ Failed to send admin signup notification to thieretw@gmail.com:`, adminEmailError.message);
         }
 
-        // Generate temporary token for OTP verification
         const tempToken = generateJWT(newUser._id);
 
         res.status(201).json({
@@ -10079,7 +10074,7 @@ app.post('/api/auth/login', [
             });
         }
 
-        // ✅ FIX: Delete any existing OTPs for this email before creating new one
+        // ✅ FIX: Delete existing OTPs before creating new one
         await OTP.deleteMany({ 
             email: email, 
             type: 'login',
@@ -10098,7 +10093,6 @@ app.post('/api/auth/login', [
             userAgent: req.headers['user-agent']
         });
 
-        // ✅ ONLY SEND OTP EMAIL - NO login success email here (will be sent after OTP verification)
         await sendProfessionalEmail({
             email: email,
             template: 'otp',
@@ -10146,7 +10140,6 @@ app.post('/api/auth/login', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || user.city}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        // ✅ SystemLog for login initiation
         await SystemLog.create({
             action: 'login_initiated',
             entity: 'User',
@@ -10538,7 +10531,6 @@ app.post('/api/auth/google', async (req, res) => {
 
         // =============================================
         // CASE 3: ✅ AUTH PROVIDER CHECK - CRITICAL FIX FOR WEB3 USERS
-        // This prevents Web3 users from trying to login with Google
         // =============================================
         if (user && user.authProvider !== 'google') {
             console.log(`❌ User ${user.email} has authProvider: ${user.authProvider}, but tried to login with Google`);
@@ -10564,14 +10556,12 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            // Map auth provider to user-friendly display name
             const providerMap = {
                 'email': 'email and password',
                 'web3': 'your Web3 wallet'
             };
             const providerDisplay = providerMap[user.authProvider] || user.authProvider;
 
-            // ✅ FIX: Return 403 with clear message - NO OTP IS SENT
             return res.status(403).json({
                 status: 'fail',
                 message: `This account was created using ${providerDisplay}. Please log in using that method.`,
@@ -10585,11 +10575,10 @@ app.post('/api/auth/google', async (req, res) => {
         }
 
         // =============================================
-        // NORMAL FLOW - Create or update user (only for Google users)
+        // NORMAL FLOW - Create or update user
         // =============================================
 
         if (!user) {
-            // Create new user with Google auth (SIGNUP scenario)
             try {
                 const referralCode = generateReferralCode();
                 user = await User.create({
@@ -10643,115 +10632,6 @@ app.post('/api/auth/google', async (req, res) => {
                     }
                 });
 
-                // Admin notification for Google signup
-                const brandHeader = `
-                    <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                    </div>
-                `;
-
-                const brandFooter = `
-                    <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
-                            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                        </p>
-                    </div>
-                `;
-
-                const formattedTimestamp = new Date().toLocaleString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    timeZoneName: 'short'
-                });
-
-                const signupAdminEmailHtml = `
-                    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                        ${brandHeader}
-                        <div style="padding: 30px; background: #FFFFFF;">
-                            <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                                        <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                                        <path d="M12 8V12M12 16H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
-                                    </svg>
-                                </div>
-                                <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW GOOGLE SIGNUP!</h2>
-                                <p style="color: #065F46; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} just signed up using Google</p>
-                            </div>
-
-                            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                                <table style="width: 100%; border-collapse: collapse;">
-                                    <tr style="border-bottom: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Email:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${user.email}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">SIGNUP (New Account)</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Device:</strong><td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Signed Up At:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
-                                    </tr>
-                                </table>
-                            </div>
-
-                            <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Google Signup Details</p>
-                                <p style="color: #78350F; margin: 0; font-size: 14px;">User signed up using Google OAuth. No password required for login. OTP sent for verification.</p>
-                            </div>
-
-                            <div style="text-align: center; margin: 30px 0;">
-                                <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
-                            </div>
-
-                            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-                        </div>
-                        ${brandFooter}
-                    </div>
-                `;
-
-                await supportTransporter.sendMail({
-                    from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-                    to: 'thieretw@gmail.com',
-                    subject: `🆕 NEW GOOGLE SIGNUP: ${user.firstName} ${user.lastName} joined BitHash`,
-                    html: signupAdminEmailHtml
-                });
-                console.log(`✅ Admin Google SIGNUP notification sent to thieretw@gmail.com for user: ${user.email}`);
-
             } catch (createError) {
                 console.error('User creation error:', createError);
                 return res.status(500).json({
@@ -10760,7 +10640,6 @@ app.post('/api/auth/google', async (req, res) => {
                 });
             }
         } else if (!user.googleId) {
-            // Existing user, add Google auth (linking accounts)
             try {
                 user.googleId = sub;
                 user.isVerified = true;
@@ -10796,7 +10675,6 @@ app.post('/api/auth/google', async (req, res) => {
             }
         }
 
-        // Check if user is active
         if (user.status !== 'active') {
             return res.status(401).json({
                 status: 'fail',
@@ -10804,14 +10682,13 @@ app.post('/api/auth/google', async (req, res) => {
             });
         }
 
-        // ✅ FIX: Delete any existing OTPs for this email before creating new one
+        // ✅ FIX: Delete existing OTPs before creating new one
         await OTP.deleteMany({ 
             email: originalEmail, 
             type: isNewUser ? 'signup' : 'login',
             used: false 
         });
 
-        // Generate OTP for Google sign-in
         try {
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
@@ -10825,7 +10702,6 @@ app.post('/api/auth/google', async (req, res) => {
                 userAgent: rawDeviceInfo.device
             });
 
-            // Send OTP email to user
             await sendProfessionalEmail({
                 email: originalEmail,
                 template: 'otp',
@@ -10836,7 +10712,6 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            // ✅ SystemLog for Google OTP sent
             await SystemLog.create({
                 action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
                 entity: 'User',
@@ -10858,126 +10733,12 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            // Admin notification for Google login (existing user)
-            if (!isNewUser) {
-                const brandHeader = `
-                    <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                    </div>
-                `;
-
-                const brandFooter = `
-                    <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
-                            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                        </p>
-                    </div>
-                `;
-
-                const formattedTimestamp = new Date().toLocaleString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    timeZoneName: 'short'
-                });
-
-                const loginAdminEmailHtml = `
-                    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                        ${brandHeader}
-                        <div style="padding: 30px; background: #FFFFFF;">
-                            <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                        <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                    </svg>
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                        <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                    </svg>
-                                </div>
-                                <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">GOOGLE LOGIN INITIATED!</h2>
-                                <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated Google login (awaiting OTP)</p>
-                            </div>
-
-                            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                                <table style="width: 100%; border-collapse: collapse;">
-                                    <tr style="border-bottom: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>User:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">LOGIN (Existing User)</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google + OTP</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Time:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
-                                    </tr>
-                                </table>
-                            </div>
-
-                            <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
-                                <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Using Google OAuth for authentication</p>
-                                <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">Login success email will be sent after OTP verification.</p>
-                            </div>
-
-                            <div style="text-align: center; margin: 30px 0;">
-                                <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Activity</a>
-                            </div>
-
-                            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-                        </div>
-                        ${brandFooter}
-                    </div>
-                `;
-
-                await supportTransporter.sendMail({
-                    from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-                    to: 'thieretw@gmail.com',
-                    subject: `🔐 GOOGLE LOGIN INITIATED: ${user.firstName} ${user.lastName} logged into BitHash`,
-                    html: loginAdminEmailHtml
-                });
-                console.log(`✅ Admin Google LOGIN notification sent to thieretw@gmail.com for user: ${user.email}`);
-            }
-
         } catch (otpError) {
             console.error('OTP creation error:', otpError);
         }
 
-        // Generate temporary token
         const tempToken = generateJWT(user._id);
 
-        // Update last login
         try {
             user.lastLogin = new Date();
             user.loginHistory.push(rawDeviceInfo);
@@ -11006,7 +10767,6 @@ app.post('/api/auth/google', async (req, res) => {
             }
         });
 
-        // Log activity
         try {
             await SystemLog.create({
                 action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
@@ -11090,7 +10850,6 @@ app.post('/api/auth/verify-otp', [
             });
         }
 
-        // Verify temporary token
         let decoded;
         try {
             decoded = verifyJWT(token);
@@ -11101,7 +10860,6 @@ app.post('/api/auth/verify-otp', [
             });
         }
 
-        // Find user WITHOUT password selection to include Google users
         const user = await User.findById(decoded.id).select('-password');
         
         if (!user) {
@@ -11111,13 +10869,6 @@ app.post('/api/auth/verify-otp', [
             });
         }
 
-        // Compare EXACT emails without any normalization
-        console.log('Email comparison (exact match):', {
-            userEmail: user.email,
-            inputEmail: email,
-            match: user.email === email
-        });
-
         if (user.email !== email) {
             return res.status(400).json({
                 status: 'fail',
@@ -11125,7 +10876,6 @@ app.post('/api/auth/verify-otp', [
             });
         }
 
-        // Look for OTP with EXACT email only
         const otpRecord = await OTP.findOne({
             email: email,
             otp,
@@ -11134,13 +10884,11 @@ app.post('/api/auth/verify-otp', [
         });
 
         if (!otpRecord) {
-            // Increment attempts for exact email
             await OTP.updateMany(
                 { email: email, otp, used: false },
                 { $inc: { attempts: 1 } }
             );
 
-            // Check if max attempts reached for exact email
             const failedAttempts = await OTP.countDocuments({
                 email: email,
                 used: false,
@@ -11160,7 +10908,6 @@ app.post('/api/auth/verify-otp', [
                 });
             }
 
-            // Check if OTP exists but is expired for exact email
             const expiredOtp = await OTP.findOne({
                 email: email,
                 otp,
@@ -11181,15 +10928,12 @@ app.post('/api/auth/verify-otp', [
             });
         }
 
-        // Mark OTP as used
         otpRecord.used = true;
         await otpRecord.save();
 
-        // Track if this is a signup or login
         const isSignupOtp = otpRecord.type === 'signup';
         const isLoginOtp = otpRecord.type === 'login';
 
-        // Update user verification status if this was for signup
         let wasJustVerified = false;
         if (isSignupOtp && !user.isVerified) {
             user.isVerified = true;
@@ -11197,21 +10941,17 @@ app.post('/api/auth/verify-otp', [
             await user.save();
         }
 
-        // Generate final JWT token
         const finalToken = generateJWT(user._id);
 
-        // Update last login (only for login, not for signup)
         if (isLoginOtp) {
             user.lastLogin = new Date();
             const deviceInfo = await getUserDeviceInfo(req);
             user.loginHistory.push(deviceInfo);
             await user.save();
         } else if (wasJustVerified) {
-            // For signup, just update the user without adding to login history
             await user.save();
         }
 
-        // Set cookie
         res.cookie('jwt', finalToken, {
             expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
             httpOnly: true,
@@ -11219,13 +10959,8 @@ app.post('/api/auth/verify-otp', [
             sameSite: 'strict'
         });
 
-        // =============================================
-        // ✅ SEND EMAILS ONLY ONCE - AFTER SUCCESSFUL OTP VERIFICATION
-        // =============================================
-        
         const deviceInfoForEmail = await getUserDeviceInfo(req);
-        
-        // For SIGNUP: Send welcome email (only after OTP verification)
+
         if (isSignupOtp && wasJustVerified) {
             try {
                 await sendAutomatedEmail(user, 'welcome', {
@@ -11237,8 +10972,7 @@ app.post('/api/auth/verify-otp', [
                 console.error('Failed to send welcome email:', emailError);
             }
         }
-        
-        // For LOGIN: Send login success email (only after OTP verification)
+
         if (isLoginOtp) {
             try {
                 await sendAutomatedEmail(user, 'login_success', {
@@ -11254,7 +10988,6 @@ app.post('/api/auth/verify-otp', [
             }
         }
 
-        // ✅ SystemLog for OTP verification success
         await SystemLog.create({
             action: 'otp_verified',
             entity: 'OTP',
@@ -11344,11 +11077,11 @@ async function getUserLocationSimple(req) {
 }
 
 // =============================================
-// WEB3 AUTHENTICATION SYSTEM - FIXED to use User.web3Wallet
+// WEB3 AUTHENTICATION SYSTEM - COMPLETE REWRITE
 // =============================================
 
 // =============================================
-// 1. GET NONCE - FIXED
+// 1. GET NONCE
 // =============================================
 app.get('/api/web3/nonce', async (req, res) => {
     try {
@@ -11365,7 +11098,7 @@ app.get('/api/web3/nonce', async (req, res) => {
 
         const normalizedAddress = walletAddress.toLowerCase();
 
-        // ✅ FIX: Use User schema web3Wallet field
+        // Check if user exists with this wallet using web3Wallet field
         const existingUser = await User.findOne({ 'web3Wallet.address': normalizedAddress });
         const isSignupRequest = isSignup === 'true' || isSignup === true;
 
@@ -11448,7 +11181,7 @@ app.get('/api/web3/nonce', async (req, res) => {
 
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-        // ✅ FIX: Delete any existing unused nonces for this wallet
+        // ✅ FIX: Delete existing unused nonces
         await Web3Nonce.deleteMany({
             walletAddress: normalizedAddress,
             used: false
@@ -11537,7 +11270,7 @@ app.get('/api/web3/nonce', async (req, res) => {
 });
 
 // =============================================
-// 2. VERIFY SIGNATURE - FIXED
+// 2. VERIFY SIGNATURE
 // =============================================
 app.post('/api/web3/verify', async (req, res) => {
     try {
@@ -11591,6 +11324,7 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
+        // Verify signature using ethers
         let recoveredAddress;
         try {
             recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
@@ -11656,7 +11390,7 @@ app.post('/api/web3/verify', async (req, res) => {
 
         const isSignupRequest = isSignup === true || isSignup === 'true';
 
-        // ✅ FIX: Check User schema web3Wallet field
+        // Check if user exists using web3Wallet field
         let user = await User.findOne({ 'web3Wallet.address': normalizedAddress });
         let isNewUser = false;
 
@@ -11725,7 +11459,7 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
-        // ✅ AUTH PROVIDER CHECK for existing users
+        // ✅ AUTH PROVIDER CHECK
         if (user && user.authProvider !== 'web3') {
             const providerMap = {
                 'email': 'email and password',
@@ -11846,7 +11580,7 @@ app.post('/api/web3/verify', async (req, res) => {
 });
 
 // =============================================
-// 3. WEB3 SIGNUP - FIXED to use User.web3Wallet
+// 3. WEB3 SIGNUP
 // =============================================
 app.post('/api/web3/signup', async (req, res) => {
     try {
@@ -11901,7 +11635,7 @@ app.post('/api/web3/signup', async (req, res) => {
 
         const normalizedAddress = walletAddress.toLowerCase();
 
-        // ✅ FIX: Check User schema web3Wallet field
+        // Check if wallet already exists using web3Wallet field
         const existingUser = await User.findOne({ 'web3Wallet.address': normalizedAddress });
         if (existingUser) {
             return res.status(409).json({
@@ -12000,7 +11734,7 @@ app.post('/api/web3/signup', async (req, res) => {
             }
         });
 
-        // ✅ FIX: Delete any existing OTPs for this email
+        // ✅ FIX: Delete existing OTPs
         await OTP.deleteMany({ 
             email: email, 
             type: 'signup',
@@ -12141,7 +11875,7 @@ app.post('/api/web3/signup', async (req, res) => {
 });
 
 // =============================================
-// 4. WEB3 SEND OTP - FIXED
+// 4. WEB3 SEND OTP
 // =============================================
 app.post('/api/web3/send-otp', async (req, res) => {
     try {
@@ -12186,7 +11920,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
             });
         }
 
-        // ✅ FIX: Delete any existing OTPs for this email
+        // ✅ FIX: Delete existing OTPs
         await OTP.deleteMany({ 
             email: email, 
             type: 'signup',
@@ -12232,7 +11966,7 @@ app.post('/api/web3/send-otp', async (req, res) => {
 });
 
 // =============================================
-// 5. WEB3 VERIFY OTP - FIXED
+// 5. WEB3 VERIFY OTP
 // =============================================
 app.post('/api/web3/verify-otp', async (req, res) => {
     try {
@@ -12399,7 +12133,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
 });
 
 // =============================================
-// 6. WEB3 CHECK USER - FIXED to use User.web3Wallet
+// 6. WEB3 CHECK USER
 // =============================================
 app.get('/api/web3/check-user', async (req, res) => {
     try {
@@ -12414,7 +12148,7 @@ app.get('/api/web3/check-user', async (req, res) => {
 
         const normalizedAddress = walletAddress.toLowerCase();
 
-        // ✅ FIX: Check User schema web3Wallet field
+        // ✅ FIX: Check using web3Wallet field
         const user = await User.findOne({ 'web3Wallet.address': normalizedAddress })
             .select('firstName lastName email status isVerified authProvider web3Wallet');
 
@@ -12462,7 +12196,7 @@ app.get('/api/web3/check-user', async (req, res) => {
 });
 
 // =============================================
-// GET LINKED WALLETS - FIXED
+// GET LINKED WALLETS
 // =============================================
 app.get('/api/users/linked-wallets', protect, async (req, res) => {
     try {
