@@ -9367,6 +9367,9 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
 
 
 
+
+
+
 // =============================================
 // HELPER: Timezone-based greeting - FIXED
 // =============================================
@@ -9616,16 +9619,16 @@ app.post('/api/auth/signup', [
             }
         });
 
-        // Generate OTP with exact email
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
         // ✅ FIX: Delete any existing OTPs for this email before creating new one
         await OTP.deleteMany({ 
             email: originalEmail, 
             type: 'signup',
             used: false 
         });
+
+        // Generate OTP with exact email
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
         await OTP.create({
             email: originalEmail,
@@ -10076,15 +10079,15 @@ app.post('/api/auth/login', [
             });
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
         // ✅ FIX: Delete any existing OTPs for this email before creating new one
         await OTP.deleteMany({ 
             email: email, 
             type: 'login',
             used: false 
         });
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
         await OTP.create({
             email: email,
@@ -10801,17 +10804,17 @@ app.post('/api/auth/google', async (req, res) => {
             });
         }
 
+        // ✅ FIX: Delete any existing OTPs for this email before creating new one
+        await OTP.deleteMany({ 
+            email: originalEmail, 
+            type: isNewUser ? 'signup' : 'login',
+            used: false 
+        });
+
         // Generate OTP for Google sign-in
         try {
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-            // ✅ FIX: Delete any existing OTPs for this email before creating new one
-            await OTP.deleteMany({ 
-                email: originalEmail, 
-                type: isNewUser ? 'signup' : 'login',
-                used: false 
-            });
 
             await OTP.create({
                 email: originalEmail,
@@ -11341,8 +11344,7 @@ async function getUserLocationSimple(req) {
 }
 
 // =============================================
-// WEB3 AUTHENTICATION SYSTEM - COMPLETE REWRITE
-// USING ONLY User.web3Wallet FIELD
+// WEB3 AUTHENTICATION SYSTEM - FIXED to use User.web3Wallet
 // =============================================
 
 // =============================================
@@ -11351,6 +11353,8 @@ async function getUserLocationSimple(req) {
 app.get('/api/web3/nonce', async (req, res) => {
     try {
         const { walletAddress, type, isSignup, accountType, referralCode, timezoneOffset = 0 } = req.query;
+
+        console.log('🔑 Web3 nonce request:', { walletAddress, type, isSignup, timezoneOffset });
 
         if (!walletAddress) {
             return res.status(400).json({
@@ -11364,6 +11368,8 @@ app.get('/api/web3/nonce', async (req, res) => {
         // ✅ FIX: Use User schema web3Wallet field
         const existingUser = await User.findOne({ 'web3Wallet.address': normalizedAddress });
         const isSignupRequest = isSignup === 'true' || isSignup === true;
+
+        console.log('🔍 User found:', existingUser ? 'Yes' : 'No');
 
         if (isSignupRequest && existingUser) {
             const greeting = getGreetingByTimezone(parseInt(timezoneOffset) || 0);
@@ -11460,7 +11466,7 @@ app.get('/api/web3/nonce', async (req, res) => {
             metadata: {
                 accountType: accountType || 'individual',
                 referralCode: referralCode || null,
-                isSignup: isSignupRequest,  // ✅ This now works - isSignupRequest is defined above
+                isSignup: isSignupRequest,
                 pageSource: req.headers.referer?.includes('signup') ? 'signup' : 'login',
                 timezoneOffset: timezoneOffset
             }
@@ -11529,6 +11535,7 @@ app.get('/api/web3/nonce', async (req, res) => {
         });
     }
 });
+
 // =============================================
 // 2. VERIFY SIGNATURE - FIXED
 // =============================================
@@ -11544,6 +11551,8 @@ app.post('/api/web3/verify', async (req, res) => {
             referralCode,
             timezoneOffset = 0 
         } = req.body;
+
+        console.log('🔐 Web3 verify request:', { walletAddress, nonce, isSignup, timezoneOffset });
 
         if (!walletAddress || !signature || !nonce) {
             return res.status(400).json({
@@ -11585,8 +11594,8 @@ app.post('/api/web3/verify', async (req, res) => {
         let recoveredAddress;
         try {
             recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
-            console.log(`🔐 Recovered address: ${recoveredAddress}`);
-            console.log(`🔐 Expected address: ${normalizedAddress}`);
+            console.log(`🔐 Recovered: ${recoveredAddress}`);
+            console.log(`🔐 Expected: ${normalizedAddress}`);
         } catch (signErr) {
             console.error('Signature verification error:', signErr);
             
@@ -11716,7 +11725,7 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
-        // AUTH PROVIDER CHECK for existing users
+        // ✅ AUTH PROVIDER CHECK for existing users
         if (user && user.authProvider !== 'web3') {
             const providerMap = {
                 'email': 'email and password',
@@ -11755,7 +11764,7 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
-        // Generate temporary token        const tempToken = jwt.sign(
+        const tempToken = jwt.sign(
             { 
                 walletAddress: normalizedAddress, 
                 isSignup: isSignupRequest,
@@ -12529,11 +12538,6 @@ app.get('/api/users/linked-wallets', protect, async (req, res) => {
         });
     }
 });
-
-
-
-
-
 
 
 
