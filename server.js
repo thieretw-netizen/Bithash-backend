@@ -4365,9 +4365,12 @@ const SystemLogSchema = new mongoose.Schema({
       'balance', 'commission', 'downline', 'withdrawal_request', 'deposit_request',
       'kyc_document', 'kyc_verification', 'two_factor', 'password_reset', 'email',
       'websocket', 'cron_job', 'price_feed', 'market_data', 'order', 'trade',
-      'position', 'orderbook', 'ticker', 'candle','Web3Nonce',  'asset_info', 'pair_limit',
+      'position', 'orderbook', 'ticker', 'candle', 'asset_info', 'pair_limit',
       'user_preference', 'user_log', 'system_log', 'notification_preference',
-      'announcement', 'message', 'restriction', 'platform_revenue', 'commission_setting',  'OTP',  'User', 'AccountRestrictions', 'Transaction', 'DepositAddress'
+      'announcement', 'message', 'restriction', 'platform_revenue', 'commission_setting',
+      'otp', 'OTP', 'User', 'AccountRestrictions', 'Transaction', 'DepositAddress',
+      'Web3Nonce', 'Web3User', 'Web3Session', 'Web3Transaction', 'Web3WalletLinkRequest',
+      'Web3DepositAddress', 'Web3Log', 'Web3Settings', 'Web3Token', 'Web3BalanceHistory'
     ],
     index: true
   },
@@ -4376,17 +4379,22 @@ const SystemLogSchema = new mongoose.Schema({
     index: true
   },
   
-  // Who performed the action
+  // Who performed the action - FIXED: Use separate fields for User/Admin vs System
   performedBy: { 
     type: mongoose.Schema.Types.ObjectId, 
-    refPath: 'performedByModel',
+    ref: 'User',  // Always reference User model
+    index: true
+  },
+  performedByAdmin: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',  // Reference Admin model
     index: true
   },
   performedByModel: { 
-  type: String, 
-  enum: ['User', 'Admin', 'CronJob', 'Webhook', 'API'],  // 'System' removed
-  default: 'User'  // or 'Admin'
-},
+    type: String, 
+    enum: ['User', 'Admin', 'System'],
+    default: 'User'
+  },
   performedByEmail: { type: String, index: true },
   performedByName: { type: String },
   
@@ -4542,6 +4550,8 @@ const SystemLogSchema = new mongoose.Schema({
 
 SystemLogSchema.index({ createdAt: -1, action: 1 });
 SystemLogSchema.index({ performedBy: 1, createdAt: -1 });
+SystemLogSchema.index({ performedByAdmin: 1, createdAt: -1 });
+SystemLogSchema.index({ performedByModel: 1, createdAt: -1 });
 SystemLogSchema.index({ entity: 1, entityId: 1, createdAt: -1 });
 SystemLogSchema.index({ status: 1, createdAt: -1 });
 SystemLogSchema.index({ riskLevel: 1, createdAt: -1 });
@@ -4685,7 +4695,7 @@ SystemLogSchema.statics.findByAdmin = function(adminId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
   
-  let query = { performedBy: adminId, performedByModel: 'Admin' };
+  let query = { performedByAdmin: adminId, performedByModel: 'Admin' };
   if (action) query.action = action;
   
   return this.find(query)
@@ -4974,7 +4984,6 @@ SystemLogSchema.query.byPerformedBy = function(performedBy, model = null) {
 // =============================================
 
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
-
 
 
 
