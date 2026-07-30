@@ -24590,7 +24590,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       deviceInfo: log.deviceInfo
     }));
 
-    // Format SystemLog entries - Proper user mapping without populate
+    // Format SystemLog entries - Proper user mapping based on performedByModel
     const formattedSystemLogs = systemLogs.map(log => {
       // Extract location from SystemLog
       const locationString = log.location || 'Unknown';
@@ -24603,20 +24603,27 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         if (parts.length >= 3) country = parts[2];
       }
       
-      // Determine the user based on performedByModel and stored values
+      // Determine the user based on performedByModel from the database
+      let userType = 'System';
       let userName = 'System';
       let userEmail = 'system@bithash.com';
       let userId = null;
       
-      if (log.performedByModel === 'Admin') {
+      // Read performedByModel directly from the log document
+      const performedByModel = log.performedByModel || 'System';
+      
+      if (performedByModel === 'Admin') {
+        userType = 'Admin';
         userName = log.performedByName || 'Admin';
         userEmail = log.performedByEmail || 'admin@bithash.com';
         userId = log.performedBy || null;
-      } else if (log.performedByModel === 'User') {
+      } else if (performedByModel === 'User') {
+        userType = 'User';
         userName = log.performedByName || 'User';
         userEmail = log.performedByEmail || 'user@bithash.com';
         userId = log.performedBy || null;
       } else {
+        userType = 'System';
         userName = log.performedByName || 'System';
         userEmail = log.performedByEmail || 'system@bithash.com';
         userId = log.performedBy || null;
@@ -24632,7 +24639,8 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         user: {
           _id: userId,
           name: userName,
-          email: userEmail
+          email: userEmail,
+          type: userType  // Add the type from performedByModel
         },
         location: {
           city: city,
@@ -24729,7 +24737,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
       metadata: log.metadata || {}
     }));
 
-    // Format SystemLog entries - Proper user mapping without populate
+    // Format SystemLog entries - Proper user mapping based on performedByModel
     const formattedSystemLogs = systemLogs.map(log => {
       const locationString = log.location || 'Unknown';
       let city = 'Unknown', region = 'Unknown', country = 'Unknown';
@@ -24741,20 +24749,27 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         if (parts.length >= 3) country = parts[2];
       }
       
-      // Determine the user based on performedByModel and stored values
+      // Determine the user based on performedByModel from the database
+      let userType = 'System';
       let userName = 'System';
       let userEmail = 'system@bithash.com';
       let userId = null;
       
-      if (log.performedByModel === 'Admin') {
+      // Read performedByModel directly from the log document
+      const performedByModel = log.performedByModel || 'System';
+      
+      if (performedByModel === 'Admin') {
+        userType = 'Admin';
         userName = log.performedByName || 'Admin';
         userEmail = log.performedByEmail || 'admin@bithash.com';
         userId = log.performedBy || null;
-      } else if (log.performedByModel === 'User') {
+      } else if (performedByModel === 'User') {
+        userType = 'User';
         userName = log.performedByName || 'User';
         userEmail = log.performedByEmail || 'user@bithash.com';
         userId = log.performedBy || null;
       } else {
+        userType = 'System';
         userName = log.performedByName || 'System';
         userEmail = log.performedByEmail || 'system@bithash.com';
         userId = log.performedBy || null;
@@ -24770,7 +24785,8 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         user: {
           _id: userId,
           name: userName,
-          email: userEmail
+          email: userEmail,
+          type: userType  // Add the type from performedByModel
         },
         location: {
           city: city,
@@ -24818,7 +24834,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     });
   }
 });
-
 
 
 
