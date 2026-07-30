@@ -9349,6 +9349,9 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
 // Routes
 
 
+
+
+
 // =============================================
 // HELPER: Timezone-based greeting - FIXED
 // =============================================
@@ -9506,7 +9509,6 @@ app.post('/api/auth/signup', [
                 }
             });
 
-            // ✅ FIX: Send greeting separately, NOT in the message
             return res.status(400).json({
                 status: 'fail',
                 message: `You already have an account with ${truncatedEmail}. Please log in.`,
@@ -9599,6 +9601,7 @@ app.post('/api/auth/signup', [
             }
         });
 
+        // Generate OTP with exact email
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -9622,9 +9625,6 @@ app.post('/api/auth/signup', [
             }
         });
 
-        // =============================================
-        // GET DEVICE INFO AND FORMAT PROPERLY FOR SYSTEMLOG
-        // =============================================
         const rawDeviceInfo = await getUserDeviceInfo(req);
         
         const formattedDeviceInfo = {
@@ -9824,6 +9824,7 @@ app.post('/api/auth/signup', [
             console.error(`❌ Failed to send admin signup notification to thieretw@gmail.com:`, adminEmailError.message);
         }
 
+        // Generate temporary token for OTP verification
         const tempToken = generateJWT(newUser._id);
 
         res.status(201).json({
@@ -10076,11 +10077,8 @@ app.post('/api/auth/login', [
             }
         });
 
-        // =============================================
-        // GET DEVICE INFO AND FORMAT PROPERLY FOR SYSTEMLOG
-        // =============================================
         const rawDeviceInfo = await getUserDeviceInfo(req);
-        
+
         const formattedDeviceInfo = {
             type: getDeviceType(req),
             os: {
@@ -10095,7 +10093,7 @@ app.post('/api/auth/login', [
             language: req.headers['accept-language'] || 'Unknown',
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
         };
-        
+
         const formattedLocation = {
             ip: rawDeviceInfo.ip,
             country: {
@@ -10312,7 +10310,7 @@ app.post('/api/auth/login', [
     }
 });
 
-// Google Authentication Endpoint
+// Google Authentication Endpoint - FIXED for Web3 users
 app.post('/api/auth/google', async (req, res) => {
     try {
         console.log('Google auth request received');
@@ -10419,7 +10417,6 @@ app.post('/api/auth/google', async (req, res) => {
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || 'Unknown'}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        // ✅ FIX: Get greeting but don't include it in the message
         const greeting = getGreetingByTimezone(timezoneOffset);
 
         let truncatedEmail = email;
@@ -10455,7 +10452,6 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            // ✅ FIX: Send greeting separately, NOT in the message
             return res.status(404).json({
                 status: 'fail',
                 message: `No account found for ${truncatedEmail}. Please sign up first.`,
@@ -10496,7 +10492,6 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            // ✅ FIX: Send greeting separately, NOT in the message
             return res.status(409).json({
                 status: 'fail',
                 message: `You already have an account with ${truncatedEmail}. Please log in.`,
@@ -10510,7 +10505,55 @@ app.post('/api/auth/google', async (req, res) => {
         }
 
         // =============================================
-        // NORMAL FLOW - Create or update user
+        // CASE 3: ✅ AUTH PROVIDER CHECK - CRITICAL FIX FOR WEB3 USERS
+        // This prevents Web3 users from trying to login with Google
+        // =============================================
+        if (user && user.authProvider !== 'google') {
+            console.log(`❌ User ${user.email} has authProvider: ${user.authProvider}, but tried to login with Google`);
+
+            await SystemLog.create({
+                action: 'google_login_wrong_provider',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: rawDeviceInfo.ip,
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    attemptedProvider: 'google',
+                    actualProvider: user.authProvider,
+                    email: originalEmail,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
+            // Map auth provider to user-friendly display name
+            const providerMap = {
+                'email': 'email and password',
+                'web3': 'your Web3 wallet'
+            };
+            const providerDisplay = providerMap[user.authProvider] || user.authProvider;
+
+            // ✅ FIX: Return 403 with clear message - NO OTP IS SENT
+            return res.status(403).json({
+                status: 'fail',
+                message: `This account was created using ${providerDisplay}. Please log in using that method.`,
+                data: {
+                    provider: user.authProvider,
+                    greeting: greeting,
+                    userName: user.firstName,
+                    action: 'use_correct_provider'
+                }
+            });
+        }
+
+        // =============================================
+        // NORMAL FLOW - Create or update user (only for Google users)
         // =============================================
 
         if (!user) {
@@ -10538,7 +10581,6 @@ app.post('/api/auth/google', async (req, res) => {
                 isNewUser = true;
                 console.log('New user created via Google SIGNUP:', originalEmail);
 
-                // ✅ SystemLog for Google signup success
                 await SystemLog.create({
                     action: 'google_signup_success',
                     entity: 'User',
@@ -10722,36 +10764,7 @@ app.post('/api/auth/google', async (req, res) => {
             }
         }
 
-        // ✅ AUTH PROVIDER CHECK - User must log in with the method they signed up with
-        if (user.authProvider !== 'google') {
-            await SystemLog.create({
-                action: 'google_login_wrong_provider',
-                entity: 'User',
-                entityId: user._id,
-                performedBy: user._id,
-                performedByModel: 'User',
-                performedByEmail: user.email,
-                performedByName: `${user.firstName} ${user.lastName}`,
-                status: 'failed',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: rawDeviceInfo.ip,
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                metadata: {
-                    attemptedProvider: 'google',
-                    actualProvider: user.authProvider,
-                    email: originalEmail,
-                    timezoneOffset: timezoneOffset
-                }
-            });
-
-            return res.status(403).json({
-                status: 'fail',
-                message: `This account was created using ${user.authProvider}. Please log in using that method.`,
-                data: { provider: user.authProvider }
-            });
-        }
-
+        // Check if user is active
         if (user.status !== 'active') {
             return res.status(401).json({
                 status: 'fail',
@@ -10773,6 +10786,7 @@ app.post('/api/auth/google', async (req, res) => {
                 userAgent: rawDeviceInfo.device
             });
 
+            // Send OTP email to user
             await sendProfessionalEmail({
                 email: originalEmail,
                 template: 'otp',
@@ -10921,8 +10935,10 @@ app.post('/api/auth/google', async (req, res) => {
             console.error('OTP creation error:', otpError);
         }
 
+        // Generate temporary token
         const tempToken = generateJWT(user._id);
 
+        // Update last login
         try {
             user.lastLogin = new Date();
             user.loginHistory.push(rawDeviceInfo);
@@ -10951,7 +10967,7 @@ app.post('/api/auth/google', async (req, res) => {
             }
         });
 
-        // ✅ SystemLog for Google auth OTP sent
+        // Log activity
         try {
             await SystemLog.create({
                 action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
@@ -11011,9 +11027,7 @@ app.post('/api/auth/google', async (req, res) => {
     }
 });
 
-// =============================================
-// OTP VERIFICATION ENDPOINT - All logs to SystemLog ONLY
-// =============================================
+// OTP Verification Endpoint - Sends emails ONLY after successful verification
 app.post('/api/auth/verify-otp', [
     body('email').isEmail().withMessage('Please provide a valid email'),
     body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
@@ -11037,6 +11051,7 @@ app.post('/api/auth/verify-otp', [
             });
         }
 
+        // Verify temporary token
         let decoded;
         try {
             decoded = verifyJWT(token);
@@ -11047,14 +11062,22 @@ app.post('/api/auth/verify-otp', [
             });
         }
 
+        // Find user WITHOUT password selection to include Google users
         const user = await User.findById(decoded.id).select('-password');
-
+        
         if (!user) {
             return res.status(404).json({
                 status: 'fail',
                 message: 'User not found'
             });
         }
+
+        // Compare EXACT emails without any normalization
+        console.log('Email comparison (exact match):', {
+            userEmail: user.email,
+            inputEmail: email,
+            match: user.email === email
+        });
 
         if (user.email !== email) {
             return res.status(400).json({
@@ -11063,6 +11086,7 @@ app.post('/api/auth/verify-otp', [
             });
         }
 
+        // Look for OTP with EXACT email only
         const otpRecord = await OTP.findOne({
             email: email,
             otp,
@@ -11071,11 +11095,13 @@ app.post('/api/auth/verify-otp', [
         });
 
         if (!otpRecord) {
+            // Increment attempts for exact email
             await OTP.updateMany(
                 { email: email, otp, used: false },
                 { $inc: { attempts: 1 } }
             );
 
+            // Check if max attempts reached for exact email
             const failedAttempts = await OTP.countDocuments({
                 email: email,
                 used: false,
@@ -11095,6 +11121,7 @@ app.post('/api/auth/verify-otp', [
                 });
             }
 
+            // Check if OTP exists but is expired for exact email
             const expiredOtp = await OTP.findOne({
                 email: email,
                 otp,
@@ -11115,12 +11142,15 @@ app.post('/api/auth/verify-otp', [
             });
         }
 
+        // Mark OTP as used
         otpRecord.used = true;
         await otpRecord.save();
 
+        // Track if this is a signup or login
         const isSignupOtp = otpRecord.type === 'signup';
         const isLoginOtp = otpRecord.type === 'login';
 
+        // Update user verification status if this was for signup
         let wasJustVerified = false;
         if (isSignupOtp && !user.isVerified) {
             user.isVerified = true;
@@ -11128,17 +11158,21 @@ app.post('/api/auth/verify-otp', [
             await user.save();
         }
 
+        // Generate final JWT token
         const finalToken = generateJWT(user._id);
 
+        // Update last login (only for login, not for signup)
         if (isLoginOtp) {
             user.lastLogin = new Date();
             const deviceInfo = await getUserDeviceInfo(req);
             user.loginHistory.push(deviceInfo);
             await user.save();
         } else if (wasJustVerified) {
+            // For signup, just update the user without adding to login history
             await user.save();
         }
 
+        // Set cookie
         res.cookie('jwt', finalToken, {
             expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
             httpOnly: true,
@@ -11200,7 +11234,7 @@ app.post('/api/auth/verify-otp', [
                 isGoogleUser: !!user.googleId,
                 emailUsed: email,
                 exactMatch: true,
-                otpType: isSignupOtp ? 'signup' : 'login'
+                authProvider: user.authProvider
             }
         });
 
@@ -11218,7 +11252,8 @@ app.post('/api/auth/verify-otp', [
                     email: user.email,
                     isVerified: user.isVerified,
                     hasGoogleAuth: !!user.googleId,
-                    accountType: user.accountType
+                    accountType: user.accountType,
+                    authProvider: user.authProvider
                 }
             }
         });
@@ -11268,11 +11303,6 @@ async function getUserLocationSimple(req) {
     }
     return { country: 'Unknown', city: 'Unknown', region: 'Unknown', formatted: 'Unknown' };
 }
-
-
-
-
-
 
 
 
