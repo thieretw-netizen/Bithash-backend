@@ -24557,7 +24557,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         .sort({ createdAt: -1 })
         .lean(),
       SystemLog.find({})
-        .populate('performedBy', 'firstName lastName email')
         .sort({ createdAt: -1 })
         .lean()
     ]);
@@ -24591,7 +24590,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       deviceInfo: log.deviceInfo
     }));
 
-    // Format SystemLog entries - FIXED: Proper user mapping
+    // Format SystemLog entries - Proper user mapping without populate
     const formattedSystemLogs = systemLogs.map(log => {
       // Extract location from SystemLog
       const locationString = log.location || 'Unknown';
@@ -24604,35 +24603,23 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         if (parts.length >= 3) country = parts[2];
       }
       
-      // Determine the user based on performedByModel
+      // Determine the user based on performedByModel and stored values
       let userName = 'System';
       let userEmail = 'system@bithash.com';
       let userId = null;
       
-      if (log.performedBy) {
-        // performedBy is populated from the database
-        userId = log.performedBy._id;
-        
-        if (log.performedByModel === 'Admin') {
-          // This is an admin user
-          userName = log.performedBy.name || log.performedByName || 'Admin';
-          userEmail = log.performedBy.email || log.performedByEmail || 'admin@bithash.com';
-        } else if (log.performedByModel === 'User') {
-          // This is a regular user
-          userName = `${log.performedBy.firstName || ''} ${log.performedBy.lastName || ''}`.trim() || 
-                     log.performedByName || 
-                     log.performedByEmail?.split('@')[0] || 
-                     'User';
-          userEmail = log.performedBy.email || log.performedByEmail || 'user@bithash.com';
-        } else {
-          // Fallback to stored values
-          userName = log.performedByName || 'Unknown User';
-          userEmail = log.performedByEmail || 'unknown@bithash.com';
-        }
-      } else if (log.performedByName) {
-        // No populated performedBy, but we have stored name
-        userName = log.performedByName;
-        userEmail = log.performedByEmail || `${log.performedByName.toLowerCase().replace(/\s/g, '')}@bithash.com`;
+      if (log.performedByModel === 'Admin') {
+        userName = log.performedByName || 'Admin';
+        userEmail = log.performedByEmail || 'admin@bithash.com';
+        userId = log.performedBy || null;
+      } else if (log.performedByModel === 'User') {
+        userName = log.performedByName || 'User';
+        userEmail = log.performedByEmail || 'user@bithash.com';
+        userId = log.performedBy || null;
+      } else {
+        userName = log.performedByName || 'System';
+        userEmail = log.performedByEmail || 'system@bithash.com';
+        userId = log.performedBy || null;
       }
       
       return {
@@ -24715,7 +24702,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         .limit(limit)
         .lean(),
       SystemLog.find({ createdAt: { $gt: since } })
-        .populate('performedBy', 'firstName lastName email')
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean()
@@ -24743,7 +24729,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
       metadata: log.metadata || {}
     }));
 
-    // Format SystemLog entries - FIXED: Proper user mapping
+    // Format SystemLog entries - Proper user mapping without populate
     const formattedSystemLogs = systemLogs.map(log => {
       const locationString = log.location || 'Unknown';
       let city = 'Unknown', region = 'Unknown', country = 'Unknown';
@@ -24755,30 +24741,23 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         if (parts.length >= 3) country = parts[2];
       }
       
-      // Determine the user based on performedByModel
+      // Determine the user based on performedByModel and stored values
       let userName = 'System';
       let userEmail = 'system@bithash.com';
       let userId = null;
       
-      if (log.performedBy) {
-        userId = log.performedBy._id;
-        
-        if (log.performedByModel === 'Admin') {
-          userName = log.performedBy.name || log.performedByName || 'Admin';
-          userEmail = log.performedBy.email || log.performedByEmail || 'admin@bithash.com';
-        } else if (log.performedByModel === 'User') {
-          userName = `${log.performedBy.firstName || ''} ${log.performedBy.lastName || ''}`.trim() || 
-                     log.performedByName || 
-                     log.performedByEmail?.split('@')[0] || 
-                     'User';
-          userEmail = log.performedBy.email || log.performedByEmail || 'user@bithash.com';
-        } else {
-          userName = log.performedByName || 'Unknown User';
-          userEmail = log.performedByEmail || 'unknown@bithash.com';
-        }
-      } else if (log.performedByName) {
-        userName = log.performedByName;
-        userEmail = log.performedByEmail || `${log.performedByName.toLowerCase().replace(/\s/g, '')}@bithash.com`;
+      if (log.performedByModel === 'Admin') {
+        userName = log.performedByName || 'Admin';
+        userEmail = log.performedByEmail || 'admin@bithash.com';
+        userId = log.performedBy || null;
+      } else if (log.performedByModel === 'User') {
+        userName = log.performedByName || 'User';
+        userEmail = log.performedByEmail || 'user@bithash.com';
+        userId = log.performedBy || null;
+      } else {
+        userName = log.performedByName || 'System';
+        userEmail = log.performedByEmail || 'system@bithash.com';
+        userId = log.performedBy || null;
       }
       
       return {
