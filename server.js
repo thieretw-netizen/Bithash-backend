@@ -35427,7 +35427,1114 @@ console.log('   - GET /api/admin/wallet/* (admin endpoints)');
 
 
 
+// =============================================
+// WALLET DASHBOARD - REAL BLOCKCHAIN DATA
+// GET /api/admin/wallet/dashboard
+// =============================================
+app.get('/api/admin/wallet/dashboard', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const startTime = Date.now();
+        
+        // =============================================
+        // 1. GET TOTAL WALLET ADDRESSES FROM DATABASE
+        // =============================================
+        const totalAddresses = await DepositAddress.countDocuments({ isActive: true });
+        const activeAddresses = await DepositAddress.countDocuments({ 
+            isActive: true,
+            lastUsedAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // Last 30 days
+        });
+        
+        // =============================================
+        // 2. GET UNIQUE USERS WITH WALLETS
+        // =============================================
+        const totalUsersWithWallets = await DepositAddress.distinct('userId').then(users => users.length);
+        
+        // =============================================
+        // 3. GET TODAY'S TRANSACTIONS FROM BLOCKCHAIN
+        // =============================================
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        // Get recent deposits from database that are pending or completed today
+        const todayDeposits = await Transaction.find({
+            type: 'deposit',
+            createdAt: { $gte: today },
+            status: { $in: ['pending', 'completed'] }
+        });
+        
+        const totalDepositsToday = todayDeposits.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+        const depositCount = todayDeposits.length;
+        
+        // Get today's withdrawals
+        const todayWithdrawals = await Transaction.find({
+            type: 'withdrawal',
+            createdAt: { $gte: today },
+            status: { $in: ['pending', 'completed'] }
+        });
+        
+        const totalWithdrawalsToday = todayWithdrawals.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+        const withdrawalCount = todayWithdrawals.length;
+        
+        // =============================================
+        // 4. GET ALL-TIME CRYPTO RECEIVED/SENT
+        // =============================================
+        const allDeposits = await Transaction.find({
+            type: 'deposit',
+            status: 'completed'
+        });
+        
+        const totalCryptoReceived = allDeposits.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+        
+        const allWithdrawals = await Transaction.find({
+            type: 'withdrawal',
+            status: 'completed'
+        });
+        
+        const totalCryptoSent = allWithdrawals.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+        
+        // =============================================
+        // 5. CALCULATE ASSETS UNDER MANAGEMENT (Real-time blockchain balances)
+        // =============================================
+        let assetsUnderManagement = 0;
+        const assetBalances = {};
+        
+        // Get all unique assets from deposit addresses
+        const uniqueAssets = await DepositAddress.distinct('asset');
+        
+        for (const asset of uniqueAssets) {
+            // Get all addresses for this asset
+            const addresses = await DepositAddress.find({ 
+                asset: asset, 
+                isActive: true 
+            }).select('address');
+            
+            if (addresses.length === 0) continue;
+            
+            // Fetch real-time balance from blockchain for each address
+            let totalAssetBalance = 0;
+            const batchSize = 50;
+            
+            for (let i = 0; i < addresses.length; i += batchSize) {
+                const batch = addresses.slice(i, i + batchSize);
+                const batchPromises = batch.map(async (addr) => {
+                    try {
+                        const balance = await getBlockchainBalance(addr.address, asset);
+                        return balance;
+                    } catch (err) {
+                        console.error(`Failed to get balance for ${addr.address}:`, err.message);
+                        return 0;
+                    }
+                });
+                
+                const batchResults = await Promise.all(batchPromises);
+                totalAssetBalance += batchResults.reduce((sum, bal) => sum + bal, 0);
+            }
+            
+            // Get current price
+            const price = await getCryptoPrice(asset);
+            const usdValue = totalAssetBalance * (price || 0);
+            
+            assetBalances[asset] = {
+                balance: totalAssetBalance,
+                usdValue: usdValue,
+                price: price || 0
+            };
+            
+            assetsUnderManagement += usdValue;
+        }
+        
+        // =============================================
+        // 6. GET PENDING AND FAILED TRANSACTIONS
+        // =============================================
+        const pendingTransactions = await Transaction.countDocuments({
+            status: 'pending',
+            type: { $in: ['deposit', 'withdrawal'] }
+        });
+        
+        const failedTransactions = await Transaction.countDocuments({
+            status: 'failed',
+            type: { $in: ['deposit', 'withdrawal'] },
+            createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+        });
+        
+        // =============================================
+        // 7. GET ACTIVE NETWORKS
+        // =============================================
+        const activeNetworks = await DepositAddress.distinct('asset').then(assets => assets.length);
+        
+        // =============================================
+        // 8. GET INCOMING/OUTGOING DATA (Last 24 hours)
+        // =============================================
+        const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        
+        const incomingTx = await Transaction.find({
+            type: 'deposit',
+            status: 'completed',
+            createdAt: { $gte: last24h }
+        });
+        
+        const outgoingTx = await Transaction.find({
+            type: 'withdrawal',
+            status: 'completed',
+            createdAt: { $gte: last24h }
+        });
+        
+        const incomingTotal = incomingTx.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+        const outgoingTotal = outgoingTx.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+        
+        // =============================================
+        // 9. GET DEPOSITS PER HOUR (Last 24 hours)
+        // =============================================
+        const depositsPerHour = new Array(24).fill(0);
+        for (const tx of incomingTx) {
+            const hour = new Date(tx.createdAt).getHours();
+            depositsPerHour[hour] += tx.amount || 0;
+        }
+        
+        // =============================================
+        // 10. GET DEPOSITS PER DAY (Last 7 days)
+        // =============================================
+        const depositsPerDay = [];
+        for (let i = 6; i >= 0; i--) {
+            const day = new Date();
+            day.setDate(day.getDate() - i);
+            day.setHours(0, 0, 0, 0);
+            
+            const nextDay = new Date(day);
+            nextDay.setDate(nextDay.getDate() + 1);
+            
+            const dayTx = await Transaction.find({
+                type: 'deposit',
+                status: 'completed',
+                createdAt: { $gte: day, $lt: nextDay }
+            });
+            
+            depositsPerDay.push(dayTx.reduce((sum, tx) => sum + (tx.amount || 0), 0));
+        }
+        
+        // =============================================
+        // 11. GET NETWORK DISTRIBUTION
+        // =============================================
+        const networkDistribution = {};
+        const networkAddresses = await DepositAddress.find({ isActive: true });
+        for (const addr of networkAddresses) {
+            const network = addr.asset || 'unknown';
+            networkDistribution[network] = (networkDistribution[network] || 0) + 1;
+        }
+        
+        // =============================================
+        // 12. GET ASSET DISTRIBUTION
+        // =============================================
+        const assetDistribution = {};
+        for (const [asset, data] of Object.entries(assetBalances)) {
+            assetDistribution[asset] = data.usdValue;
+        }
+        
+        // =============================================
+        // 13. GET LARGEST DEPOSITS (Last 30 days)
+        // =============================================
+        const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const largestDeposits = await Transaction.find({
+            type: 'deposit',
+            status: 'completed',
+            createdAt: { $gte: last30Days }
+        })
+        .sort({ amount: -1 })
+        .limit(10)
+        .select('amount');
+        
+        const largestDepositAmounts = largestDeposits.map(tx => tx.amount || 0);
+        
+        // =============================================
+        // 14. GET RECENT ACTIVITY
+        // =============================================
+        const recentActivity = [];
+        
+        // Get recent deposits
+        const recentDeposits = await Transaction.find({
+            type: 'deposit',
+            status: { $in: ['pending', 'completed'] }
+        })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .populate('user', 'firstName lastName email');
+        
+        for (const tx of recentDeposits) {
+            recentActivity.push({
+                type: 'deposit',
+                title: `Deposit from ${tx.user?.firstName || 'User'}`,
+                description: `${tx.amount || 0} ${tx.asset || 'USD'}`,
+                details: `Transaction: ${tx.reference || 'N/A'}`,
+                timestamp: tx.createdAt,
+                status: tx.status
+            });
+        }
+        
+        // Get recent withdrawals
+        const recentWithdrawals = await Transaction.find({
+            type: 'withdrawal',
+            status: { $in: ['pending', 'completed'] }
+        })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .populate('user', 'firstName lastName email');
+        
+        for (const tx of recentWithdrawals) {
+            recentActivity.push({
+                type: 'withdrawal',
+                title: `Withdrawal by ${tx.user?.firstName || 'User'}`,
+                description: `${tx.amount || 0} ${tx.asset || 'USD'}`,
+                details: `To: ${tx.btcAddress || 'External Wallet'}`,
+                timestamp: tx.createdAt,
+                status: tx.status
+            });
+        }
+        
+        // Sort recent activity by timestamp
+        recentActivity.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        const topRecentActivity = recentActivity.slice(0, 20);
+        
+        // =============================================
+        // 15. GET LAST SYNC TIME
+        // =============================================
+        const lastSyncTime = await redis.get('wallet:last_sync') || new Date().toISOString();
+        
+        // =============================================
+        // 16. BUILD RESPONSE
+        // =============================================
+        const responseData = {
+            totalAddresses: totalAddresses,
+            activeAddresses: activeAddresses,
+            totalUsersWithWallets: totalUsersWithWallets,
+            totalDepositsToday: totalDepositsToday,
+            depositCount: depositCount,
+            totalWithdrawalsToday: totalWithdrawalsToday,
+            withdrawalCount: withdrawalCount,
+            totalCryptoReceived: totalCryptoReceived,
+            totalCryptoSent: totalCryptoSent,
+            assetsUnderManagement: assetsUnderManagement,
+            pendingTransactions: pendingTransactions,
+            failedTransactions: failedTransactions,
+            activeNetworks: activeNetworks,
+            lastSyncTime: lastSyncTime,
+            incomingOutgoing: {
+                incoming: incomingTotal,
+                outgoing: outgoingTotal
+            },
+            depositsPerHour: depositsPerHour,
+            depositsPerDay: depositsPerDay,
+            networkDistribution: networkDistribution,
+            assetDistribution: assetDistribution,
+            largestDeposits: largestDepositAmounts,
+            assetBalances: assetBalances,
+            recentActivity: topRecentActivity,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Cache the dashboard data
+        await redis.setex('wallet:dashboard', 60, JSON.stringify(responseData));
+        
+        res.status(200).json({
+            status: 'success',
+            data: responseData
+        });
+        
+    } catch (err) {
+        console.error('Wallet dashboard error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to load wallet dashboard'
+        });
+    }
+});
 
+// =============================================
+// HELPER: Get blockchain balance for any asset
+// =============================================
+async function getBlockchainBalance(address, asset) {
+    const assetUpper = asset.toUpperCase();
+    
+    try {
+        // Check cache first
+        const cacheKey = `balance:${assetUpper}:${address}`;
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+            return parseFloat(cached);
+        }
+        
+        let balance = 0;
+        const config = ASSET_NETWORK_MAP[assetUpper];
+        
+        if (!config) {
+            console.warn(`No config found for asset: ${assetUpper}`);
+            return 0;
+        }
+        
+        switch (config.type) {
+            case 'evm': {
+                // EVM balance (ETH, BNB, MATIC, etc.)
+                const provider = new ethers.JsonRpcProvider(config.rpc);
+                const balanceWei = await provider.getBalance(address);
+                balance = parseFloat(ethers.formatEther(balanceWei));
+                break;
+            }
+            
+            case 'utxo': {
+                // UTXO balance (BTC, DOGE, LTC)
+                // Using Blockchair API
+                const explorerMap = {
+                    'BTC': 'https://api.blockchair.com/bitcoin',
+                    'DOGE': 'https://api.blockchair.com/dogecoin',
+                    'LTC': 'https://api.blockchair.com/litecoin'
+                };
+                
+                const baseUrl = explorerMap[assetUpper];
+                if (baseUrl) {
+                    const response = await axios.get(`${baseUrl}/dashboards/address/${address}`, {
+                        timeout: 10000
+                    });
+                    
+                    if (response.data && response.data.data && response.data.data[address]) {
+                        const addrData = response.data.data[address];
+                        balance = addrData.balance / 1e8; // Convert satoshis to BTC
+                    }
+                }
+                break;
+            }
+            
+            case 'solana': {
+                // Solana balance
+                const connection = new Connection(config.rpc);
+                const publicKey = new PublicKey(address);
+                const balanceLamports = await connection.getBalance(publicKey);
+                balance = balanceLamports / 1e9; // Convert lamports to SOL
+                break;
+            }
+            
+            case 'tron': {
+                // TRON balance
+                const tronWeb = new TronWeb({ fullHost: config.rpc });
+                const account = await tronWeb.trx.getAccount(address);
+                if (account && account.balance) {
+                    balance = account.balance / 1e6; // Convert SUN to TRX
+                }
+                break;
+            }
+            
+            case 'xrp': {
+                // XRP balance
+                const client = new xrpl.Client(config.rpc);
+                await client.connect();
+                const accountInfo = await client.request({
+                    command: 'account_info',
+                    account: address
+                });
+                await client.disconnect();
+                
+                if (accountInfo && accountInfo.result && accountInfo.result.account_data) {
+                    balance = accountInfo.result.account_data.Balance / 1e6; // Convert drops to XRP
+                }
+                break;
+            }
+            
+            case 'cardano': {
+                // Cardano ADA balance (using Blockfrost API)
+                const blockfrostKey = process.env.BLOCKFROST_API_KEY;
+                if (blockfrostKey) {
+                    const response = await axios.get(
+                        `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}`,
+                        {
+                            headers: { 'project_id': blockfrostKey },
+                            timeout: 10000
+                        }
+                    );
+                    
+                    if (response.data && response.data.amount) {
+                        const adaAsset = response.data.amount.find(a => a.unit === 'lovelace');
+                        if (adaAsset) {
+                            balance = parseFloat(adaAsset.quantity) / 1e6;
+                        }
+                    }
+                }
+                break;
+            }
+            
+            case 'polkadot': {
+                // Polkadot DOT balance
+                const provider = new WsProvider(config.rpc);
+                const api = await ApiPromise.create({ provider });
+                
+                const accountInfo = await api.query.system.account(address);
+                const balanceData = accountInfo.data;
+                balance = parseFloat(balanceData.free.toString()) / 1e10; // Convert Planck to DOT
+                
+                await api.disconnect();
+                break;
+            }
+            
+            default:
+                console.warn(`Unsupported asset type for balance check: ${config.type}`);
+                return 0;
+        }
+        
+        // Cache the balance for 5 minutes
+        await redis.setex(cacheKey, 300, balance.toString());
+        
+        return balance;
+        
+    } catch (err) {
+        console.error(`Error fetching balance for ${asset} ${address}:`, err.message);
+        return 0;
+    }
+}
+
+// =============================================
+// PENDING TRANSACTIONS COUNT
+// GET /api/admin/wallet/pending-count
+// =============================================
+app.get('/api/admin/wallet/pending-count', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        // Get pending deposits
+        const pendingDeposits = await Transaction.countDocuments({
+            type: 'deposit',
+            status: 'pending'
+        });
+        
+        // Get pending withdrawals
+        const pendingWithdrawals = await Transaction.countDocuments({
+            type: 'withdrawal',
+            status: 'pending'
+        });
+        
+        // Get pending transfers (if any)
+        const pendingTransfers = await Transaction.countDocuments({
+            type: 'transfer',
+            status: 'pending'
+        });
+        
+        // Get pending gas fee deposits
+        const pendingGasFees = await DepositAsset.countDocuments({
+            status: 'pending',
+            'metadata.type': 'gas_fee'
+        });
+        
+        // Get pending KYC verifications
+        const pendingKYC = await KYC.countDocuments({
+            overallStatus: 'pending'
+        });
+        
+        const totalPending = pendingDeposits + pendingWithdrawals + pendingTransfers + pendingGasFees;
+        
+        res.status(200).json({
+            status: 'success',
+            data: {
+                count: totalPending,
+                breakdown: {
+                    deposits: pendingDeposits,
+                    withdrawals: pendingWithdrawals,
+                    transfers: pendingTransfers,
+                    gasFees: pendingGasFees,
+                    kyc: pendingKYC
+                },
+                timestamp: new Date().toISOString()
+            }
+        });
+        
+    } catch (err) {
+        console.error('Pending count error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to get pending count'
+        });
+    }
+});
+
+
+// =============================================
+// WALLET ADDRESSES - WITH SEARCH/FILTER/PAGINATION
+// GET /api/admin/wallet/addresses
+// =============================================
+app.get('/api/admin/wallet/addresses', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const skip = (page - 1) * limit;
+        const search = req.query.search || '';
+        const network = req.query.network || '';
+        const status = req.query.status || '';
+        const age = req.query.age || '';
+        
+        // =============================================
+        // BUILD QUERY
+        // =============================================
+        let query = {};
+        
+        // Search by address, user email, or user name
+        if (search) {
+            const searchRegex = new RegExp(search, 'i');
+            
+            // Find users matching search
+            const users = await User.find({
+                $or: [
+                    { email: searchRegex },
+                    { firstName: searchRegex },
+                    { lastName: searchRegex }
+                ]
+            }).select('_id');
+            
+            const userIds = users.map(u => u._id);
+            
+            query.$or = [
+                { address: searchRegex },
+                { userId: { $in: userIds } }
+            ];
+        }
+        
+        // Filter by network (asset)
+        if (network) {
+            query.asset = network.toLowerCase();
+        }
+        
+        // Filter by status
+        if (status) {
+            if (status === 'active') {
+                query.isActive = true;
+            } else if (status === 'inactive') {
+                query.isActive = false;
+            }
+        }
+        
+        // Filter by age
+        if (age) {
+            let dateFilter = {};
+            const now = new Date();
+            
+            switch (age) {
+                case 'today':
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    dateFilter = { $gte: today };
+                    break;
+                case 'yesterday':
+                    const yesterday = new Date();
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    yesterday.setHours(0, 0, 0, 0);
+                    const yesterdayEnd = new Date(yesterday);
+                    yesterdayEnd.setHours(23, 59, 59, 999);
+                    dateFilter = { $gte: yesterday, $lte: yesterdayEnd };
+                    break;
+                case '7d':
+                    const sevenDaysAgo = new Date();
+                    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                    dateFilter = { $gte: sevenDaysAgo };
+                    break;
+                case '30d':
+                    const thirtyDaysAgo = new Date();
+                    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                    dateFilter = { $gte: thirtyDaysAgo };
+                    break;
+                default:
+                    break;
+            }
+            
+            if (Object.keys(dateFilter).length > 0) {
+                query.createdAt = dateFilter;
+            }
+        }
+        
+        // =============================================
+        // EXECUTE QUERY WITH PAGINATION
+        // =============================================
+        const [addresses, total] = await Promise.all([
+            DepositAddress.find(query)
+                .populate('userId', 'firstName lastName email')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            DepositAddress.countDocuments(query)
+        ]);
+        
+        // =============================================
+        // GET NETWORKS LIST FOR FILTER DROPDOWN
+        // =============================================
+        const networks = await DepositAddress.distinct('asset');
+        
+        // =============================================
+        // FORMAT RESPONSE WITH REAL BALANCES
+        // =============================================
+        const formattedAddresses = await Promise.all(addresses.map(async (addr) => {
+            const user = addr.userId || {};
+            const assetUpper = (addr.asset || 'BTC').toUpperCase();
+            
+            // Get real blockchain balance
+            let balance = 0;
+            try {
+                balance = await getBlockchainBalance(addr.address, assetUpper);
+            } catch (err) {
+                console.error(`Failed to get balance for ${addr.address}:`, err.message);
+            }
+            
+            // Get deposit count for this address
+            const depositCount = await Transaction.countDocuments({
+                'details.depositAddress': addr.address,
+                type: 'deposit',
+                status: 'completed'
+            });
+            
+            // Get last deposit
+            const lastDeposit = await Transaction.findOne({
+                'details.depositAddress': addr.address,
+                type: 'deposit',
+                status: 'completed'
+            }).sort({ createdAt: -1 });
+            
+            // Get last activity (any transaction involving this address)
+            const lastActivity = await Transaction.findOne({
+                $or: [
+                    { 'details.depositAddress': addr.address },
+                    { btcAddress: addr.address },
+                    { 'details.walletAddress': addr.address }
+                ]
+            }).sort({ createdAt: -1 });
+            
+            // Get current price for USD value
+            const price = await getCryptoPrice(assetUpper);
+            const usdValue = balance * (price || 0);
+            
+            return {
+                _id: addr._id,
+                address: addr.address,
+                network: addr.asset || 'Unknown',
+                coin: addr.asset || 'Unknown',
+                asset: addr.asset || 'Unknown',
+                user: {
+                    _id: user._id || null,
+                    firstName: user.firstName || 'Unassigned',
+                    lastName: user.lastName || '',
+                    email: user.email || 'N/A',
+                    name: user.firstName ? `${user.firstName} ${user.lastName}`.trim() : 'Unassigned'
+                },
+                userId: addr.userId || null,
+                label: addr.label || '',
+                status: addr.isActive ? 'active' : 'inactive',
+                generatedAt: addr.createdAt,
+                balance: balance,
+                usdValue: usdValue,
+                depositCount: depositCount,
+                lastDeposit: lastDeposit?.createdAt || null,
+                lastActivity: lastActivity?.createdAt || null,
+                createdAt: addr.createdAt,
+                updatedAt: addr.updatedAt
+            };
+        }));
+        
+        // =============================================
+        // CACHE NETWORKS FOR FILTER
+        // =============================================
+        await redis.setex('wallet:networks', 3600, JSON.stringify(networks));
+        
+        res.status(200).json({
+            status: 'success',
+            data: {
+                addresses: formattedAddresses,
+                networks: networks,
+                total: total,
+                page: page,
+                limit: limit,
+                totalPages: Math.ceil(total / limit),
+                timestamp: new Date().toISOString()
+            }
+        });
+        
+    } catch (err) {
+        console.error('Wallet addresses error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to load wallet addresses'
+        });
+    }
+});
+
+// =============================================
+// HELPER: Get blockchain balance for any asset (Enhanced with caching)
+// =============================================
+async function getBlockchainBalance(address, asset) {
+    const assetUpper = asset.toUpperCase();
+    
+    try {
+        // Check cache first
+        const cacheKey = `balance:${assetUpper}:${address}`;
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+            return parseFloat(cached);
+        }
+        
+        let balance = 0;
+        const config = ASSET_NETWORK_MAP[assetUpper];
+        
+        if (!config) {
+            console.warn(`No config found for asset: ${assetUpper}`);
+            return 0;
+        }
+        
+        // Use a timeout for all balance checks
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Balance check timeout')), 10000);
+        });
+        
+        const balancePromise = (async () => {
+            switch (config.type) {
+                case 'evm': {
+                    // EVM balance (ETH, BNB, MATIC, etc.)
+                    const provider = new ethers.JsonRpcProvider(config.rpc);
+                    const balanceWei = await provider.getBalance(address);
+                    return parseFloat(ethers.formatEther(balanceWei));
+                }
+                
+                case 'utxo': {
+                    // UTXO balance (BTC, DOGE, LTC)
+                    const explorerMap = {
+                        'BTC': 'https://api.blockchair.com/bitcoin',
+                        'DOGE': 'https://api.blockchair.com/dogecoin',
+                        'LTC': 'https://api.blockchair.com/litecoin'
+                    };
+                    
+                    const baseUrl = explorerMap[assetUpper];
+                    if (baseUrl) {
+                        const response = await axios.get(`${baseUrl}/dashboards/address/${address}`, {
+                            timeout: 10000
+                        });
+                        
+                        if (response.data && response.data.data && response.data.data[address]) {
+                            const addrData = response.data.data[address];
+                            return addrData.balance / 1e8;
+                        }
+                    }
+                    return 0;
+                }
+                
+                case 'solana': {
+                    const connection = new Connection(config.rpc);
+                    const publicKey = new PublicKey(address);
+                    const balanceLamports = await connection.getBalance(publicKey);
+                    return balanceLamports / 1e9;
+                }
+                
+                case 'tron': {
+                    const tronWeb = new TronWeb({ fullHost: config.rpc });
+                    const account = await tronWeb.trx.getAccount(address);
+                    if (account && account.balance) {
+                        return account.balance / 1e6;
+                    }
+                    return 0;
+                }
+                
+                case 'xrp': {
+                    const client = new xrpl.Client(config.rpc);
+                    await client.connect();
+                    const accountInfo = await client.request({
+                        command: 'account_info',
+                        account: address
+                    });
+                    await client.disconnect();
+                    
+                    if (accountInfo && accountInfo.result && accountInfo.result.account_data) {
+                        return accountInfo.result.account_data.Balance / 1e6;
+                    }
+                    return 0;
+                }
+                
+                case 'cardano': {
+                    const blockfrostKey = process.env.BLOCKFROST_API_KEY;
+                    if (blockfrostKey) {
+                        const response = await axios.get(
+                            `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}`,
+                            {
+                                headers: { 'project_id': blockfrostKey },
+                                timeout: 10000
+                            }
+                        );
+                        
+                        if (response.data && response.data.amount) {
+                            const adaAsset = response.data.amount.find(a => a.unit === 'lovelace');
+                            if (adaAsset) {
+                                return parseFloat(adaAsset.quantity) / 1e6;
+                            }
+                        }
+                    }
+                    return 0;
+                }
+                
+                case 'polkadot': {
+                    const provider = new WsProvider(config.rpc);
+                    const api = await ApiPromise.create({ provider });
+                    
+                    const accountInfo = await api.query.system.account(address);
+                    const balanceData = accountInfo.data;
+                    const balanceValue = parseFloat(balanceData.free.toString()) / 1e10;
+                    
+                    await api.disconnect();
+                    return balanceValue;
+                }
+                
+                default:
+                    console.warn(`Unsupported asset type for balance check: ${config.type}`);
+                    return 0;
+            }
+        })();
+        
+        // Race the balance check against timeout
+        balance = await Promise.race([balancePromise, timeoutPromise]);
+        
+        // Cache the balance for 5 minutes
+        if (balance > 0) {
+            await redis.setex(cacheKey, 300, balance.toString());
+        }
+        
+        return balance || 0;
+        
+    } catch (err) {
+        console.error(`Error fetching balance for ${asset} ${address}:`, err.message);
+        return 0;
+    }
+}
+
+// =============================================
+// HELPER: Get ERC-20 token balance
+// =============================================
+async function getERC20TokenBalance(address, contractAddress, rpcUrl) {
+    try {
+        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        const contract = new ethers.Contract(
+            contractAddress,
+            [
+                'function balanceOf(address owner) view returns (uint256)',
+                'function decimals() view returns (uint8)'
+            ],
+            provider
+        );
+        
+        const [balance, decimals] = await Promise.all([
+            contract.balanceOf(address),
+            contract.decimals().catch(() => 18)
+        ]);
+        
+        return parseFloat(ethers.formatUnits(balance, decimals));
+    } catch (err) {
+        console.error('ERC-20 balance error:', err.message);
+        return 0;
+    }
+}
+
+// =============================================
+// HELPER: Batch balance check for performance
+// =============================================
+async function getBatchBlockchainBalances(addresses, asset) {
+    const assetUpper = asset.toUpperCase();
+    const results = {};
+    
+    // Process in batches of 50
+    const batchSize = 50;
+    for (let i = 0; i < addresses.length; i += batchSize) {
+        const batch = addresses.slice(i, i + batchSize);
+        const batchPromises = batch.map(async (addr) => {
+            const balance = await getBlockchainBalance(addr, assetUpper);
+            return { address: addr, balance };
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        for (const result of batchResults) {
+            results[result.address] = result.balance;
+        }
+    }
+    
+    return results;
+}
+
+// =============================================
+// HELPER: Get address transaction history from blockchain
+// =============================================
+async function getAddressTransactionHistory(address, asset, limit = 50) {
+    const assetUpper = asset.toUpperCase();
+    const config = ASSET_NETWORK_MAP[assetUpper];
+    
+    if (!config) {
+        return [];
+    }
+    
+    try {
+        let transactions = [];
+        
+        switch (config.type) {
+            case 'evm': {
+                // Use Etherscan/BSCScan API
+                const apiKey = getExplorerApiKey(assetUpper);
+                const explorerUrl = getExplorerUrl(assetUpper);
+                
+                if (apiKey && explorerUrl) {
+                    const response = await axios.get(
+                        `${explorerUrl}api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${apiKey}`,
+                        { timeout: 10000 }
+                    );
+                    
+                    if (response.data && response.data.status === '1') {
+                        transactions = response.data.result.slice(0, limit).map(tx => ({
+                            txHash: tx.hash,
+                            from: tx.from,
+                            to: tx.to,
+                            value: parseFloat(ethers.formatEther(tx.value || '0')),
+                            gas: tx.gas,
+                            gasPrice: tx.gasPrice,
+                            blockNumber: tx.blockNumber,
+                            timestamp: new Date(parseInt(tx.timeStamp) * 1000),
+                            status: tx.txreceipt_status === '1' ? 'confirmed' : 'failed',
+                            type: tx.from.toLowerCase() === address.toLowerCase() ? 'outgoing' : 'incoming'
+                        }));
+                    }
+                }
+                break;
+            }
+            
+            case 'utxo': {
+                // Use Blockchair API
+                const explorerMap = {
+                    'BTC': 'https://api.blockchair.com/bitcoin',
+                    'DOGE': 'https://api.blockchair.com/dogecoin',
+                    'LTC': 'https://api.blockchair.com/litecoin'
+                };
+                
+                const baseUrl = explorerMap[assetUpper];
+                if (baseUrl) {
+                    const response = await axios.get(
+                        `${baseUrl}/dashboards/address/${address}`,
+                        { timeout: 10000 }
+                    );
+                    
+                    if (response.data && response.data.data && response.data.data[address]) {
+                        const addrData = response.data.data[address];
+                        const txs = addrData.transactions || [];
+                        transactions = txs.slice(0, limit).map(tx => ({
+                            txHash: tx.hash,
+                            from: tx.inputs?.[0]?.address || 'Unknown',
+                            to: tx.outputs?.[0]?.address || 'Unknown',
+                            value: tx.output_total / 1e8,
+                            blockNumber: tx.block_id,
+                            timestamp: new Date(tx.time * 1000),
+                            status: tx.confirmations > 0 ? 'confirmed' : 'pending',
+                            type: tx.inputs?.[0]?.address === address ? 'outgoing' : 'incoming'
+                        }));
+                    }
+                }
+                break;
+            }
+            
+            case 'solana': {
+                const connection = new Connection(config.rpc);
+                const publicKey = new PublicKey(address);
+                const signatures = await connection.getSignaturesForAddress(publicKey, { limit });
+                
+                for (const sig of signatures) {
+                    const tx = await connection.getTransaction(sig.signature);
+                    if (tx) {
+                        transactions.push({
+                            txHash: sig.signature,
+                            blockNumber: sig.slot,
+                            timestamp: new Date(sig.blockTime * 1000),
+                            status: sig.confirmationStatus === 'confirmed' ? 'confirmed' : 'pending',
+                            type: 'unknown'
+                        });
+                    }
+                }
+                break;
+            }
+            
+            default:
+                // For unsupported networks, try to get from database
+                const dbTxs = await Transaction.find({
+                    $or: [
+                        { 'details.depositAddress': address },
+                        { btcAddress: address },
+                        { 'details.walletAddress': address }
+                    ]
+                })
+                .sort({ createdAt: -1 })
+                .limit(limit)
+                .lean();
+                
+                transactions = dbTxs.map(tx => ({
+                    txHash: tx.reference,
+                    from: tx.user?.email || 'Unknown',
+                    to: tx.btcAddress || tx.details?.walletAddress || 'Unknown',
+                    value: tx.amount || 0,
+                    timestamp: tx.createdAt,
+                    status: tx.status,
+                    type: tx.type
+                }));
+                break;
+        }
+        
+        return transactions;
+        
+    } catch (err) {
+        console.error(`Error getting transaction history for ${address}:`, err.message);
+        return [];
+    }
+}
+
+// =============================================
+// HELPER: Get explorer API key by asset
+// =============================================
+function getExplorerApiKey(asset) {
+    const keyMap = {
+        'ETH': process.env.ETHERSCAN_API_KEY,
+        'USDT': process.env.ETHERSCAN_API_KEY,
+        'USDC': process.env.ETHERSCAN_API_KEY,
+        'BNB': process.env.BSCSCAN_API_KEY,
+        'MATIC': process.env.POLYGONSCAN_API_KEY,
+        'AVAX': process.env.SNOWTRACE_API_KEY,
+        'ARBITRUM': process.env.ARBISCAN_API_KEY,
+        'FANTOM': process.env.FTMSCAN_API_KEY
+    };
+    return keyMap[asset] || null;
+}
+
+// =============================================
+// HELPER: Get explorer URL by asset
+// =============================================
+function getExplorerUrl(asset) {
+    const urlMap = {
+        'ETH': 'https://api.etherscan.io/',
+        'USDT': 'https://api.etherscan.io/',
+        'USDC': 'https://api.etherscan.io/',
+        'BNB': 'https://api.bscscan.com/',
+        'MATIC': 'https://api.polygonscan.com/',
+        'AVAX': 'https://api.snowtrace.io/',
+        'ARBITRUM': 'https://api.arbiscan.io/',
+        'FANTOM': 'https://api.ftmscan.com/'
+    };
+    return urlMap[asset] || null;
+}
+
+// =============================================
+// HELPER: Cache invalidation for wallet data
+// =============================================
+async function invalidateWalletCache(userId = null) {
+    try {
+        // Clear main wallet cache
+        await redis.del('wallet:dashboard');
+        await redis.del('wallet:networks');
+        
+        // Clear user-specific wallet cache if provided
+        if (userId) {
+            await redis.del(`wallet:user:${userId}`);
+        }
+        
+        console.log('Wallet cache invalidated');
+    } catch (err) {
+        console.error('Cache invalidation error:', err);
+    }
+}
 
 
 
