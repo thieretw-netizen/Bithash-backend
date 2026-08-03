@@ -37617,288 +37617,25 @@ async function getBlockchainBalance(address, asset) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // COMPLETE WALLET TRANSFER ENDPOINT
 // PRODUCTION-READY WITH REAL ON-CHAIN BALANCE CHECK
-// =============================================
-
-// =============================================
-// UTXO NETWORK CONFIGURATIONS - ACCURATE
-// =============================================
-const UTXO_NETWORKS = {
-    BTC: {
-        network: bitcoin.networks.bitcoin,
-        explorer: 'https://api.blockchair.com/bitcoin',
-        explorerAlt: 'https://blockstream.info/api',
-        minFee: 1,
-        decimals: 8,
-        label: 'Bitcoin'
-    },
-    DOGE: {
-        network: {
-            messagePrefix: '\x19Dogecoin Signed Message:\n',
-            bech32: 'doge',
-            bip32: { public: 0x02facafd, private: 0x02fac398 },
-            pubKeyHash: 0x1e,
-            scriptHash: 0x16,
-            wif: 0x9e
-        },
-        explorer: 'https://api.blockchair.com/dogecoin',
-        explorerAlt: null,
-        minFee: 0.01,
-        decimals: 8,
-        label: 'Dogecoin'
-    },
-    LTC: {
-        network: {
-            messagePrefix: '\x19Litecoin Signed Message:\n',
-            bech32: 'ltc',
-            bip32: { public: 0x019da462, private: 0x019d9cfe },
-            pubKeyHash: 0x30,
-            scriptHash: 0x32,
-            wif: 0xb0
-        },
-        explorer: 'https://api.blockchair.com/litecoin',
-        explorerAlt: null,
-        minFee: 0.1,
-        decimals: 8,
-        label: 'Litecoin'
-    }
-};
-
-// =============================================
-// GET REAL ON-CHAIN UTXO BALANCE
-// =============================================
-async function getUtxoBalanceOnChain(address, asset) {
-    const assetUpper = asset.toUpperCase();
-    const config = UTXO_NETWORKS[assetUpper];
-    
-    if (!config) {
-        throw new Error(`Unsupported UTXO asset: ${assetUpper}`);
-    }
-
-    try {
-        const cacheKey = `utxo:balance:${assetUpper}:${address}`;
-        const cached = await redis.get(cacheKey);
-        if (cached) {
-            return parseFloat(cached);
-        }
-
-        const response = await axios.get(
-            `${config.explorer}/dashboards/address/${address}`,
-            { timeout: 15000 }
-        );
-
-        if (response.data && response.data.data && response.data.data[address]) {
-            const addrData = response.data.data[address];
-            const balance = addrData.balance / 1e8;
-            
-            await redis.setex(cacheKey, 60, balance.toString());
-            return balance;
-        }
-
-        return 0;
-    } catch (err) {
-        console.error(`Error fetching UTXO balance for ${assetUpper}:`, err.message);
-        return 0;
-    }
-}
-
-// =============================================
-// GET REAL ON-CHAIN UTXOS
-// =============================================
-async function getUtxosForAddressOnChain(address, asset) {
-    const assetUpper = asset.toUpperCase();
-    const config = UTXO_NETWORKS[assetUpper];
-    
-    if (!config) {
-        throw new Error(`Unsupported UTXO asset: ${assetUpper}`);
-    }
-
-    try {
-        const response = await axios.get(
-            `${config.explorer}/dashboards/address/${address}`,
-            { timeout: 15000 }
-        );
-
-        if (response.data && response.data.data && response.data.data[address]) {
-            const addrData = response.data.data[address];
-            const utxos = addrData.utxo || [];
-            
-            return utxos.map(utxo => ({
-                txid: utxo.transaction_hash,
-                vout: utxo.index,
-                value: utxo.value,
-                confirmations: utxo.confirmations || 0,
-                status: {
-                    confirmed: (utxo.confirmations || 0) > 0
-                }
-            }));
-        }
-
-        return [];
-    } catch (err) {
-        console.error(`Error fetching UTXOs for ${assetUpper}:`, err.message);
-        return [];
-    }
-}
-
-// =============================================
-// BROADCAST UTXO TRANSACTION
-// =============================================
-async function broadcastUtxoTransaction(txHex, asset) {
-    const assetUpper = asset.toUpperCase();
-    const config = UTXO_NETWORKS[assetUpper];
-    
-    if (!config) {
-        throw new Error(`Unsupported UTXO asset: ${assetUpper}`);
-    }
-
-    try {
-        const response = await axios.post(
-            `${config.explorer}/push/transaction`,
-            { data: txHex },
-            { 
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 30000 
-            }
-        );
-
-        if (response.data && response.data.data) {
-            return response.data.data.transaction_hash;
-        }
-
-        throw new Error('Failed to broadcast transaction');
-    } catch (err) {
-        console.error(`Error broadcasting ${assetUpper} transaction:`, err.message);
-        
-        // Fallback for BTC
-        if (assetUpper === 'BTC' && config.explorerAlt) {
-            try {
-                const response = await axios.post(
-                    `${config.explorerAlt}/tx`,
-                    txHex,
-                    { 
-                        headers: { 'Content-Type': 'text/plain' },
-                        timeout: 30000
-                    }
-                );
-                
-                if (response.data) {
-                    return response.data;
-                }
-            } catch (fallbackErr) {
-                console.error('Fallback broadcast failed:', fallbackErr.message);
-            }
-        }
-        
-        throw err;
-    }
-}
-
-// =============================================
-// EXECUTE UTXO TRANSFER - PRODUCTION READY
-// =============================================
-async function executeUtxoTransferOnChain(sourceAddress, destinationAddress, amount, asset, privateKeyHex) {
-    const assetUpper = asset.toUpperCase();
-    const config = UTXO_NETWORKS[assetUpper];
-    
-    if (!config) {
-        throw new Error(`Unsupported UTXO asset: ${assetUpper}`);
-    }
-
-    // 1. Get UTXOs
-    const utxos = await getUtxosForAddressOnChain(sourceAddress, assetUpper);
-    
-    if (utxos.length === 0) {
-        throw new Error(`No UTXOs found for ${assetUpper} address: ${sourceAddress}`);
-    }
-
-    // 2. Calculate total available balance
-    const amountInSatoshis = Math.floor(amount * 1e8);
-    let totalUtxoValue = 0;
-    for (const utxo of utxos) {
-        totalUtxoValue += utxo.value;
-    }
-
-    if (totalUtxoValue < amountInSatoshis) {
-        throw new Error(`Insufficient UTXO balance. Available: ${(totalUtxoValue / 1e8).toFixed(8)} ${assetUpper}, Required: ${amount.toFixed(8)} ${assetUpper}`);
-    }
-
-    // 3. Create PSBT
-    const psbt = new bitcoin.Psbt({ network: config.network });
-
-    // 4. Select UTXOs
-    let selectedAmount = 0;
-    const selectedUtxos = [];
-    const sortedUtxos = utxos.sort((a, b) => a.value - b.value);
-
-    for (const utxo of sortedUtxos) {
-        selectedUtxos.push(utxo);
-        selectedAmount += utxo.value;
-        if (selectedAmount >= amountInSatoshis) break;
-    }
-
-    if (selectedAmount < amountInSatoshis) {
-        throw new Error(`Unable to select enough UTXOs. Selected: ${(selectedAmount / 1e8).toFixed(8)} ${assetUpper}, Required: ${amount.toFixed(8)} ${assetUpper}`);
-    }
-
-    // 5. Add inputs
-    for (const utxo of selectedUtxos) {
-        psbt.addInput({
-            hash: utxo.txid,
-            index: utxo.vout,
-            nonWitnessUtxo: Buffer.from(utxo.txid, 'hex'),
-        });
-    }
-
-    // 6. Add output (destination)
-    psbt.addOutput({
-        address: destinationAddress,
-        value: amountInSatoshis
-    });
-
-    // 7. Calculate fee
-    const estimatedFee = 2000;
-    const changeAmount = selectedAmount - amountInSatoshis - estimatedFee;
-
-    if (changeAmount > 0) {
-        psbt.addOutput({
-            address: sourceAddress,
-            value: changeAmount
-        });
-    }
-
-    // 8. Sign inputs
-    const keyPair = ECPair.fromPrivateKey(Buffer.from(privateKeyHex, 'hex'), { network: config.network });
-    
-    for (let i = 0; i < selectedUtxos.length; i++) {
-        psbt.signInput(i, keyPair);
-    }
-
-    // 9. Finalize inputs
-    for (let i = 0; i < selectedUtxos.length; i++) {
-        psbt.finalizeInput(i);
-    }
-
-    // 10. Extract transaction
-    const tx = psbt.extractTransaction();
-    const txHex = tx.toHex();
-
-    // 11. Broadcast
-    const txHash = await broadcastUtxoTransaction(txHex, assetUpper);
-
-    return {
-        txHash: txHash,
-        txHex: txHex,
-        inputs: selectedUtxos.length,
-        outputs: psbt.txOutputs.length,
-        fee: estimatedFee / 1e8
-    };
-}
-
-// =============================================
-// MAIN TRANSFER ENDPOINT - PRODUCTION READY
 // POST /api/admin/wallet/transfer
 // =============================================
 app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
@@ -37939,7 +37676,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         }
 
         // =============================================
-        // 2. VALIDATE DESTINATION ADDRESS
+        // 2. VALIDATE DESTINATION ADDRESS FORMAT
         // =============================================
         let isValidAddress = false;
         try {
@@ -37987,96 +37724,150 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         }
 
         // =============================================
-        // 3. GET SOURCE WALLET
+        // 3. FIND SOURCE WALLET WITH BALANCE
         // =============================================
-        let sourceAddress;
-        let privateKey;
-        let derivationPath;
-
-        try {
-            const addressData = platformWallet.generateDepositAddress('system', assetUpper);
-            sourceAddress = addressData.address;
-            privateKey = addressData.privateKey;
-            derivationPath = addressData.derivationPath;
-        } catch (err) {
-            console.error('Failed to get platform wallet address:', err);
-            return res.status(500).json({
-                status: 'error',
-                message: 'Failed to get source wallet address'
-            });
-        }
-
-        // =============================================
-        // 4. CHECK REAL ON-CHAIN BALANCE
-        // =============================================
+        let sourceAddress = null;
+        let privateKey = null;
+        let derivationPath = null;
         let onChainBalance = 0;
+        let foundAddress = false;
+
+        // First, try to find an existing deposit address with balance
+        console.log(`🔍 Searching for ${assetUpper} addresses with balance...`);
         
-        if (networkInfo.type === 'utxo') {
-            onChainBalance = await getUtxoBalanceOnChain(sourceAddress, assetUpper);
-        } else {
-            onChainBalance = await getBlockchainBalance(sourceAddress, assetUpper);
+        const existingAddresses = await DepositAddress.find({
+            asset: assetLower,
+            isActive: true
+        }).limit(200);
+
+        if (existingAddresses.length > 0) {
+            console.log(`📊 Found ${existingAddresses.length} existing addresses for ${assetUpper}`);
+
+            // Check each address for balance (in batches)
+            const batchSize = 10;
+            for (let i = 0; i < existingAddresses.length; i += batchSize) {
+                const batch = existingAddresses.slice(i, i + batchSize);
+                const checkPromises = batch.map(async (addr) => {
+                    try {
+                        // Clear cache for fresh balance
+                        const cacheKey = `balance:${assetUpper}:${addr.address}`;
+                        await redis.del(cacheKey);
+                        
+                        let balance = 0;
+                        if (networkInfo.type === 'utxo') {
+                            balance = await getUtxoBalanceOnChain(addr.address, assetUpper);
+                        } else {
+                            balance = await getBlockchainBalance(addr.address, assetUpper);
+                        }
+                        
+                        return { address: addr, balance: balance };
+                    } catch (err) {
+                        console.error(`Error checking ${addr.address}:`, err.message);
+                        return { address: addr, balance: 0 };
+                    }
+                });
+
+                const results = await Promise.all(checkPromises);
+                
+                // Find the first address with balance >= amount
+                for (const result of results) {
+                    if (result.balance >= amount) {
+                        sourceAddress = result.address.address;
+                        derivationPath = result.address.derivationPath;
+                        onChainBalance = result.balance;
+                        foundAddress = true;
+                        console.log(`✅ Found address with sufficient balance: ${sourceAddress} (${onChainBalance} ${assetUpper})`);
+                        break;
+                    }
+                }
+
+                if (foundAddress) break;
+            }
         }
 
-        console.log(`💰 REAL on-chain balance for ${assetUpper}: ${onChainBalance}`);
-        console.log(`📊 Requested amount: ${amount}`);
+        // If no existing address has sufficient balance, try the platform wallet
+        if (!foundAddress) {
+            console.log(`🆕 No existing address with sufficient balance found, checking platform wallet...`);
+            
+            try {
+                const addressData = platformWallet.generateDepositAddress('system', assetUpper);
+                const testAddress = addressData.address;
+                let balance = 0;
+                
+                if (networkInfo.type === 'utxo') {
+                    balance = await getUtxoBalanceOnChain(testAddress, assetUpper);
+                } else {
+                    balance = await getBlockchainBalance(testAddress, assetUpper);
+                }
+                
+                if (balance >= amount) {
+                    sourceAddress = testAddress;
+                    privateKey = addressData.privateKey;
+                    derivationPath = addressData.derivationPath;
+                    onChainBalance = balance;
+                    foundAddress = true;
+                    console.log(`✅ Platform wallet has sufficient balance: ${sourceAddress} (${onChainBalance} ${assetUpper})`);
+                }
+            } catch (err) {
+                console.error('Error checking platform wallet:', err.message);
+            }
+        }
 
-        if (onChainBalance < amount) {
+        // If still no address found, return error
+        if (!foundAddress) {
+            // Show addresses with some balance for debugging
+            const addressesWithBalance = [];
+            for (const addr of existingAddresses) {
+                let balance = 0;
+                if (networkInfo.type === 'utxo') {
+                    balance = await getUtxoBalanceOnChain(addr.address, assetUpper);
+                } else {
+                    balance = await getBlockchainBalance(addr.address, assetUpper);
+                }
+                if (balance > 0) {
+                    addressesWithBalance.push({
+                        address: addr.address,
+                        balance: balance
+                    });
+                }
+            }
+
             return res.status(400).json({
                 status: 'fail',
-                message: `Insufficient on-chain balance. Available: ${onChainBalance.toFixed(8)} ${assetUpper}, Requested: ${amount.toFixed(8)}`,
+                message: `No wallet address found with sufficient ${assetUpper} balance. Required: ${amount} ${assetUpper}`,
                 data: {
-                    availableBalance: onChainBalance,
-                    requestedAmount: amount,
+                    requiredAmount: amount,
                     asset: assetUpper,
-                    address: sourceAddress,
+                    addressesWithBalance: addressesWithBalance.slice(0, 5), // Show first 5
+                    totalAddressesChecked: existingAddresses.length,
                     network: networkInfo.network,
                     networkType: networkInfo.type
                 }
             });
         }
 
-        // =============================================
-        // 5. GAS RESERVE CHECK
-        // =============================================
-        let gasReserve = 0;
-        switch (networkInfo.type) {
-            case 'evm':
-                gasReserve = 0.005; // ETH/BNB/MATIC for gas
-                break;
-            case 'solana':
-                gasReserve = 0.005;
-                break;
-            case 'tron':
-                gasReserve = 10;
-                break;
-            case 'utxo':
-                gasReserve = 0.0001;
-                break;
-            default:
-                gasReserve = 0.001;
-        }
-
-        if (onChainBalance < amount + gasReserve) {
-            return res.status(400).json({
-                status: 'fail',
-                message: `Insufficient balance including gas. Available: ${onChainBalance.toFixed(8)} ${assetUpper}, Required: ${(amount + gasReserve).toFixed(8)} (includes ${gasReserve} for gas)`,
-                data: {
-                    availableBalance: onChainBalance,
-                    requestedAmount: amount,
-                    gasReserve: gasReserve,
-                    requiredTotal: amount + gasReserve
-                }
-            });
+        // Get private key if not already set
+        if (!privateKey) {
+            try {
+                const addressData = platformWallet.generateDepositAddress('system', assetUpper);
+                privateKey = addressData.privateKey;
+            } catch (err) {
+                console.error('Failed to get private key:', err);
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Failed to get private key for wallet'
+                });
+            }
         }
 
         // =============================================
-        // 6. GET PRICE FOR USD VALUE
+        // 4. GET PRICE FOR USD VALUE
         // =============================================
         const currentPrice = await getCryptoPrice(assetUpper);
         const usdValue = amount * (currentPrice || 1);
 
         // =============================================
-        // 7. CREATE TRANSACTION RECORD
+        // 5. CREATE TRANSACTION RECORD
         // =============================================
         const txReference = `TRF-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
         
@@ -38106,7 +37897,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                 type: 'admin_transfer',
                 derivationPath: derivationPath,
                 onChainBalanceBefore: onChainBalance,
-                gasReserve: gasReserve,
                 networkType: networkInfo.type
             },
             btcAddress: destinationAddress,
@@ -38120,7 +37910,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         });
 
         // =============================================
-        // 8. EXECUTE ON-CHAIN TRANSFER
+        // 6. EXECUTE ON-CHAIN TRANSFER
         // =============================================
         let txHash = null;
         let transferSuccess = false;
@@ -38134,28 +37924,54 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                     const provider = new ethers.JsonRpcProvider(networkInfo.rpc);
                     const wallet = new ethers.Wallet(privateKey, provider);
                     
+                    // Get current gas price
+                    const feeData = await provider.getFeeData();
+                    const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
+                    
                     const tx = await wallet.sendTransaction({
                         to: destinationAddress,
-                        value: ethers.parseEther(amount.toString())
+                        value: ethers.parseEther(amount.toString()),
+                        gasLimit: 21000,
+                        gasPrice: gasPrice || undefined,
+                        maxFeePerGas: feeData.maxFeePerGas || undefined,
+                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || undefined
                     });
                     
                     txHash = tx.hash;
-                    await tx.wait(2);
-                    transferSuccess = true;
+                    console.log(`📝 Transaction sent: ${txHash}`);
+                    
+                    // Wait for confirmation
+                    const receipt = await tx.wait(2);
+                    transferSuccess = receipt.status === 1;
+                    
+                    if (transferSuccess) {
+                        console.log(`✅ Transfer confirmed: ${txHash}`);
+                    } else {
+                        errorMessage = 'Transaction failed on chain';
+                        console.error(`❌ Transfer failed: ${errorMessage}`);
+                    }
                     break;
                 }
 
                 case 'utxo': {
-                    const result = await executeUtxoTransferOnChain(
-                        sourceAddress,
-                        destinationAddress,
-                        amount,
-                        assetUpper,
-                        privateKey
-                    );
-                    
-                    txHash = result.txHash;
-                    transferSuccess = true;
+                    // UTXO transfer (BTC, DOGE, LTC)
+                    try {
+                        const result = await executeUtxoTransferOnChain(
+                            sourceAddress,
+                            destinationAddress,
+                            amount,
+                            assetUpper,
+                            privateKey
+                        );
+                        
+                        txHash = result.txHash;
+                        transferSuccess = true;
+                        console.log(`✅ ${assetUpper} UTXO transfer confirmed: ${txHash}`);
+                    } catch (utxoErr) {
+                        errorMessage = utxoErr.message;
+                        transferSuccess = false;
+                        console.error(`❌ UTXO transfer failed: ${errorMessage}`);
+                    }
                     break;
                 }
 
@@ -38177,6 +37993,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                     
                     txHash = await sendAndConfirmTransaction(connection, tx, [fromKeypair]);
                     transferSuccess = true;
+                    console.log(`✅ SOL transfer confirmed: ${txHash}`);
                     break;
                 }
 
@@ -38194,7 +38011,25 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                     
                     const result = await tronWeb.trx.sendRawTransaction(tx);
                     txHash = result.txid;
-                    transferSuccess = true;
+                    
+                    // Wait for confirmation
+                    let confirmed = false;
+                    let attempts = 0;
+                    while (!confirmed && attempts < 30) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        const info = await tronWeb.trx.getTransactionInfo(txHash);
+                        if (info && info.receipt && info.receipt.result === 'SUCCESS') {
+                            confirmed = true;
+                            transferSuccess = true;
+                            console.log(`✅ TRX transfer confirmed: ${txHash}`);
+                        }
+                        attempts++;
+                    }
+                    
+                    if (!confirmed) {
+                        errorMessage = 'TRX transaction not confirmed after 30 seconds';
+                        transferSuccess = false;
+                    }
                     break;
                 }
 
@@ -38208,7 +38043,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         }
 
         // =============================================
-        // 9. UPDATE TRANSACTION RECORD
+        // 7. UPDATE TRANSACTION RECORD
         // =============================================
         if (transferSuccess) {
             await Transaction.findByIdAndUpdate(transaction._id, {
@@ -38219,6 +38054,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                 'details.transferSuccess': true
             });
 
+            // Create admin withdrawal record
             await AdminWithdrawal.create({
                 adminId: req.admin._id,
                 adminName: req.admin.name,
@@ -38235,8 +38071,12 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                 confirmedAt: new Date()
             });
 
-            await redis.del(`balance:${assetUpper}:${sourceAddress}`);
-            await redis.del(`utxo:balance:${assetUpper}:${sourceAddress}`);
+            // Clear balance cache
+            const cacheKey = `balance:${assetUpper}:${sourceAddress}`;
+            await redis.del(cacheKey);
+            if (networkInfo.type === 'utxo') {
+                await redis.del(`utxo:balance:${assetUpper}:${sourceAddress}`);
+            }
 
         } else {
             await Transaction.findByIdAndUpdate(transaction._id, {
@@ -38247,7 +38087,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         }
 
         // =============================================
-        // 10. LOG ACTIVITY
+        // 8. LOG ACTIVITY
         // =============================================
         await logActivity(
             transferSuccess ? 'wallet_transfer_completed' : 'wallet_transfer_failed',
@@ -38271,12 +38111,12 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         );
 
         // =============================================
-        // 11. INVALIDATE CACHE
+        // 9. INVALIDATE CACHE
         // =============================================
         await invalidateWalletCache();
 
         // =============================================
-        // 12. EMIT WEBSOCKET UPDATE
+        // 10. EMIT WEBSOCKET UPDATE
         // =============================================
         const adminWalletWss = req.app.get('adminWalletWss');
         if (adminWalletWss) {
@@ -38303,7 +38143,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         }
 
         // =============================================
-        // 13. RETURN RESPONSE
+        // 11. RETURN RESPONSE
         // =============================================
         if (transferSuccess) {
             res.status(200).json({
@@ -38355,24 +38195,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         });
     }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
