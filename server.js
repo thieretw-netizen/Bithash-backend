@@ -37633,9 +37633,13 @@ async function getBlockchainBalance(address, asset) {
 
 
 
+
+
+
+
 // =============================================
 // COMPLETE WALLET TRANSFER ENDPOINT
-// PRODUCTION-READY WITH REAL ON-CHAIN BALANCE CHECK
+// FIXED: No user required for admin/system transfers
 // POST /api/admin/wallet/transfer
 // =============================================
 app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
@@ -37732,7 +37736,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         let onChainBalance = 0;
         let foundAddress = false;
 
-        // First, try to find an existing deposit address with balance
         console.log(`🔍 Searching for ${assetUpper} addresses with balance...`);
         
         const existingAddresses = await DepositAddress.find({
@@ -37743,13 +37746,11 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         if (existingAddresses.length > 0) {
             console.log(`📊 Found ${existingAddresses.length} existing addresses for ${assetUpper}`);
 
-            // Check each address for balance (in batches)
             const batchSize = 10;
             for (let i = 0; i < existingAddresses.length; i += batchSize) {
                 const batch = existingAddresses.slice(i, i + batchSize);
                 const checkPromises = batch.map(async (addr) => {
                     try {
-                        // Clear cache for fresh balance
                         const cacheKey = `balance:${assetUpper}:${addr.address}`;
                         await redis.del(cacheKey);
                         
@@ -37769,7 +37770,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
 
                 const results = await Promise.all(checkPromises);
                 
-                // Find the first address with balance >= amount
                 for (const result of results) {
                     if (result.balance >= amount) {
                         sourceAddress = result.address.address;
@@ -37785,7 +37785,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
             }
         }
 
-        // If no existing address has sufficient balance, try the platform wallet
         if (!foundAddress) {
             console.log(`🆕 No existing address with sufficient balance found, checking platform wallet...`);
             
@@ -37813,9 +37812,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
             }
         }
 
-        // If still no address found, return error
         if (!foundAddress) {
-            // Show addresses with some balance for debugging
             const addressesWithBalance = [];
             for (const addr of existingAddresses) {
                 let balance = 0;
@@ -37838,7 +37835,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                 data: {
                     requiredAmount: amount,
                     asset: assetUpper,
-                    addressesWithBalance: addressesWithBalance.slice(0, 5), // Show first 5
+                    addressesWithBalance: addressesWithBalance.slice(0, 5),
                     totalAddressesChecked: existingAddresses.length,
                     network: networkInfo.network,
                     networkType: networkInfo.type
@@ -37846,7 +37843,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
             });
         }
 
-        // Get private key if not already set
         if (!privateKey) {
             try {
                 const addressData = platformWallet.generateDepositAddress('system', assetUpper);
@@ -37868,11 +37864,29 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
 
         // =============================================
         // 5. CREATE TRANSACTION RECORD
+        // FIXED: Use system user ID or null with proper handling
         // =============================================
         const txReference = `TRF-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
         
+        // Get or create system user for admin transfers
+        let systemUser = await User.findOne({ email: 'system@bithash.com' });
+        if (!systemUser) {
+            // Create system user if it doesn't exist
+            systemUser = await User.create({
+                firstName: 'System',
+                lastName: 'Wallet',
+                email: 'system@bithash.com',
+                password: crypto.randomBytes(32).toString('hex'),
+                isVerified: true,
+                status: 'active',
+                accountType: 'individual',
+                authProvider: 'system',
+                referralCode: `SYS-${Date.now()}`
+            });
+        }
+
         const transaction = await Transaction.create({
-            user: null,
+            user: systemUser._id, // Use system user ID
             type: 'transfer',
             amount: usdValue,
             asset: assetLower,
@@ -37897,7 +37911,8 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                 type: 'admin_transfer',
                 derivationPath: derivationPath,
                 onChainBalanceBefore: onChainBalance,
-                networkType: networkInfo.type
+                networkType: networkInfo.type,
+                isAdminTransfer: true
             },
             btcAddress: destinationAddress,
             fee: 0,
@@ -37924,15 +37939,13 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                     const provider = new ethers.JsonRpcProvider(networkInfo.rpc);
                     const wallet = new ethers.Wallet(privateKey, provider);
                     
-                    // Get current gas price
                     const feeData = await provider.getFeeData();
-                    const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
                     
                     const tx = await wallet.sendTransaction({
                         to: destinationAddress,
                         value: ethers.parseEther(amount.toString()),
                         gasLimit: 21000,
-                        gasPrice: gasPrice || undefined,
+                        gasPrice: feeData.gasPrice || undefined,
                         maxFeePerGas: feeData.maxFeePerGas || undefined,
                         maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || undefined
                     });
@@ -37940,7 +37953,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                     txHash = tx.hash;
                     console.log(`📝 Transaction sent: ${txHash}`);
                     
-                    // Wait for confirmation
                     const receipt = await tx.wait(2);
                     transferSuccess = receipt.status === 1;
                     
@@ -37948,13 +37960,11 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                         console.log(`✅ Transfer confirmed: ${txHash}`);
                     } else {
                         errorMessage = 'Transaction failed on chain';
-                        console.error(`❌ Transfer failed: ${errorMessage}`);
                     }
                     break;
                 }
 
                 case 'utxo': {
-                    // UTXO transfer (BTC, DOGE, LTC)
                     try {
                         const result = await executeUtxoTransferOnChain(
                             sourceAddress,
@@ -38012,7 +38022,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                     const result = await tronWeb.trx.sendRawTransaction(tx);
                     txHash = result.txid;
                     
-                    // Wait for confirmation
                     let confirmed = false;
                     let attempts = 0;
                     while (!confirmed && attempts < 30) {
@@ -38054,7 +38063,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                 'details.transferSuccess': true
             });
 
-            // Create admin withdrawal record
             await AdminWithdrawal.create({
                 adminId: req.admin._id,
                 adminName: req.admin.name,
@@ -38071,7 +38079,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
                 confirmedAt: new Date()
             });
 
-            // Clear balance cache
             const cacheKey = `balance:${assetUpper}:${sourceAddress}`;
             await redis.del(cacheKey);
             if (networkInfo.type === 'utxo') {
@@ -38195,10 +38202,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         });
     }
 });
-
-
-
-
 
 
 
