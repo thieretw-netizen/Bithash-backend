@@ -36538,12 +36538,697 @@ async function invalidateWalletCache(userId = null) {
 
 
 
+// =============================================
+// WALLET SUMMARY - REAL BLOCKCHAIN BALANCES
+// GET /api/admin/wallet/summary
+// =============================================
+app.get('/api/admin/wallet/summary', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        // =============================================
+        // 1. GET ALL UNIQUE ASSETS FROM DEPOSIT ADDRESSES
+        // =============================================
+        const uniqueAssets = await DepositAddress.distinct('asset');
+        const summary = [];
+        let totalUsdValue = 0;
+        let totalAddresses = 0;
+        
+        // =============================================
+        // 2. FOR EACH ASSET, GET ALL ADDRESSES AND CALCULATE BALANCES
+        // =============================================
+        for (const asset of uniqueAssets) {
+            const addresses = await DepositAddress.find({ 
+                asset: asset, 
+                isActive: true 
+            }).select('address');
+            
+            if (addresses.length === 0) continue;
+            
+            const addressList = addresses.map(a => a.address);
+            const addressCount = addressList.length;
+            totalAddresses += addressCount;
+            
+            // Get real blockchain balance for this asset
+            let totalBalance = 0;
+            const batchSize = 50;
+            
+            for (let i = 0; i < addressList.length; i += batchSize) {
+                const batch = addressList.slice(i, i + batchSize);
+                const batchPromises = batch.map(async (addr) => {
+                    try {
+                        const balance = await getBlockchainBalance(addr, asset);
+                        return balance;
+                    } catch (err) {
+                        console.error(`Failed to get balance for ${addr}:`, err.message);
+                        return 0;
+                    }
+                });
+                
+                const batchResults = await Promise.all(batchPromises);
+                totalBalance += batchResults.reduce((sum, bal) => sum + bal, 0);
+            }
+            
+            // Get current price
+            const price = await getCryptoPrice(asset);
+            const usdValue = totalBalance * (price || 0);
+            totalUsdValue += usdValue;
+            
+            // Get network info
+            const networkInfo = ASSET_NETWORK_MAP[asset.toUpperCase()] || { network: 'Unknown' };
+            
+            summary.push({
+                asset: asset.toUpperCase(),
+                totalBalance: totalBalance,
+                usdValue: usdValue,
+                usdPrice: price || 0,
+                addressCount: addressCount,
+                network: networkInfo.network || 'Unknown',
+                chainId: networkInfo.chainId || null,
+                lastUpdated: new Date().toISOString()
+            });
+        }
+        
+        // Sort by USD value descending
+        summary.sort((a, b) => b.usdValue - a.usdValue);
+        
+        // =============================================
+        // 3. CACHE THE SUMMARY
+        // =============================================
+        const cacheData = {
+            summary: summary,
+            totalUsdValue: totalUsdValue,
+            totalAddresses: totalAddresses,
+            lastUpdated: new Date().toISOString()
+        };
+        
+        await redis.setex('wallet:summary', 60, JSON.stringify(cacheData));
+        
+        res.status(200).json({
+            status: 'success',
+            data: cacheData
+        });
+        
+    } catch (err) {
+        console.error('Wallet summary error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to load wallet summary'
+        });
+    }
+});
+
+// =============================================
+// WALLET TRANSACTIONS - REAL BLOCKCHAIN DATA
+// GET /api/admin/wallet/transactions
+// =============================================
+app.get('/api/admin/wallet/transactions', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+        const search = req.query.search || '';
+        const direction = req.query.direction || '';
+        const status = req.query.status || '';
+        const age = req.query.age || '';
+        const category = req.query.category || '';
+        
+        // =============================================
+        // 1. BUILD DATABASE QUERY
+        // =============================================
+        let query = {};
+        
+        // Search by hash, address, user, network, asset
+        if (search) {
+            const searchRegex = new RegExp(search, 'i');
+            
+            // Find users matching search
+            const users = await User.find({
+                $or: [
+                    { email: searchRegex },
+                    { firstName: searchRegex },
+                    { lastName: searchRegex }
+                ]
+            }).select('_id');
+            
+            const userIds = users.map(u => u._id);
+            
+            query.$or = [
+                { reference: searchRegex },
+                { btcAddress: searchRegex },
+                { 'details.depositAddress': searchRegex },
+                { 'details.walletAddress': searchRegex },
+                { 'details.txHash': searchRegex },
+                { asset: searchRegex },
+                { method: searchRegex },
+                { user: { $in: userIds } }
+            ];
+        }
+        
+        // Filter by direction
+        if (direction) {
+            if (direction === 'incoming') {
+                query.type = 'deposit';
+            } else if (direction === 'outgoing') {
+                query.type = 'withdrawal';
+            }
+        }
+        
+        // Filter by category (if provided)
+        if (category && category !== 'all') {
+            if (category === 'deposit') query.type = 'deposit';
+            else if (category === 'withdrawal') query.type = 'withdrawal';
+            else if (category === 'transfer') query.type = 'transfer';
+        }
+        
+        // Filter by status
+        if (status && status !== 'all') {
+            query.status = status;
+        }
+        
+        // Filter by age
+        if (age) {
+            let dateFilter = {};
+            const now = new Date();
+            
+            switch (age) {
+                case 'today':
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    dateFilter = { $gte: today };
+                    break;
+                case 'yesterday':
+                    const yesterday = new Date();
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    yesterday.setHours(0, 0, 0, 0);
+                    const yesterdayEnd = new Date(yesterday);
+                    yesterdayEnd.setHours(23, 59, 59, 999);
+                    dateFilter = { $gte: yesterday, $lte: yesterdayEnd };
+                    break;
+                case '7d':
+                    const sevenDaysAgo = new Date();
+                    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                    dateFilter = { $gte: sevenDaysAgo };
+                    break;
+                case '30d':
+                    const thirtyDaysAgo = new Date();
+                    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                    dateFilter = { $gte: thirtyDaysAgo };
+                    break;
+                default:
+                    break;
+            }
+            
+            if (Object.keys(dateFilter).length > 0) {
+                query.createdAt = dateFilter;
+            }
+        }
+        
+        // =============================================
+        // 2. EXECUTE QUERY
+        // =============================================
+        const [transactions, total] = await Promise.all([
+            Transaction.find(query)
+                .populate('user', 'firstName lastName email')
+                .populate('processedBy', 'name email')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            Transaction.countDocuments(query)
+        ]);
+        
+        // =============================================
+        // 3. ENRICH WITH BLOCKCHAIN DATA
+        // =============================================
+        const enrichedTransactions = await Promise.all(transactions.map(async (tx) => {
+            const user = tx.user || {};
+            const processedBy = tx.processedBy || {};
+            
+            // Determine asset
+            let asset = tx.asset || tx.method || 'USD';
+            if (tx.buyDetails?.asset) asset = tx.buyDetails.asset;
+            if (tx.sellDetails?.asset) asset = tx.sellDetails.asset;
+            
+            // Get real blockchain confirmation status if txHash exists
+            let confirmations = tx.details?.confirmations || 0;
+            let blockchainStatus = tx.details?.blockchainStatus || null;
+            let txHash = tx.details?.txHash || tx.reference || null;
+            
+            // If transaction has a txHash, verify on blockchain
+            if (txHash && txHash.length > 20) {
+                try {
+                    const assetUpper = asset.toUpperCase();
+                    const networkInfo = ASSET_NETWORK_MAP[assetUpper];
+                    
+                    if (networkInfo) {
+                        const txStatus = await checkTransactionOnBlockchain(txHash, assetUpper, networkInfo.chainId);
+                        if (txStatus) {
+                            confirmations = txStatus.confirmations || 0;
+                            blockchainStatus = txStatus;
+                        }
+                    }
+                } catch (err) {
+                    console.error(`Failed to verify tx ${txHash} on blockchain:`, err.message);
+                }
+            }
+            
+            // Determine direction
+            let directionType = 'unknown';
+            if (tx.type === 'deposit') directionType = 'incoming';
+            else if (tx.type === 'withdrawal') directionType = 'outgoing';
+            else if (tx.type === 'transfer') directionType = 'transfer';
+            
+            // Get USD value
+            const usdValue = tx.amount || 0;
+            
+            // Get gas fee
+            const gasFee = tx.fee || tx.details?.gasFee?.amount || 0;
+            
+            return {
+                _id: tx._id,
+                txHash: txHash,
+                timestamp: tx.createdAt,
+                age: tx.createdAt,
+                network: tx.network || tx.details?.network || 'Unknown',
+                asset: asset,
+                tokenSymbol: tx.details?.tokenSymbol || null,
+                direction: directionType,
+                amount: tx.assetAmount || tx.amount || 0,
+                fiatValue: usdValue,
+                from: tx.details?.fromAddress || tx.details?.from || 'Unknown',
+                to: tx.details?.toAddress || tx.details?.to || tx.btcAddress || tx.details?.walletAddress || 'Unknown',
+                platformWallet: tx.details?.depositAddress || tx.details?.platformWallet || null,
+                assignedUser: user.email || null,
+                gasFee: gasFee,
+                feeAsset: tx.asset || 'USD',
+                blockNumber: tx.details?.blockNumber || null,
+                confirmations: confirmations,
+                status: tx.status || 'pending',
+                type: tx.type || 'unknown',
+                method: tx.method || 'unknown',
+                memo: tx.details?.memo || tx.details?.destinationTag || null,
+                tag: tx.details?.destinationTag || null,
+                gasUsed: tx.details?.gasUsed || null,
+                gasPrice: tx.details?.gasPrice || null,
+                nonce: tx.details?.nonce || null,
+                internalTransfers: tx.details?.internalTransfers || null,
+                tokenTransfers: tx.details?.tokenTransfers || null,
+                logs: tx.details?.logs || null,
+                events: tx.details?.events || null,
+                explorerUrl: txHash ? `${ASSET_NETWORK_MAP[asset.toUpperCase()]?.explorer || '#'}${txHash}` : null,
+                blockchainStatus: blockchainStatus,
+                adminName: processedBy.name || 'System',
+                notes: tx.adminNotes || null,
+                createdAt: tx.createdAt,
+                updatedAt: tx.updatedAt
+            };
+        }));
+        
+        // =============================================
+        // 4. CALCULATE STATS
+        // =============================================
+        const totalTransfers = await Transaction.countDocuments({
+            type: { $in: ['deposit', 'withdrawal', 'transfer'] }
+        });
+        
+        const pendingTransfers = await Transaction.countDocuments({
+            type: { $in: ['deposit', 'withdrawal', 'transfer'] },
+            status: 'pending'
+        });
+        
+        // =============================================
+        // 5. RETURN RESPONSE
+        // =============================================
+        res.status(200).json({
+            status: 'success',
+            data: {
+                transactions: enrichedTransactions,
+                total: total,
+                page: page,
+                limit: limit,
+                totalPages: Math.ceil(total / limit),
+                totalTransfers: totalTransfers,
+                pendingTransfers: pendingTransfers,
+                timestamp: new Date().toISOString()
+            }
+        });
+        
+    } catch (err) {
+        console.error('Wallet transactions error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to load wallet transactions'
+        });
+    }
+});
 
 
-
-
-
-
+// =============================================
+// WEB SOCKET FOR WALLET - /ws/admin/wallet
+// =============================================
+const setupAdminWalletWebSocket = (server) => {
+    const walletWss = new WebSocket.Server({ 
+        server, 
+        path: '/ws/admin/wallet' 
+    });
+    
+    const adminClients = new Map(); // clientId -> { ws, adminId, isAuthenticated }
+    const subscriptions = new Map(); // clientId -> Set of subscriptions
+    
+    // =============================================
+    // AUTHENTICATE ADMIN
+    // =============================================
+    const authenticateAdmin = async (token) => {
+        try {
+            const decoded = verifyJWT(token);
+            if (!decoded.isAdmin) return null;
+            
+            const admin = await Admin.findById(decoded.id);
+            if (!admin) return null;
+            
+            return admin;
+        } catch (err) {
+            console.error('WebSocket auth error:', err);
+            return null;
+        }
+    };
+    
+    // =============================================
+    // BROADCAST TO ADMIN
+    // =============================================
+    const broadcastToAdmin = (adminId, data) => {
+        adminClients.forEach((client, clientId) => {
+            if (client.adminId === adminId && client.ws.readyState === WebSocket.OPEN) {
+                client.ws.send(JSON.stringify(data));
+            }
+        });
+    };
+    
+    // =============================================
+    // BROADCAST TO ALL ADMINS
+    // =============================================
+    const broadcastToAllAdmins = (data) => {
+        adminClients.forEach((client) => {
+            if (client.ws.readyState === WebSocket.OPEN) {
+                client.ws.send(JSON.stringify(data));
+            }
+        });
+    };
+    
+    // =============================================
+    // HANDLE INCOMING MESSAGES
+    // =============================================
+    const handleMessage = async (clientId, message) => {
+        try {
+            const data = JSON.parse(message);
+            const client = adminClients.get(clientId);
+            
+            if (!client || !client.isAuthenticated) {
+                return;
+            }
+            
+            switch (data.type) {
+                case 'subscribe':
+                    // Subscribe to channels
+                    if (data.channels && Array.isArray(data.channels)) {
+                        if (!subscriptions.has(clientId)) {
+                            subscriptions.set(clientId, new Set());
+                        }
+                        data.channels.forEach(channel => {
+                            subscriptions.get(clientId).add(channel);
+                        });
+                        
+                        client.ws.send(JSON.stringify({
+                            type: 'subscribed',
+                            channels: Array.from(subscriptions.get(clientId)),
+                            timestamp: new Date().toISOString()
+                        }));
+                    }
+                    break;
+                    
+                case 'unsubscribe':
+                    if (data.channels && Array.isArray(data.channels) && subscriptions.has(clientId)) {
+                        data.channels.forEach(channel => {
+                            subscriptions.get(clientId).delete(channel);
+                        });
+                        
+                        client.ws.send(JSON.stringify({
+                            type: 'unsubscribed',
+                            channels: Array.from(subscriptions.get(clientId)),
+                            timestamp: new Date().toISOString()
+                        }));
+                    }
+                    break;
+                    
+                case 'ping':
+                    client.ws.send(JSON.stringify({
+                        type: 'pong',
+                        timestamp: new Date().toISOString()
+                    }));
+                    break;
+                    
+                default:
+                    // Handle other message types
+                    break;
+            }
+        } catch (err) {
+            console.error('WebSocket message error:', err);
+        }
+    };
+    
+    // =============================================
+    // WEB SOCKET CONNECTION
+    // =============================================
+    walletWss.on('connection', async (ws, req) => {
+        const clientId = uuidv4();
+        let isAuthenticated = false;
+        let adminId = null;
+        let heartbeatInterval = null;
+        
+        console.log(`Admin wallet WebSocket client connected: ${clientId}`);
+        
+        // Store client
+        adminClients.set(clientId, {
+            ws: ws,
+            adminId: null,
+            isAuthenticated: false,
+            connectedAt: new Date()
+        });
+        
+        // =============================================
+        // HEARTBEAT
+        // =============================================
+        heartbeatInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.ping();
+            }
+        }, 30000);
+        
+        // =============================================
+        // MESSAGE HANDLER
+        // =============================================
+        ws.on('message', async (message) => {
+            try {
+                const data = JSON.parse(message);
+                
+                // Handle authentication
+                if (data.type === 'authenticate') {
+                    const token = data.token;
+                    const admin = await authenticateAdmin(token);
+                    
+                    if (admin) {
+                        isAuthenticated = true;
+                        adminId = admin._id.toString();
+                        
+                        // Update client record
+                        const client = adminClients.get(clientId);
+                        if (client) {
+                            client.adminId = adminId;
+                            client.isAuthenticated = true;
+                        }
+                        
+                        ws.send(JSON.stringify({
+                            type: 'authenticated',
+                            adminId: adminId,
+                            adminName: admin.name,
+                            timestamp: new Date().toISOString()
+                        }));
+                        
+                        console.log(`Admin ${admin.email} authenticated for wallet WebSocket`);
+                        
+                        // Send initial data
+                        await sendInitialWalletData(ws);
+                    } else {
+                        ws.send(JSON.stringify({
+                            type: 'auth_failed',
+                            message: 'Invalid token',
+                            timestamp: new Date().toISOString()
+                        }));
+                        ws.close();
+                    }
+                    return;
+                }
+                
+                // Handle authenticated messages
+                if (isAuthenticated) {
+                    await handleMessage(clientId, message);
+                } else {
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: 'Not authenticated',
+                        timestamp: new Date().toISOString()
+                    }));
+                }
+                
+            } catch (err) {
+                console.error('WebSocket message error:', err);
+                ws.send(JSON.stringify({
+                    type: 'error',
+                    message: 'Invalid message format',
+                    timestamp: new Date().toISOString()
+                }));
+            }
+        });
+        
+        // =============================================
+        // CLOSE HANDLER
+        // =============================================
+        ws.on('close', () => {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+            
+            adminClients.delete(clientId);
+            subscriptions.delete(clientId);
+            
+            console.log(`Admin wallet WebSocket client disconnected: ${clientId}`);
+        });
+        
+        // =============================================
+        // ERROR HANDLER
+        // =============================================
+        ws.on('error', (err) => {
+            console.error(`WebSocket error for client ${clientId}:`, err);
+        });
+    });
+    
+    // =============================================
+    // SEND INITIAL WALLET DATA
+    // =============================================
+    async function sendInitialWalletData(ws) {
+        try {
+            // Get summary
+            const summaryCache = await redis.get('wallet:summary');
+            if (summaryCache) {
+                ws.send(JSON.stringify({
+                    type: 'summary_update',
+                    data: JSON.parse(summaryCache),
+                    timestamp: new Date().toISOString()
+                }));
+            }
+            
+            // Get pending count
+            const pendingCount = await Transaction.countDocuments({
+                type: { $in: ['deposit', 'withdrawal'] },
+                status: 'pending'
+            });
+            
+            ws.send(JSON.stringify({
+                type: 'pending_count',
+                count: pendingCount,
+                timestamp: new Date().toISOString()
+            }));
+            
+        } catch (err) {
+            console.error('Error sending initial wallet data:', err);
+        }
+    }
+    
+    // =============================================
+    // REAL-TIME UPDATE BROADCASTERS
+    // =============================================
+    
+    // Broadcast wallet summary updates every 30 seconds
+    setInterval(async () => {
+        try {
+            const summaryCache = await redis.get('wallet:summary');
+            if (summaryCache) {
+                const data = JSON.parse(summaryCache);
+                broadcastToAllAdmins({
+                    type: 'summary_update',
+                    data: data,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        } catch (err) {
+            console.error('Error broadcasting summary update:', err);
+        }
+    }, 30000);
+    
+    // Broadcast pending count updates every 10 seconds
+    setInterval(async () => {
+        try {
+            const pendingCount = await Transaction.countDocuments({
+                type: { $in: ['deposit', 'withdrawal'] },
+                status: 'pending'
+            });
+            
+            broadcastToAllAdmins({
+                type: 'pending_count',
+                count: pendingCount,
+                timestamp: new Date().toISOString()
+            });
+        } catch (err) {
+            console.error('Error broadcasting pending count:', err);
+        }
+    }, 10000);
+    
+    // =============================================
+    // MONITOR NEW TRANSACTIONS
+    // =============================================
+    const lastTxCheck = { timestamp: new Date() };
+    
+    setInterval(async () => {
+        try {
+            const newTxs = await Transaction.find({
+                createdAt: { $gt: lastTxCheck.timestamp },
+                type: { $in: ['deposit', 'withdrawal'] }
+            })
+            .populate('user', 'firstName lastName email')
+            .limit(50)
+            .lean();
+            
+            if (newTxs.length > 0) {
+                lastTxCheck.timestamp = new Date();
+                
+                // Process each new transaction
+                for (const tx of newTxs) {
+                    const asset = tx.asset || tx.method || 'USD';
+                    const user = tx.user || {};
+                    
+                    broadcastToAllAdmins({
+                        type: tx.type === 'deposit' ? 'IncomingTransaction' : 'OutgoingTransaction',
+                        transaction: {
+                            _id: tx._id,
+                            hash: tx.reference || tx.details?.txHash,
+                            amount: tx.amount || 0,
+                            asset: asset,
+                            user: user.email || 'Unknown',
+                            timestamp: tx.createdAt,
+                            status: tx.status
+                        },
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Error monitoring new transactions:', err);
+        }
+    }, 5000);
+    
+    console.log('✅ Admin wallet WebSocket server started on /ws/admin/wallet');
+    
+    return walletWss;
+};
 
 
 
