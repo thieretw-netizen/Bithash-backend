@@ -35437,91 +35437,6 @@ const WALLET_CACHE_TTL = 60; // 60 seconds
 const WALLET_PAGE_LIMIT = 50;
 
 // =============================================
-// BLOCKCHAIN CONFIG - Using your RPC endpoints
-// =============================================
-const BLOCKCHAIN_PROVIDERS = {
-    'ETH': {
-        rpc: process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io/v3/2e692d39dad941d799bb09fa90bf2881',
-        explorer: 'https://etherscan.io',
-        apiKey: process.env.ETHERSCAN_API_KEY,
-        type: 'evm',
-        chainId: 1
-    },
-    'BSC': {
-        rpc: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org/',
-        explorer: 'https://bscscan.com',
-        apiKey: process.env.BSCSCAN_API_KEY,
-        type: 'evm',
-        chainId: 56
-    },
-    'POLYGON': {
-        rpc: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com/',
-        explorer: 'https://polygonscan.com',
-        apiKey: process.env.POLYGONSCAN_API_KEY,
-        type: 'evm',
-        chainId: 137
-    },
-    'ARBITRUM': {
-        rpc: process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc',
-        explorer: 'https://arbiscan.io',
-        apiKey: process.env.ARBISCAN_API_KEY,
-        type: 'evm',
-        chainId: 42161
-    },
-    'AVALANCHE': {
-        rpc: process.env.AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc',
-        explorer: 'https://snowtrace.io',
-        apiKey: process.env.SNOWTRACE_API_KEY,
-        type: 'evm',
-        chainId: 43114
-    },
-    'FANTOM': {
-        rpc: process.env.FANTOM_RPC_URL || 'https://rpc.soniclabs.com',
-        explorer: 'https://ftmscan.com',
-        apiKey: process.env.FTMSCAN_API_KEY,
-        type: 'evm',
-        chainId: 250
-    },
-    'OPTIMISM': {
-        rpc: process.env.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io',
-        explorer: 'https://optimistic.etherscan.io',
-        type: 'evm',
-        chainId: 10
-    },
-    'BASE': {
-        rpc: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
-        explorer: 'https://basescan.org',
-        type: 'evm',
-        chainId: 8453
-    },
-    'SOLANA': {
-        rpc: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-        explorer: 'https://solscan.io',
-        type: 'solana',
-        chainId: 501
-    }
-};
-
-// Asset to network mapping
-const ASSET_NETWORK_MAP = {
-    'BTC': { network: 'BTC', rpc: null, explorer: 'https://blockchair.com/bitcoin', type: 'utxo' },
-    'ETH': { network: 'ETH', rpc: BLOCKCHAIN_PROVIDERS.ETH.rpc, explorer: 'https://etherscan.io', type: 'evm' },
-    'USDT': { network: 'ETH', rpc: BLOCKCHAIN_PROVIDERS.ETH.rpc, explorer: 'https://etherscan.io', type: 'evm', contract: '0xdAC17F958D2ee523a2206206994597C13D831ec7' },
-    'USDC': { network: 'ETH', rpc: BLOCKCHAIN_PROVIDERS.ETH.rpc, explorer: 'https://etherscan.io', type: 'evm', contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
-    'BNB': { network: 'BSC', rpc: BLOCKCHAIN_PROVIDERS.BSC.rpc, explorer: 'https://bscscan.com', type: 'evm' },
-    'SOL': { network: 'SOLANA', rpc: BLOCKCHAIN_PROVIDERS.SOLANA.rpc, explorer: 'https://solscan.io', type: 'solana' },
-    'XRP': { network: 'XRP', rpc: null, explorer: 'https://xrpscan.com', type: 'xrp' },
-    'DOGE': { network: 'DOGE', rpc: null, explorer: 'https://blockchair.com/dogecoin', type: 'utxo' },
-    'LTC': { network: 'LTC', rpc: null, explorer: 'https://blockchair.com/litecoin', type: 'utxo' },
-    'ADA': { network: 'ADA', rpc: null, explorer: 'https://cardanoscan.io', type: 'cardano' },
-    'SHIB': { network: 'ETH', rpc: BLOCKCHAIN_PROVIDERS.ETH.rpc, explorer: 'https://etherscan.io', type: 'evm', contract: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE' },
-    'LINK': { network: 'ETH', rpc: BLOCKCHAIN_PROVIDERS.ETH.rpc, explorer: 'https://etherscan.io', type: 'evm', contract: '0x514910771AF9Ca656af840dff83E8264EcF986CA' },
-    'MATIC': { network: 'POLYGON', rpc: BLOCKCHAIN_PROVIDERS.POLYGON.rpc, explorer: 'https://polygonscan.com', type: 'evm' },
-    'AVAX': { network: 'AVALANCHE', rpc: BLOCKCHAIN_PROVIDERS.AVALANCHE.rpc, explorer: 'https://snowtrace.io', type: 'evm' },
-    'TRX': { network: 'TRON', rpc: 'https://api.trongrid.io', explorer: 'https://tronscan.org', type: 'tron' }
-};
-
-// =============================================
 // HELPER: Get blockchain balance with RPC
 // =============================================
 async function getBlockchainBalance(address, asset, network) {
@@ -35577,21 +35492,18 @@ async function getBlockchainBalance(address, asset, network) {
             }
             case 'cardano': {
                 try {
-                    const { BlockfrostProvider } = require('@cardano-sdk/core');
-                    const provider = new BlockfrostProvider({
-                        apiKey: process.env.BLOCKFROST_API_KEY,
-                        network: 'mainnet'
-                    });
-                    const utxos = await provider.utxosByAddresses([address]);
-                    let totalLovelace = 0;
-                    for (const utxo of utxos) {
-                        for (const asset of utxo.assets) {
-                            if (asset.unit === 'lovelace') {
-                                totalLovelace += BigInt(asset.quantity);
-                            }
-                        }
+                    if (!process.env.BLOCKFROST_API_KEY) {
+                        console.warn('BLOCKFROST_API_KEY not set for Cardano');
+                        return 0;
                     }
-                    balance = Number(totalLovelace) / 1_000_000;
+                    const response = await axios.get(
+                        `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}`,
+                        { headers: { 'project_id': process.env.BLOCKFROST_API_KEY } }
+                    );
+                    if (response.data && response.data.amount) {
+                        const lovelace = response.data.amount.find(a => a.unit === 'lovelace');
+                        balance = lovelace ? lovelace.quantity / 1_000_000 : 0;
+                    }
                 } catch (err) {
                     console.warn('Cardano balance fetch failed:', err.message);
                     balance = 0;
@@ -35600,9 +35512,10 @@ async function getBlockchainBalance(address, asset, network) {
             }
             case 'utxo': {
                 try {
-                    const response = await axios.get(`${networkInfo.explorer}/dashboards/address/${address}`, {
-                        timeout: 10000
-                    });
+                    const response = await axios.get(
+                        `${networkInfo.explorer}/dashboards/address/${address}`,
+                        { timeout: 10000 }
+                    );
                     const data = response.data.data[address];
                     if (data && data.address && data.address.balance) {
                         balance = data.address.balance / 1e8;
@@ -37262,17 +37175,96 @@ app.get('/api/admin/wallet/reports/:type', adminProtect, restrictTo('super', 'fi
             res.setHeader('Content-Type', 'text/csv');
             res.setHeader('Content-Disposition', `attachment; filename=${type}_report_${Date.now()}.csv`);
             res.send(csv);
-        } else {
+        } else if (format === 'excel' || format === 'xlsx') {
             // Excel export
             const XLSX = require('xlsx');
             const wb = XLSX.utils.book_new();
-            let ws = XLSX.utils.json_to_sheet(reportData);
+            let wsData = [];
+            
+            if (type === 'wallet') {
+                wsData = reportData.wallets.map(w => ({
+                    Address: w.address,
+                    Asset: w.asset,
+                    Balance: w.balance,
+                    User: w.userName,
+                    Email: w.userEmail,
+                    Created: w.createdAt
+                }));
+            } else if (type === 'transaction') {
+                wsData = reportData.transactions.map(t => ({
+                    ID: t.id,
+                    Type: t.type,
+                    Amount: t.amount,
+                    Asset: t.asset,
+                    User: t.user,
+                    Status: t.status,
+                    Date: t.createdAt
+                }));
+            } else {
+                wsData = [reportData];
+            }
+            
+            const ws = XLSX.utils.json_to_sheet(wsData);
             XLSX.utils.book_append_sheet(wb, ws, 'Report');
             const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
             
             res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
             res.setHeader('Content-Disposition', `attachment; filename=${type}_report_${Date.now()}.xlsx`);
             res.send(buffer);
+        } else if (format === 'pdf') {
+            // PDF export
+            const PDFDocument = require('pdfkit');
+            const doc = new PDFDocument({ margin: 40, size: 'A4' });
+            const chunks = [];
+            doc.on('data', chunk => chunks.push(chunk));
+            
+            // Header
+            doc.fontSize(18).font('Helvetica-Bold').text(`${type.toUpperCase()} Report`, { align: 'center' });
+            doc.fontSize(10).font('Helvetica').text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' });
+            doc.moveDown();
+            
+            // Content
+            if (type === 'wallet' && reportData.wallets) {
+                doc.fontSize(12).font('Helvetica-Bold').text(`Total Wallets: ${reportData.totalWallets}`);
+                doc.fontSize(12).text(`Total Balance: ${reportData.totalBalance.toFixed(8)}`);
+                doc.moveDown();
+                
+                // Table headers
+                const tableTop = doc.y + 10;
+                doc.fontSize(9).font('Helvetica-Bold');
+                doc.text('Address', 50, tableTop);
+                doc.text('Asset', 250, tableTop);
+                doc.text('Balance', 350, tableTop);
+                doc.text('User', 450, tableTop);
+                doc.text('Email', 520, tableTop);
+                
+                doc.moveDown();
+                let y = doc.y + 5;
+                doc.fontSize(8).font('Helvetica');
+                
+                for (const w of reportData.wallets.slice(0, 50)) {
+                    if (y > 700) { doc.addPage(); y = 50; }
+                    doc.text(w.address.substring(0, 20) + '...', 50, y);
+                    doc.text(w.asset, 250, y);
+                    doc.text(w.balance.toFixed(8), 350, y);
+                    doc.text(w.userName.substring(0, 20), 450, y);
+                    doc.text(w.userEmail.substring(0, 20), 520, y);
+                    y += 15;
+                }
+            }
+            
+            doc.end();
+            await new Promise(resolve => doc.on('end', resolve));
+            const pdfBuffer = Buffer.concat(chunks);
+            
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename=${type}_report_${Date.now()}.pdf`);
+            res.send(pdfBuffer);
+        } else {
+            return res.status(400).json({
+                status: 'fail',
+                message: `Unsupported format: ${format}`
+            });
         }
         
     } catch (err) {
@@ -37283,47 +37275,6 @@ app.get('/api/admin/wallet/reports/:type', adminProtect, restrictTo('super', 'fi
         });
     }
 });
-
-// =============================================
-// HELPER: Get asset price with caching
-// =============================================
-async function getCryptoPrice(asset) {
-    const assetUpper = asset.toUpperCase();
-    const cacheKey = `price:${assetUpper}`;
-    const cached = await redis.get(cacheKey);
-    
-    if (cached) {
-        return parseFloat(cached);
-    }
-    
-    let price = 0;
-    
-    try {
-        // Try CoinGecko first
-        const response = await axios.get(
-            `https://api.coingecko.com/api/v3/simple/price?ids=${assetUpper.toLowerCase()}&vs_currencies=usd`,
-            { timeout: 5000 }
-        );
-        price = response.data[assetUpper.toLowerCase()]?.usd || 0;
-    } catch (err) {
-        // Fallback to Binance
-        try {
-            const response = await axios.get(
-                `https://api.binance.com/api/v3/ticker/price?symbol=${assetUpper}USDT`,
-                { timeout: 5000 }
-            );
-            price = parseFloat(response.data.price) || 0;
-        } catch (err2) {
-            console.warn(`Failed to fetch price for ${assetUpper}`);
-        }
-    }
-    
-    if (price > 0) {
-        await redis.setex(cacheKey, 120, price.toString());
-    }
-    
-    return price;
-}
 
 console.log('✅ Wallet Management endpoints loaded successfully');
 console.log('   - GET /api/admin/wallet/dashboard');
@@ -37340,8 +37291,6 @@ console.log('   - POST /api/admin/wallet/treasury/transfer');
 console.log('   - POST /api/admin/wallet/treasury/sweep');
 console.log('   - GET /api/admin/wallet/reports/:type');
 console.log('🚀 Supports 3+ million users with Redis caching');
-
-
 
 
 
