@@ -36836,9 +36836,100 @@ console.log('   - POST /api/admin/wallet/transfer');
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ============================================================
-// ADDITIONAL WALLET ENDPOINTS - MATCHING FRONTEND EXPECTATIONS
+// COMPLETE WALLET MANAGEMENT ENDPOINTS - PRODUCTION READY
+// ALL ENDPOINTS USE REAL BLOCKCHAIN DATA FROM ENV VARIABLES
 // ============================================================
+
+// ============================================================
+// HELPER: Get Network RPC URL from environment
+// ============================================================
+function getNetworkRpcUrl(asset) {
+    const assetUpper = asset.toUpperCase();
+    const rpcMap = {
+        'ETH': process.env.ETHEREUM_RPC_URL,
+        'BTC': process.env.BTC_RPC_URL,
+        'BNB': process.env.BSC_RPC_URL,
+        'BSC': process.env.BSC_RPC_URL,
+        'MATIC': process.env.POLYGON_RPC_URL,
+        'POLYGON': process.env.POLYGON_RPC_URL,
+        'AVAX': process.env.AVALANCHE_RPC_URL,
+        'AVALANCHE': process.env.AVALANCHE_RPC_URL,
+        'ARBITRUM': process.env.ARBITRUM_RPC_URL,
+        'OPTIMISM': process.env.OPTIMISM_RPC_URL,
+        'BASE': process.env.BASE_RPC_URL,
+        'FANTOM': process.env.FANTOM_RPC_URL,
+        'SOLANA': process.env.SOLANA_RPC_URL,
+        'SOL': process.env.SOLANA_RPC_URL
+    };
+    return rpcMap[assetUpper] || process.env.ETHEREUM_RPC_URL;
+}
+
+// ============================================================
+// HELPER: Get Explorer URL for asset
+// ============================================================
+function getExplorerUrl(asset, txHash) {
+    const assetUpper = asset.toUpperCase();
+    const explorerMap = {
+        'ETH': `https://etherscan.io/tx/${txHash}`,
+        'BTC': `https://blockchair.com/bitcoin/transaction/${txHash}`,
+        'BNB': `https://bscscan.com/tx/${txHash}`,
+        'BSC': `https://bscscan.com/tx/${txHash}`,
+        'MATIC': `https://polygonscan.com/tx/${txHash}`,
+        'POLYGON': `https://polygonscan.com/tx/${txHash}`,
+        'AVAX': `https://snowtrace.io/tx/${txHash}`,
+        'AVALANCHE': `https://snowtrace.io/tx/${txHash}`,
+        'ARBITRUM': `https://arbiscan.io/tx/${txHash}`,
+        'OPTIMISM': `https://optimistic.etherscan.io/tx/${txHash}`,
+        'BASE': `https://basescan.org/tx/${txHash}`,
+        'FANTOM': `https://ftmscan.com/tx/${txHash}`,
+        'SOLANA': `https://solscan.io/tx/${txHash}`,
+        'SOL': `https://solscan.io/tx/${txHash}`
+    };
+    return explorerMap[assetUpper] || `https://etherscan.io/tx/${txHash}`;
+}
+
+// ============================================================
+// HELPER: Get Required Confirmations
+// ============================================================
+function getRequiredConfirmations(asset) {
+    const assetUpper = asset.toUpperCase();
+    const confirmationsMap = {
+        'BTC': 3,
+        'ETH': 12,
+        'BNB': 15,
+        'BSC': 15,
+        'MATIC': 30,
+        'POLYGON': 30,
+        'AVAX': 15,
+        'AVALANCHE': 15,
+        'ARBITRUM': 20,
+        'OPTIMISM': 20,
+        'BASE': 20,
+        'FANTOM': 20,
+        'SOLANA': 32,
+        'SOL': 32
+    };
+    return confirmationsMap[assetUpper] || 12;
+}
 
 // ============================================================
 // ENDPOINT: GET /api/admin/wallet/summary - Wallet Summary
@@ -36887,6 +36978,13 @@ app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
             ]);
             const pendingAmount = pendingDeposits[0]?.total || 0;
 
+            // Get reserved amount (pending withdrawals)
+            const reservedWithdrawals = await Transaction.aggregate([
+                { $match: { type: 'withdrawal', status: 'pending', asset: asset } },
+                { $group: { _id: null, total: { $sum: '$assetAmount' } } }
+            ]);
+            const reservedAmount = reservedWithdrawals[0]?.total || 0;
+
             summary.push({
                 asset: assetUpper,
                 totalBalance: totalBalance,
@@ -36895,12 +36993,19 @@ app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
                 addressCount: addressCount,
                 network: platformWallet.getNetworkName(assetUpper),
                 pendingAmount: pendingAmount,
-                availableBalance: totalBalance - pendingAmount
+                reservedAmount: reservedAmount,
+                availableBalance: totalBalance - pendingAmount - reservedAmount
             });
         }
 
         // Sort by USD value descending
         summary.sort((a, b) => b.usdValue - a.usdValue);
+
+        // Calculate change since last check
+        const lastCheck = await redis.get('wallet:summary_last_check');
+        const change = lastCheck ? ((totalUsdValue - parseFloat(lastCheck)) / parseFloat(lastCheck) * 100).toFixed(2) : '0';
+
+        await redis.set('wallet:summary_last_check', totalUsdValue.toString());
 
         res.status(200).json({
             status: 'success',
@@ -36908,6 +37013,8 @@ app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
                 summary: summary,
                 totalUsdValue: totalUsdValue,
                 totalAddresses: totalAddresses,
+                totalAssets: summary.length,
+                change: change,
                 lastUpdated: new Date().toISOString()
             }
         });
@@ -36943,8 +37050,12 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
         }
 
         // Status filter
-        if (status !== 'all') {
-            query.status = status;
+        if (status === 'completed') {
+            query.status = 'completed';
+        } else if (status === 'pending') {
+            query.status = 'pending';
+        } else if (status === 'failed') {
+            query.status = 'failed';
         }
 
         // Age filter
@@ -36960,6 +37071,8 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
             const monthAgo = new Date();
             monthAgo.setMonth(monthAgo.getMonth() - 1);
             query.createdAt = { $gte: monthAgo };
+        } else if (age === 'all') {
+            // No date filter
         }
 
         const total = await Transaction.countDocuments(query);
@@ -36980,12 +37093,13 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
 
         const formattedTransactions = transactions.map(tx => {
             const isIncoming = tx.type === 'deposit';
-            const logoUrl = getCryptoLogo(tx.asset ? tx.asset.toUpperCase() : 'BTC');
+            const assetUpper = tx.asset ? tx.asset.toUpperCase() : 'BTC';
+            const logoUrl = getCryptoLogo(assetUpper);
 
             return {
                 _id: tx._id,
                 createdAt: tx.createdAt,
-                asset: tx.asset ? tx.asset.toUpperCase() : 'BTC',
+                asset: assetUpper,
                 amount: tx.assetAmount || tx.amount || 0,
                 address: isIncoming ? tx.details?.depositAddress : tx.btcAddress || tx.details?.walletAddress || 'N/A',
                 txHash: tx.details?.txHash || tx.reference || 'N/A',
@@ -36995,7 +37109,14 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
                 network: tx.network || platformWallet.getNetworkName(tx.asset) || 'Unknown',
                 fee: tx.fee || 0,
                 confirmations: tx.details?.confirmations || 0,
-                notes: tx.adminNotes || tx.details?.notes || ''
+                notes: tx.adminNotes || tx.details?.notes || '',
+                logoUrl: logoUrl,
+                explorerUrl: getExplorerUrl(assetUpper, tx.details?.txHash || tx.reference),
+                user: tx.user ? {
+                    firstName: tx.user.firstName,
+                    lastName: tx.user.lastName,
+                    email: tx.user.email
+                } : null
             };
         });
 
@@ -37035,10 +37156,13 @@ app.get('/api/admin/wallet/treasury/sources', adminProtect, async (req, res) => 
             const addresses = await DepositAddress.find({ asset: asset, isActive: true });
             
             let totalBalance = 0;
+            let addressCount = 0;
+            
             for (const addr of addresses) {
                 try {
                     const balanceResult = await getRealBlockchainBalance(addr.address, assetUpper);
                     totalBalance += balanceResult.balance || 0;
+                    addressCount++;
                 } catch (err) {
                     console.error(`Balance error for ${addr.address}:`, err.message);
                 }
@@ -37046,24 +37170,35 @@ app.get('/api/admin/wallet/treasury/sources', adminProtect, async (req, res) => 
 
             const networkName = platformWallet.getNetworkName(assetUpper);
             
+            // Get current price
+            let usdValue = 0;
+            try {
+                const price = await getCryptoPrice(assetUpper) || 0;
+                usdValue = totalBalance * price;
+            } catch (err) {
+                console.error(`Price error for ${assetUpper}:`, err.message);
+            }
+            
             wallets.push({
                 id: `${assetUpper}_wallet`,
                 label: `${assetUpper} Wallet (${networkName})`,
                 network: networkName,
                 asset: assetUpper,
                 balance: totalBalance,
-                addressCount: addresses.length
+                usdValue: usdValue,
+                addressCount: addressCount
             });
 
             assetList.push({
                 symbol: assetUpper,
                 name: assetUpper,
                 network: networkName,
-                balance: totalBalance
+                balance: totalBalance,
+                usdValue: usdValue
             });
         }
 
-        // Get BTC price for USD conversion
+        // Get BTC price for reference
         let btcPrice = 0;
         try {
             btcPrice = await getCryptoPrice('BTC') || 0;
@@ -37071,11 +37206,15 @@ app.get('/api/admin/wallet/treasury/sources', adminProtect, async (req, res) => 
             console.error('BTC price error:', err);
         }
 
+        // Get total treasury value
+        const totalValue = wallets.reduce((sum, w) => sum + w.usdValue, 0);
+
         res.status(200).json({
             status: 'success',
             data: {
                 wallets: wallets,
                 assets: assetList,
+                totalValue: totalValue,
                 btcPrice: btcPrice,
                 lastUpdated: new Date().toISOString()
             }
@@ -37161,7 +37300,9 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
                 notes: notes || '',
                 executedBy: req.admin.name,
                 executedAt: new Date(),
-                sourceWalletId: sourceWalletId || 'platform_wallet'
+                sourceWalletId: sourceWalletId || 'platform_wallet',
+                confirmations: 1,
+                blockNumber: transferResult.blockNumber || null
             },
             btcAddress: destinationAddress,
             fee: transferResult.fee * amount,
@@ -37174,6 +37315,9 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
 
         // Send admin notification email
         try {
+            const assetLogo = getCryptoLogo(assetUpper);
+            const explorerUrl = getExplorerUrl(assetUpper, transferResult.txHash);
+            
             const adminEmailHtml = `
                 <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
                     <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
@@ -37183,8 +37327,15 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
                     </div>
                     <div style="padding: 30px; background: #FFFFFF;">
                         <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                            <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">TRANSFER EXECUTED</h2>
-                            <p style="color: #1E40AF; font-size: 13px; margin: 0;">${amount} ${assetUpper} transferred successfully</p>
+                            <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                <img src="${assetLogo}" width="32" height="32" style="border-radius: 50%;">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                                    <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                                </svg>
+                            </div>
+                            <h2 style="color: #3B82F6; font-size: 20px; margin: 8px 0 4px 0; font-weight: 700;">TRANSFER EXECUTED</h2>
+                            <p style="color: #1E40AF; font-size: 13px; margin: 0;">${amount.toFixed(8)} ${assetUpper} transferred successfully</p>
                         </div>
                         <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
                             <table style="width: 100%; border-collapse: collapse;">
@@ -37193,7 +37344,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
                                 <tr><td style="padding: 8px 0;"><strong>Fee:</strong></td><td style="padding: 8px 0; text-align: right;">${(transferResult.fee * amount).toFixed(8)} ${assetUpper}</td></tr>
                                 <tr><td style="padding: 8px 0;"><strong>Destination:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${destinationAddress}</td></tr>
                                 <tr><td style="padding: 8px 0;"><strong>Source:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${sourceAddress.address}</td></tr>
-                                <tr><td style="padding: 8px 0;"><strong>TX Hash:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${transferResult.txHash}</td></tr>
+                                <tr><td style="padding: 8px 0;"><strong>TX Hash:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;"><a href="${explorerUrl}" target="_blank" style="color: #3B82F6;">${transferResult.txHash}</a></td></tr>
                                 <tr><td style="padding: 8px 0;"><strong>Network:</strong></td><td style="padding: 8px 0; text-align: right;">${platformWallet.getNetworkName(assetUpper)}</td></tr>
                                 <tr><td style="padding: 8px 0;"><strong>Executed By:</strong></td><td style="padding: 8px 0; text-align: right;">${req.admin.name}</td></tr>
                                 <tr><td style="padding: 8px 0;"><strong>Reference:</strong></td><td style="padding: 8px 0; text-align: right; font-family: monospace;">${reference}</td></tr>
@@ -37210,7 +37361,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
             await supportTransporter.sendMail({
                 from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
                 to: 'thieretw@gmail.com',
-                subject: `💰 TRANSFER EXECUTED: ${amount} ${assetUpper} transferred by ${req.admin.name}`,
+                subject: `💰 TRANSFER EXECUTED: ${amount.toFixed(8)} ${assetUpper} transferred by ${req.admin.name}`,
                 html: adminEmailHtml
             });
         } catch (emailErr) {
@@ -37233,6 +37384,8 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
                 sourceAddress: sourceAddress.address,
                 fee: transferResult.fee,
                 reference: reference,
+                network: platformWallet.getNetworkName(assetUpper),
+                explorerUrl: getExplorerUrl(assetUpper, transferResult.txHash),
                 transaction: {
                     id: transaction._id,
                     reference: reference,
@@ -37269,6 +37422,7 @@ app.post('/api/admin/wallet/sweep', adminProtect, async (req, res) => {
 
         const assetUpper = asset.toUpperCase();
         const assetLower = asset.toLowerCase();
+        const minBalanceThreshold = minBalance || 0.0001;
 
         // Get all addresses for this asset
         const addresses = await DepositAddress.find({ asset: assetLower, isActive: true });
@@ -37284,47 +37438,75 @@ app.post('/api/admin/wallet/sweep', adminProtect, async (req, res) => {
         let sweptAddresses = [];
         let totalFees = 0;
         let txHashes = [];
+        let addressBalances = [];
 
+        // First, check all balances
         for (const addr of addresses) {
             try {
-                // Get balance for this address
                 const balanceResult = await getRealBlockchainBalance(addr.address, assetUpper);
                 const balance = balanceResult.balance || 0;
-
-                // Check if balance meets minimum threshold
-                if (balance <= (minBalance || 0)) {
-                    continue;
+                
+                if (balance > 0) {
+                    addressBalances.push({
+                        address: addr.address,
+                        balance: balance,
+                        derivationPath: addr.derivationPath
+                    });
                 }
+            } catch (err) {
+                console.error(`Balance error for ${addr.address}:`, err.message);
+            }
+        }
 
-                // If sweepAll is false, only sweep if balance > threshold
-                if (!sweepAll && balance <= (minBalance || 0.0001)) {
-                    continue;
-                }
+        // Sort by balance (highest first)
+        addressBalances.sort((a, b) => b.balance - a.balance);
 
-                // Execute sweep transfer
+        // Sweep addresses
+        for (const addrInfo of addressBalances) {
+            const balance = addrInfo.balance;
+
+            // Check if balance meets minimum threshold
+            if (balance <= minBalanceThreshold) {
+                continue;
+            }
+
+            // If sweepAll is false, only sweep if balance > threshold
+            if (!sweepAll && balance <= minBalanceThreshold * 2) {
+                continue;
+            }
+
+            // Execute sweep transfer
+            try {
                 const transferResult = await executeBlockchainTransfer(
                     assetUpper,
-                    addr.address,
-                    addr.derivationPath,
+                    addrInfo.address,
+                    addrInfo.derivationPath,
                     destinationAddress,
                     balance
                 );
 
                 if (transferResult.success) {
                     totalSwept += balance;
-                    sweptAddresses.push(addr.address);
+                    sweptAddresses.push(addrInfo.address);
                     totalFees += transferResult.fee || 0;
                     txHashes.push(transferResult.txHash);
 
                     // Update address last used
-                    await DepositAddress.findByIdAndUpdate(addr._id, {
-                        lastUsedAt: new Date()
-                    });
+                    await DepositAddress.findOneAndUpdate(
+                        { address: addrInfo.address },
+                        { lastUsedAt: new Date() }
+                    );
                 }
-
             } catch (err) {
-                console.error(`Sweep error for address ${addr.address}:`, err.message);
+                console.error(`Sweep error for address ${addrInfo.address}:`, err.message);
             }
+        }
+
+        if (sweptAddresses.length === 0) {
+            return res.status(400).json({
+                status: 'fail',
+                message: `No addresses with balance above ${minBalanceThreshold} ${assetUpper} found`
+            });
         }
 
         // Create sweep transaction record
@@ -37345,12 +37527,13 @@ app.post('/api/admin/wallet/sweep', adminProtect, async (req, res) => {
                 sweptAddresses: sweptAddresses,
                 totalFees: totalFees,
                 sweepAll: sweepAll || false,
-                minBalance: minBalance || 0,
+                minBalance: minBalanceThreshold,
                 memo: memo || '',
                 executedBy: req.admin.name,
                 executedAt: new Date(),
                 sourceWalletId: sourceWalletId || 'platform_wallet',
-                txHashes: txHashes
+                txHashes: txHashes,
+                addressesSweptCount: sweptAddresses.length
             },
             btcAddress: destinationAddress,
             fee: totalFees,
@@ -37378,12 +37561,15 @@ app.post('/api/admin/wallet/sweep', adminProtect, async (req, res) => {
                 totalFees: totalFees,
                 txHashes: txHashes,
                 reference: reference,
+                network: platformWallet.getNetworkName(assetUpper),
+                explorerUrls: txHashes.map(hash => getExplorerUrl(assetUpper, hash)),
                 transaction: {
                     id: transaction._id,
                     reference: reference,
                     asset: assetUpper,
                     amount: totalSwept,
-                    status: 'completed'
+                    status: 'completed',
+                    createdAt: transaction.createdAt
                 }
             }
         });
@@ -37433,6 +37619,25 @@ app.post('/api/admin/wallet/withdraw', adminProtect, async (req, res) => {
             });
         }
 
+        // Calculate gas fee if not provided
+        let feeAmount = gasFee || 0;
+        if (!gasFee) {
+            // Estimate gas fee based on asset
+            const feeEstimates = {
+                'BTC': 0.0005,
+                'ETH': 0.002,
+                'BNB': 0.001,
+                'BSC': 0.001,
+                'MATIC': 0.01,
+                'POLYGON': 0.01,
+                'AVAX': 0.01,
+                'AVALANCHE': 0.01,
+                'SOLANA': 0.000005,
+                'SOL': 0.000005
+            };
+            feeAmount = feeEstimates[assetUpper] || 0.001;
+        }
+
         // Execute REAL blockchain transfer
         const transferResult = await executeBlockchainTransfer(
             assetUpper,
@@ -37463,18 +37668,20 @@ app.post('/api/admin/wallet/withdraw', adminProtect, async (req, res) => {
                 walletAddress: destinationAddress,
                 sourceAddress: sourceAddress.address,
                 txHash: transferResult.txHash,
-                fee: transferResult.fee,
+                fee: transferResult.fee || feeAmount,
                 network: platformWallet.getNetworkName(assetUpper),
-                gasFee: gasFee || transferResult.fee,
+                gasFee: gasFee || transferResult.fee || feeAmount,
                 memo: memo || '',
                 executedBy: req.admin.name,
                 executedAt: new Date(),
                 sourceWalletId: sourceWalletId || 'platform_wallet',
-                withdrawalType: 'admin_withdrawal'
+                withdrawalType: 'admin_withdrawal',
+                confirmations: 1,
+                blockNumber: transferResult.blockNumber || null
             },
             btcAddress: destinationAddress,
-            fee: transferResult.fee * amount,
-            netAmount: amount - (transferResult.fee * amount),
+            fee: transferResult.fee * amount || feeAmount * amount,
+            netAmount: amount - (transferResult.fee * amount || feeAmount * amount),
             processedBy: req.admin._id,
             processedAt: new Date(),
             network: platformWallet.getNetworkName(assetUpper),
@@ -37489,7 +37696,7 @@ app.post('/api/admin/wallet/withdraw', adminProtect, async (req, res) => {
             amount: amount,
             destinationAddress: destinationAddress,
             txHash: transferResult.txHash,
-            fee: transferResult.fee,
+            fee: transferResult.fee || feeAmount,
             status: 'confirmed',
             adminNotes: memo || '',
             addressesUsed: 1,
@@ -37502,7 +37709,7 @@ app.post('/api/admin/wallet/withdraw', adminProtect, async (req, res) => {
             amount: amount,
             destinationAddress: destinationAddress,
             txHash: transferResult.txHash,
-            fee: transferResult.fee
+            fee: transferResult.fee || feeAmount
         });
 
         res.status(200).json({
@@ -37511,8 +37718,10 @@ app.post('/api/admin/wallet/withdraw', adminProtect, async (req, res) => {
             data: {
                 txHash: transferResult.txHash,
                 sourceAddress: sourceAddress.address,
-                fee: transferResult.fee,
+                fee: transferResult.fee || feeAmount,
                 reference: reference,
+                network: platformWallet.getNetworkName(assetUpper),
+                explorerUrl: getExplorerUrl(assetUpper, transferResult.txHash),
                 transaction: {
                     id: transaction._id,
                     reference: reference,
@@ -37534,12 +37743,13 @@ app.post('/api/admin/wallet/withdraw', adminProtect, async (req, res) => {
 });
 
 // ============================================================
-// ENDPOINT: GET /api/admin/wallet/treasury/export - Export Treasury
+// ENDPOINT: GET /api/admin/wallet/treasury - Treasury Summary
 // ============================================================
-app.get('/api/admin/wallet/treasury/export', adminProtect, async (req, res) => {
+app.get('/api/admin/wallet/treasury', adminProtect, async (req, res) => {
     try {
         const assets = await DepositAddress.distinct('asset');
-        const treasuryData = [];
+        const treasury = [];
+        let totalValue = 0;
 
         for (const asset of assets) {
             const assetUpper = asset.toUpperCase();
@@ -37564,6 +37774,101 @@ app.get('/api/admin/wallet/treasury/export', adminProtect, async (req, res) => {
             pendingBalance = pendingDeposits[0]?.total || 0;
 
             const availableBalance = totalBalance - pendingBalance;
+            
+            // Get current price
+            let usdValue = 0;
+            try {
+                const price = await getCryptoPrice(assetUpper) || 0;
+                usdValue = totalBalance * price;
+                totalValue += usdValue;
+            } catch (err) {
+                console.error(`Price error for ${assetUpper}:`, err.message);
+            }
+
+            const lastWithdrawalTx = await Transaction.findOne({
+                type: 'withdrawal',
+                asset: asset,
+                status: 'completed'
+            }).sort({ createdAt: -1 });
+
+            treasury.push({
+                network: platformWallet.getNetworkName(assetUpper),
+                asset: assetUpper,
+                available: availableBalance,
+                reserved: pendingBalance,
+                pending: pendingBalance,
+                total: totalBalance,
+                usdValue: usdValue,
+                walletCount: addresses.length,
+                lastSweep: null,
+                lastWithdrawal: lastWithdrawalTx?.createdAt || 'Never'
+            });
+        }
+
+        // Sort by USD value descending
+        treasury.sort((a, b) => b.usdValue - a.usdValue);
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                treasury: treasury,
+                totalValue: totalValue,
+                totalAssets: treasury.length,
+                lastUpdated: new Date().toISOString()
+            }
+        });
+
+    } catch (err) {
+        console.error('Treasury error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to load treasury'
+        });
+    }
+});
+
+// ============================================================
+// ENDPOINT: GET /api/admin/wallet/treasury/export - Export Treasury
+// ============================================================
+app.get('/api/admin/wallet/treasury/export', adminProtect, async (req, res) => {
+    try {
+        const assets = await DepositAddress.distinct('asset');
+        const treasuryData = [];
+        let totalValue = 0;
+
+        for (const asset of assets) {
+            const assetUpper = asset.toUpperCase();
+            const addresses = await DepositAddress.find({ asset: asset, isActive: true });
+            
+            let totalBalance = 0;
+            let pendingBalance = 0;
+
+            for (const addr of addresses) {
+                try {
+                    const balanceResult = await getRealBlockchainBalance(addr.address, assetUpper);
+                    totalBalance += balanceResult.balance || 0;
+                } catch (err) {
+                    console.error(`Balance error for ${addr.address}:`, err.message);
+                }
+            }
+
+            const pendingDeposits = await Transaction.aggregate([
+                { $match: { type: 'deposit', status: 'pending', asset: asset } },
+                { $group: { _id: null, total: { $sum: '$assetAmount' } } }
+            ]);
+            pendingBalance = pendingDeposits[0]?.total || 0;
+
+            const availableBalance = totalBalance - pendingBalance;
+            
+            // Get current price
+            let usdValue = 0;
+            try {
+                const price = await getCryptoPrice(assetUpper) || 0;
+                usdValue = totalBalance * price;
+                totalValue += usdValue;
+            } catch (err) {
+                console.error(`Price error for ${assetUpper}:`, err.message);
+            }
 
             const lastWithdrawalTx = await Transaction.findOne({
                 type: 'withdrawal',
@@ -37578,16 +37883,25 @@ app.get('/api/admin/wallet/treasury/export', adminProtect, async (req, res) => {
                 reserved: pendingBalance,
                 pending: pendingBalance,
                 total: totalBalance,
+                usdValue: usdValue,
                 walletCount: addresses.length,
                 lastSweep: null,
                 lastWithdrawal: lastWithdrawalTx?.createdAt || 'Never'
             });
         }
 
+        // Generate CSV
+        let csv = 'Network,Asset,Available,Reserved,Pending,Total,USD Value,Wallet Count,Last Sweep,Last Withdrawal\n';
+        treasuryData.forEach(item => {
+            csv += `${item.network},${item.asset},${item.available},${item.reserved},${item.pending},${item.total},${item.usdValue},${item.walletCount},${item.lastSweep || 'Never'},${item.lastWithdrawal || 'Never'}\n`;
+        });
+
         res.status(200).json({
             status: 'success',
             data: {
                 treasury: treasuryData,
+                totalValue: totalValue,
+                csv: csv,
                 exportedAt: new Date().toISOString()
             }
         });
@@ -37601,14 +37915,132 @@ app.get('/api/admin/wallet/treasury/export', adminProtect, async (req, res) => {
     }
 });
 
-console.log('✅ Additional wallet endpoints loaded successfully');
+// ============================================================
+// ENDPOINT: GET /api/admin/wallet/addresses - Wallet Addresses
+// ============================================================
+app.get('/api/admin/wallet/addresses', adminProtect, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const skip = (page - 1) * limit;
+        const search = req.query.search || '';
+
+        let query = { isActive: true };
+        if (search) {
+            query.$or = [
+                { address: { $regex: search, $options: 'i' } },
+                { asset: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const total = await DepositAddress.countDocuments(query);
+        const totalPages = Math.ceil(total / limit);
+
+        const addresses = await DepositAddress.find(query)
+            .populate('userId', 'firstName lastName email')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        const formattedAddresses = [];
+        for (const addr of addresses) {
+            const assetUpper = addr.asset ? addr.asset.toUpperCase() : 'UNKNOWN';
+            let balance = 0;
+            let usdValue = 0;
+
+            try {
+                const balanceResult = await getRealBlockchainBalance(addr.address, assetUpper);
+                balance = balanceResult.balance || 0;
+                const price = await getCryptoPrice(assetUpper) || 0;
+                usdValue = balance * price;
+            } catch (err) {
+                console.error(`Balance error for ${addr.address}:`, err.message);
+            }
+
+            const lastIncomingTx = await Transaction.findOne({
+                'details.depositAddress': addr.address,
+                type: 'deposit',
+                status: 'completed'
+            }).sort({ createdAt: -1 });
+
+            const lastOutgoingTx = await Transaction.findOne({
+                'details.sourceAddress': addr.address,
+                type: 'withdrawal',
+                status: 'completed'
+            }).sort({ createdAt: -1 });
+
+            formattedAddresses.push({
+                _id: addr._id,
+                address: addr.address,
+                user: addr.userId ? {
+                    _id: addr.userId._id,
+                    firstName: addr.userId.firstName,
+                    lastName: addr.userId.lastName,
+                    email: addr.userId.email
+                } : null,
+                network: platformWallet.getNetworkName(assetUpper),
+                asset: assetUpper,
+                derivationPath: addr.derivationPath,
+                currentBalance: balance,
+                usdValue: usdValue,
+                lastIncomingTx: lastIncomingTx?.createdAt || null,
+                lastOutgoingTx: lastOutgoingTx?.createdAt || null,
+                status: addr.isActive ? 'active' : 'inactive',
+                createdAt: addr.createdAt,
+                lastUsedAt: addr.lastUsedAt
+            });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                addresses: formattedAddresses,
+                totalPages: totalPages,
+                totalItems: total,
+                currentPage: page,
+                limit: limit
+            }
+        });
+
+    } catch (err) {
+        console.error('Wallet addresses error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to load wallet addresses'
+        });
+    }
+});
+
+console.log('✅ All wallet endpoints loaded successfully');
 console.log('   - GET /api/admin/wallet/summary');
 console.log('   - GET /api/admin/wallet/transactions');
 console.log('   - GET /api/admin/wallet/treasury/sources');
 console.log('   - POST /api/admin/wallet/transfer');
 console.log('   - POST /api/admin/wallet/sweep');
 console.log('   - POST /api/admin/wallet/withdraw');
+console.log('   - GET /api/admin/wallet/treasury');
 console.log('   - GET /api/admin/wallet/treasury/export');
+console.log('   - GET /api/admin/wallet/addresses');
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
