@@ -35239,54 +35239,60 @@ console.log('   - GET /api/admin/wallet/* (admin endpoints)');
 
 // =============================================
 // WALLET MANAGEMENT - PRODUCTION IMPLEMENTATION
-// EXACTLY MATCHES FRONTEND EXPECTATIONS
+// CHECKS FOR EXISTING DECLARATIONS - NO DUPLICATES
 // =============================================
 
 // =============================================
-// NETWORK CONFIGURATION - USING ENV VARIABLES
+// CONDITIONAL DECLARATIONS - CHECK IF ALREADY EXISTS
 // =============================================
 
-const NETWORK_CONFIG = {
-    'BTC': { rpc: null, chainId: 0, type: 'utxo', explorer: 'https://blockchair.com/bitcoin/transaction/', name: 'Bitcoin', decimals: 8 },
-    'ETH': { rpc: process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io/v3/2e692d39dad941d799bb09fa90bf2881', chainId: 1, type: 'evm', explorer: 'https://etherscan.io/tx/', name: 'Ethereum' },
-    'BNB': { rpc: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org/', chainId: 56, type: 'evm', explorer: 'https://bscscan.com/tx/', name: 'BNB Smart Chain' },
-    'MATIC': { rpc: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com/', chainId: 137, type: 'evm', explorer: 'https://polygonscan.com/tx/', name: 'Polygon' },
-    'ARBITRUM': { rpc: process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc', chainId: 42161, type: 'evm', explorer: 'https://arbiscan.io/tx/', name: 'Arbitrum' },
-    'OPTIMISM': { rpc: process.env.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io', chainId: 10, type: 'evm', explorer: 'https://optimistic.etherscan.io/tx/', name: 'Optimism' },
-    'BASE': { rpc: process.env.BASE_RPC_URL || 'https://mainnet.base.org', chainId: 8453, type: 'evm', explorer: 'https://basescan.org/tx/', name: 'Base' },
-    'AVALANCHE': { rpc: process.env.AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc', chainId: 43114, type: 'evm', explorer: 'https://snowtrace.io/tx/', name: 'Avalanche' },
-    'FANTOM': { rpc: process.env.FANTOM_RPC_URL || 'https://rpcapi.fantom.network', chainId: 250, type: 'evm', explorer: 'https://ftmscan.com/tx/', name: 'Fantom' },
-    'SOL': { rpc: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', chainId: 501, type: 'solana', explorer: 'https://solscan.io/tx/', name: 'Solana' },
-    'ADA': { rpc: process.env.BLOCKFROST_API_KEY, chainId: 1815, type: 'cardano', explorer: 'https://cardanoscan.io/transaction/', name: 'Cardano' },
-    'DOGE': { rpc: null, chainId: 3, type: 'utxo', explorer: 'https://blockchair.com/dogecoin/transaction/', name: 'Dogecoin', decimals: 8 },
-    'LTC': { rpc: null, chainId: 2, type: 'utxo', explorer: 'https://blockchair.com/litecoin/transaction/', name: 'Litecoin', decimals: 8 },
-};
+// Only declare if not already defined
+if (typeof REQUIRED_CONFIRMATIONS === 'undefined') {
+    var REQUIRED_CONFIRMATIONS = {
+        'BTC': 3, 'ETH': 12, 'BNB': 15, 'MATIC': 30, 'ARBITRUM': 20,
+        'OPTIMISM': 20, 'BASE': 20, 'AVALANCHE': 15, 'FANTOM': 20,
+        'SOL': 32, 'ADA': 15, 'DOGE': 6, 'LTC': 6
+    };
+}
 
-// ERC-20 Tokens
-const ERC20_TOKENS = {
-    'USDT': { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6, symbol: 'USDT', name: 'Tether USD' },
-    'USDC': { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6, symbol: 'USDC', name: 'USD Coin' },
-    'SHIB': { address: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', decimals: 18, symbol: 'SHIB', name: 'Shiba Inu' },
-    'LINK': { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', decimals: 18, symbol: 'LINK', name: 'Chainlink' },
-    'UNI': { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', decimals: 18, symbol: 'UNI', name: 'Uniswap' },
-    'WBTC': { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', decimals: 8, symbol: 'WBTC', name: 'Wrapped Bitcoin' },
-    'DAI': { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals: 18, symbol: 'DAI', name: 'Dai Stablecoin' }
-};
+if (typeof SWEEP_THRESHOLD === 'undefined') {
+    var SWEEP_THRESHOLD = {
+        'BTC': 0.001, 'ETH': 0.01, 'BNB': 0.1, 'MATIC': 1,
+        'ARBITRUM': 0.01, 'OPTIMISM': 0.01, 'BASE': 0.01,
+        'AVALANCHE': 0.1, 'FANTOM': 0.1, 'SOL': 0.01,
+        'ADA': 1, 'DOGE': 10, 'LTC': 0.1
+    };
+}
 
-// Required Confirmations
-const REQUIRED_CONFIRMATIONS = {
-    'BTC': 3, 'ETH': 12, 'BNB': 15, 'MATIC': 30, 'ARBITRUM': 20,
-    'OPTIMISM': 20, 'BASE': 20, 'AVALANCHE': 15, 'FANTOM': 20,
-    'SOL': 32, 'ADA': 15, 'DOGE': 6, 'LTC': 6
-};
+if (typeof NETWORK_CONFIG === 'undefined') {
+    var NETWORK_CONFIG = {
+        'BTC': { rpc: null, chainId: 0, type: 'utxo', explorer: 'https://blockchair.com/bitcoin/transaction/', name: 'Bitcoin', decimals: 8 },
+        'ETH': { rpc: process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io/v3/2e692d39dad941d799bb09fa90bf2881', chainId: 1, type: 'evm', explorer: 'https://etherscan.io/tx/', name: 'Ethereum' },
+        'BNB': { rpc: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org/', chainId: 56, type: 'evm', explorer: 'https://bscscan.com/tx/', name: 'BNB Smart Chain' },
+        'MATIC': { rpc: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com/', chainId: 137, type: 'evm', explorer: 'https://polygonscan.com/tx/', name: 'Polygon' },
+        'ARBITRUM': { rpc: process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc', chainId: 42161, type: 'evm', explorer: 'https://arbiscan.io/tx/', name: 'Arbitrum' },
+        'OPTIMISM': { rpc: process.env.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io', chainId: 10, type: 'evm', explorer: 'https://optimistic.etherscan.io/tx/', name: 'Optimism' },
+        'BASE': { rpc: process.env.BASE_RPC_URL || 'https://mainnet.base.org', chainId: 8453, type: 'evm', explorer: 'https://basescan.org/tx/', name: 'Base' },
+        'AVALANCHE': { rpc: process.env.AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc', chainId: 43114, type: 'evm', explorer: 'https://snowtrace.io/tx/', name: 'Avalanche' },
+        'FANTOM': { rpc: process.env.FANTOM_RPC_URL || 'https://rpcapi.fantom.network', chainId: 250, type: 'evm', explorer: 'https://ftmscan.com/tx/', name: 'Fantom' },
+        'SOL': { rpc: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', chainId: 501, type: 'solana', explorer: 'https://solscan.io/tx/', name: 'Solana' },
+        'ADA': { rpc: process.env.BLOCKFROST_API_KEY, chainId: 1815, type: 'cardano', explorer: 'https://cardanoscan.io/transaction/', name: 'Cardano' },
+        'DOGE': { rpc: null, chainId: 3, type: 'utxo', explorer: 'https://blockchair.com/dogecoin/transaction/', name: 'Dogecoin', decimals: 8 },
+        'LTC': { rpc: null, chainId: 2, type: 'utxo', explorer: 'https://blockchair.com/litecoin/transaction/', name: 'Litecoin', decimals: 8 },
+    };
+}
 
-// Sweep Thresholds
-const SWEEP_THRESHOLD = {
-    'BTC': 0.001, 'ETH': 0.01, 'BNB': 0.1, 'MATIC': 1,
-    'ARBITRUM': 0.01, 'OPTIMISM': 0.01, 'BASE': 0.01,
-    'AVALANCHE': 0.1, 'FANTOM': 0.1, 'SOL': 0.01,
-    'ADA': 1, 'DOGE': 10, 'LTC': 0.1
-};
+if (typeof ERC20_TOKENS === 'undefined') {
+    var ERC20_TOKENS = {
+        'USDT': { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6, symbol: 'USDT', name: 'Tether USD' },
+        'USDC': { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6, symbol: 'USDC', name: 'USD Coin' },
+        'SHIB': { address: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', decimals: 18, symbol: 'SHIB', name: 'Shiba Inu' },
+        'LINK': { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', decimals: 18, symbol: 'LINK', name: 'Chainlink' },
+        'UNI': { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', decimals: 18, symbol: 'UNI', name: 'Uniswap' },
+        'WBTC': { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', decimals: 8, symbol: 'WBTC', name: 'Wrapped Bitcoin' },
+        'DAI': { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals: 18, symbol: 'DAI', name: 'Dai Stablecoin' }
+    };
+}
 
 // =============================================
 // UTXO WALLET MANAGER - FULL IMPLEMENTATION
@@ -35337,7 +35343,7 @@ class UTXOWalletManager {
 
             return utxos;
         } catch (error) {
-            console.error(`Failed to fetch UTXOs for ${address}:`, error);
+            console.error(`Failed to fetch UTXOs for ${address}:`, error.message);
             return [];
         }
     }
@@ -35595,6 +35601,7 @@ async function getBlockchainBalance(userId, asset) {
     const addressData = await platformWallet.getOrGenerateAddress(userId, assetUpper);
     const address = addressData.address;
 
+    // Use existing NETWORK_CONFIG
     const config = NETWORK_CONFIG[assetUpper];
     if (!config) {
         return 0;
@@ -35908,16 +35915,14 @@ async function broadcastSignedTransaction(asset, signedTransaction) {
 /**
  * GET /api/admin/wallet/summary
  * Returns wallet summary with real-time blockchain balances
- * EXACTLY matches frontend expectations
  */
 app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
     try {
         const { userId } = req.query;
         
-        // If no userId provided, get the admin's user ID or use first user
+        // If no userId provided, get the admin's associated user or first user
         let targetUserId = userId;
         if (!targetUserId) {
-            // Get the admin's associated user or first user
             const admin = req.admin;
             const user = await User.findOne({ email: admin.email });
             if (user) {
@@ -35965,6 +35970,7 @@ app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
                     totalUsdValue += usdValue;
                     totalAddresses++;
 
+                    const addressData = await platformWallet.getOrGenerateAddress(targetUserId, asset);
                     summary.push({
                         asset: asset,
                         totalBalance: balance,
@@ -35972,8 +35978,8 @@ app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
                         usdPrice: price,
                         addressCount: 1,
                         network: platformWallet.getNetworkName(asset),
+                        walletAddress: addressData.address,
                         lastUpdated: new Date().toISOString(),
-                        walletAddress: (await platformWallet.getOrGenerateAddress(targetUserId, asset)).address
                     });
                 }
             } catch (err) {
@@ -36022,7 +36028,6 @@ app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
 /**
  * GET /api/admin/wallet-management/dashboard
  * Returns aggregated dashboard data from blockchain
- * EXACTLY matches frontend expectations
  */
 app.get('/api/admin/wallet-management/dashboard', adminProtect, async (req, res) => {
     try {
@@ -36086,7 +36091,7 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, async (req, res)
 
         transactionVolume = todayDeposits + todayWithdrawals;
 
-        // Calculate pending sweeps
+        // Calculate pending sweeps using existing SWEEP_THRESHOLD
         for (const user of users) {
             for (const asset of supportedAssets) {
                 try {
@@ -36153,7 +36158,6 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, async (req, res)
 /**
  * GET /api/admin/wallet-management/wallets
  * Returns paginated wallet addresses with real-time balances
- * EXACTLY matches frontend expectations
  */
 app.get('/api/admin/wallet-management/wallets', adminProtect, async (req, res) => {
     try {
@@ -36249,7 +36253,6 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, async (req, res) =
 /**
  * GET /api/admin/wallet/transactions
  * Returns paginated transactions with real blockchain data
- * EXACTLY matches frontend expectations
  */
 app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
     try {
@@ -36351,7 +36354,6 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
 
         // If no transactions in DB, fetch from blockchain directly
         if (formattedTxs.length === 0 && req.query.forceBlockchain === 'true') {
-            // Get the admin's user or first user
             const admin = req.admin;
             let user = await User.findOne({ email: admin.email });
             if (!user) {
@@ -36421,7 +36423,6 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
 /**
  * POST /api/admin/wallet/transfer
  * Executes a wallet transfer (admin initiated)
- * EXACTLY matches frontend expectations
  */
 app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
     try {
@@ -36490,7 +36491,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
             // Check ERC-20
             const tokenConfig = ERC20_TOKENS[assetUpper];
             let tx = {
-                to: destinationAddress,
+                to: tokenConfig ? tokenConfig.address : destinationAddress,
                 value: tokenConfig ? '0x0' : ethers.parseEther(amount.toString()),
                 gasLimit: tokenConfig ? 100000 : 21000,
                 gasPrice: (await provider.getFeeData()).gasPrice,
@@ -36509,7 +36510,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
                     ethers.parseUnits(amount.toString(), tokenConfig.decimals)
                 );
                 tx.data = txData.data;
-                tx.to = tokenConfig.address;
             }
 
             const signedTx = await wallet.signTransaction(tx);
@@ -36937,6 +36937,10 @@ app.get('/api/admin/wallet-management/treasury/wallets', adminProtect, async (re
     }
 });
 
+// =============================================
+// TREASURY TRANSFER, SWEEP, WITHDRAW ENDPOINTS
+// =============================================
+
 /**
  * POST /api/admin/wallet-management/treasury/transfer
  * Executes treasury transfer
@@ -37149,7 +37153,6 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, async (req
 
         const threshold = minBalance || SWEEP_THRESHOLD[assetUpper] || 0.01;
 
-        // Process each user's wallet
         for (const user of users) {
             try {
                 const addressData = await platformWallet.getOrGenerateAddress(user._id, assetUpper);
@@ -37238,7 +37241,6 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, async (req
                         totalFees += result.fee || 0;
                         txHashes.push(result.txHash);
 
-                        // Create transaction record
                         const price = await getCryptoPrice(assetUpper);
                         const usdValue = (result.amount || 0) * (price || 1);
                         const reference = `SWEEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
@@ -37338,7 +37340,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, async (
             });
         }
 
-        // Get the user who owns this address
         const depositAddress = await DepositAddress.findOne({
             address: fromAddress,
             asset: asset.toLowerCase(),
@@ -38660,10 +38661,10 @@ const scanner = new BlockchainScanner();
 setTimeout(() => scanner.start(), 15000);
 
 // =============================================
-// LOGGING - ALL ENDPOINTS LOADED
+// LOGGING
 // =============================================
 
-console.log('✅ Wallet Management endpoints loaded successfully:');
+console.log('✅ Wallet Management endpoints loaded successfully');
 console.log('   - GET /api/admin/wallet/summary');
 console.log('   - GET /api/admin/wallet-management/dashboard');
 console.log('   - GET /api/admin/wallet-management/wallets');
@@ -38683,13 +38684,8 @@ console.log('   - GET /api/admin/wallet-management/treasury/export');
 console.log('   - GET /api/admin/wallet-management/reports-alerts');
 console.log('   - GET /api/admin/crypto/assets');
 console.log('   - GET /api/admin/transactions/volume');
-console.log('✅ Blockchain Scanner initialized');
 console.log('✅ UTXO Manager initialized with full Bitcoin, Dogecoin, Litecoin support');
-
-
-
-
-
+console.log('✅ Blockchain Scanner initialized for all networks');
 
 
 
