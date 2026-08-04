@@ -35239,60 +35239,8 @@ console.log('   - GET /api/admin/wallet/* (admin endpoints)');
 
 // =============================================
 // WALLET MANAGEMENT - PRODUCTION IMPLEMENTATION
-// CHECKS FOR EXISTING DECLARATIONS - NO DUPLICATES
+// USES EXISTING DECLARATIONS - NO NEW VARIABLES
 // =============================================
-
-// =============================================
-// CONDITIONAL DECLARATIONS - CHECK IF ALREADY EXISTS
-// =============================================
-
-// Only declare if not already defined
-if (typeof REQUIRED_CONFIRMATIONS === 'undefined') {
-    var REQUIRED_CONFIRMATIONS = {
-        'BTC': 3, 'ETH': 12, 'BNB': 15, 'MATIC': 30, 'ARBITRUM': 20,
-        'OPTIMISM': 20, 'BASE': 20, 'AVALANCHE': 15, 'FANTOM': 20,
-        'SOL': 32, 'ADA': 15, 'DOGE': 6, 'LTC': 6
-    };
-}
-
-if (typeof SWEEP_THRESHOLD === 'undefined') {
-    var SWEEP_THRESHOLD = {
-        'BTC': 0.001, 'ETH': 0.01, 'BNB': 0.1, 'MATIC': 1,
-        'ARBITRUM': 0.01, 'OPTIMISM': 0.01, 'BASE': 0.01,
-        'AVALANCHE': 0.1, 'FANTOM': 0.1, 'SOL': 0.01,
-        'ADA': 1, 'DOGE': 10, 'LTC': 0.1
-    };
-}
-
-if (typeof NETWORK_CONFIG === 'undefined') {
-    var NETWORK_CONFIG = {
-        'BTC': { rpc: null, chainId: 0, type: 'utxo', explorer: 'https://blockchair.com/bitcoin/transaction/', name: 'Bitcoin', decimals: 8 },
-        'ETH': { rpc: process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io/v3/2e692d39dad941d799bb09fa90bf2881', chainId: 1, type: 'evm', explorer: 'https://etherscan.io/tx/', name: 'Ethereum' },
-        'BNB': { rpc: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org/', chainId: 56, type: 'evm', explorer: 'https://bscscan.com/tx/', name: 'BNB Smart Chain' },
-        'MATIC': { rpc: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com/', chainId: 137, type: 'evm', explorer: 'https://polygonscan.com/tx/', name: 'Polygon' },
-        'ARBITRUM': { rpc: process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc', chainId: 42161, type: 'evm', explorer: 'https://arbiscan.io/tx/', name: 'Arbitrum' },
-        'OPTIMISM': { rpc: process.env.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io', chainId: 10, type: 'evm', explorer: 'https://optimistic.etherscan.io/tx/', name: 'Optimism' },
-        'BASE': { rpc: process.env.BASE_RPC_URL || 'https://mainnet.base.org', chainId: 8453, type: 'evm', explorer: 'https://basescan.org/tx/', name: 'Base' },
-        'AVALANCHE': { rpc: process.env.AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc', chainId: 43114, type: 'evm', explorer: 'https://snowtrace.io/tx/', name: 'Avalanche' },
-        'FANTOM': { rpc: process.env.FANTOM_RPC_URL || 'https://rpcapi.fantom.network', chainId: 250, type: 'evm', explorer: 'https://ftmscan.com/tx/', name: 'Fantom' },
-        'SOL': { rpc: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', chainId: 501, type: 'solana', explorer: 'https://solscan.io/tx/', name: 'Solana' },
-        'ADA': { rpc: process.env.BLOCKFROST_API_KEY, chainId: 1815, type: 'cardano', explorer: 'https://cardanoscan.io/transaction/', name: 'Cardano' },
-        'DOGE': { rpc: null, chainId: 3, type: 'utxo', explorer: 'https://blockchair.com/dogecoin/transaction/', name: 'Dogecoin', decimals: 8 },
-        'LTC': { rpc: null, chainId: 2, type: 'utxo', explorer: 'https://blockchair.com/litecoin/transaction/', name: 'Litecoin', decimals: 8 },
-    };
-}
-
-if (typeof ERC20_TOKENS === 'undefined') {
-    var ERC20_TOKENS = {
-        'USDT': { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6, symbol: 'USDT', name: 'Tether USD' },
-        'USDC': { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6, symbol: 'USDC', name: 'USD Coin' },
-        'SHIB': { address: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', decimals: 18, symbol: 'SHIB', name: 'Shiba Inu' },
-        'LINK': { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', decimals: 18, symbol: 'LINK', name: 'Chainlink' },
-        'UNI': { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', decimals: 18, symbol: 'UNI', name: 'Uniswap' },
-        'WBTC': { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', decimals: 8, symbol: 'WBTC', name: 'Wrapped Bitcoin' },
-        'DAI': { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals: 18, symbol: 'DAI', name: 'Dai Stablecoin' }
-    };
-}
 
 // =============================================
 // UTXO WALLET MANAGER - FULL IMPLEMENTATION
@@ -35586,8 +35534,10 @@ class UTXOWalletManager {
     }
 }
 
-// Initialize UTXO Manager
-const utxoManager = new UTXOWalletManager();
+// Initialize UTXO Manager - ONLY IF NOT ALREADY DEFINED
+if (typeof utxoManager === 'undefined') {
+    var utxoManager = new UTXOWalletManager();
+}
 
 // =============================================
 // CORE BLOCKCHAIN FUNCTIONS
@@ -35601,8 +35551,8 @@ async function getBlockchainBalance(userId, asset) {
     const addressData = await platformWallet.getOrGenerateAddress(userId, assetUpper);
     const address = addressData.address;
 
-    // Use existing NETWORK_CONFIG
-    const config = NETWORK_CONFIG[assetUpper];
+    // Use existing NETWORK_CONFIG from server.js
+    const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
     if (!config) {
         return 0;
     }
@@ -35613,8 +35563,8 @@ async function getBlockchainBalance(userId, asset) {
             const provider = new ethers.JsonRpcProvider(config.rpc);
             const balanceWei = await provider.getBalance(address);
             
-            // Check ERC-20
-            if (ERC20_TOKENS[assetUpper]) {
+            // Check ERC-20 using existing ERC20_TOKENS
+            if (typeof ERC20_TOKENS !== 'undefined' && ERC20_TOKENS[assetUpper]) {
                 const token = ERC20_TOKENS[assetUpper];
                 const contract = new ethers.Contract(
                     token.address,
@@ -35666,7 +35616,7 @@ async function getBlockchainTransactions(userId, asset, page = 1, limit = 20) {
     const addressData = await platformWallet.getOrGenerateAddress(userId, assetUpper);
     const address = addressData.address;
 
-    const config = NETWORK_CONFIG[assetUpper];
+    const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
     if (!config) {
         return { transactions: [], total: 0, page: 1, totalPages: 0 };
     }
@@ -35702,7 +35652,7 @@ async function getBlockchainTransactions(userId, asset, page = 1, limit = 20) {
 
                     const receipt = await provider.getTransactionReceipt(tx.hash);
                     
-                    if (receipt?.logs) {
+                    if (receipt?.logs && typeof ERC20_TOKENS !== 'undefined') {
                         for (const log of receipt.logs) {
                             for (const [symbol, tokenConfig] of Object.entries(ERC20_TOKENS)) {
                                 if (log.address.toLowerCase() === tokenConfig.address.toLowerCase()) {
@@ -35738,7 +35688,7 @@ async function getBlockchainTransactions(userId, asset, page = 1, limit = 20) {
                         fee: tx.gasPrice && tx.gasLimit ? ethers.formatEther(tx.gasPrice * tx.gasLimit) : '0',
                         status: receipt?.status === 1 ? 'CONFIRMED' : 'PENDING',
                         token: tokenSymbol,
-                        explorerUrl: `${config.explorer}${tx.hash}`,
+                        explorerUrl: config.explorer ? `${config.explorer}${tx.hash}` : `https://etherscan.io/tx/${tx.hash}`,
                         confirmations: currentBlock - blockNum + 1,
                         gas: receipt?.gasUsed?.toString() || '0',
                         gasPrice: tx.gasPrice ? ethers.formatEther(tx.gasPrice) : '0',
@@ -35794,7 +35744,7 @@ async function getBlockchainTransactions(userId, asset, page = 1, limit = 20) {
                         fee: meta.fee / LAMPORTS_PER_SOL,
                         status: meta.err ? 'FAILED' : 'CONFIRMED',
                         token: null,
-                        explorerUrl: `${config.explorer}${sig.signature}`,
+                        explorerUrl: config.explorer ? `${config.explorer}${sig.signature}` : `https://solscan.io/tx/${sig.signature}`,
                         confirmations: 1,
                         gas: meta.fee.toString(),
                         gasPrice: '0',
@@ -35812,6 +35762,57 @@ async function getBlockchainTransactions(userId, asset, page = 1, limit = 20) {
                 total: signatures.length,
                 page,
                 totalPages: Math.ceil(signatures.length / limit)
+            };
+        }
+
+        // Cardano
+        if (config.type === 'cardano') {
+            const response = await axios.get(
+                `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}/transactions`,
+                {
+                    headers: { project_id: config.rpc },
+                    params: { page, count: limit }
+                }
+            );
+
+            const txs = [];
+            for (const tx of response.data) {
+                const txDetails = await axios.get(
+                    `https://cardano-mainnet.blockfrost.io/api/v0/txs/${tx.tx_hash}`,
+                    { headers: { project_id: config.rpc } }
+                );
+                
+                const txInfo = txDetails.data;
+                const amount = txInfo.output_amount.find(a => a.unit === 'lovelace');
+                
+                txs.push({
+                    txHash: tx.tx_hash,
+                    block: tx.block_height,
+                    timestamp: new Date(tx.block_time * 1000),
+                    network: assetUpper,
+                    from: txInfo.inputs?.[0]?.address || 'Unknown',
+                    to: txInfo.outputs?.[0]?.address || address,
+                    amount: amount ? (amount.quantity / 1000000).toString() : '0',
+                    fee: txInfo.fees ? (txInfo.fees / 1000000).toString() : '0',
+                    status: 'CONFIRMED',
+                    token: null,
+                    explorerUrl: config.explorer ? `${config.explorer}${tx.tx_hash}` : `https://cardanoscan.io/transaction/${tx.tx_hash}`,
+                    confirmations: 1,
+                    gas: txInfo.fees ? txInfo.fees.toString() : '0',
+                    gasPrice: '0',
+                    nonce: 0,
+                    input: '0x',
+                    method: 'native',
+                    direction: 'incoming',
+                    logs: [],
+                });
+            }
+
+            return {
+                transactions: txs,
+                total: response.data.length,
+                page,
+                totalPages: Math.ceil(response.data.length / limit)
             };
         }
 
@@ -35877,7 +35878,7 @@ async function getBlockchainTransactions(userId, asset, page = 1, limit = 20) {
  */
 async function broadcastSignedTransaction(asset, signedTransaction) {
     const assetUpper = asset.toUpperCase();
-    const config = NETWORK_CONFIG[assetUpper];
+    const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
 
     if (!config) {
         throw new Error(`Unsupported asset: ${assetUpper}`);
@@ -35940,7 +35941,6 @@ app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
             }
         }
 
-        // Get user from database (only for validation)
         const user = await User.findById(targetUserId);
         if (!user) {
             return res.status(404).json({
@@ -35949,14 +35949,12 @@ app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
             });
         }
 
-        // Get all supported assets from platformWallet
         const supportedAssets = platformWallet.getSupportedAssets().map(a => a.symbol);
         const summary = [];
         let totalUsdValue = 0;
         let totalAddresses = 0;
         const priceErrors = [];
 
-        // Fetch balance for each asset from blockchain
         for (const asset of supportedAssets) {
             try {
                 const balance = await getBlockchainBalance(targetUserId, asset);
@@ -35987,7 +35985,6 @@ app.get('/api/admin/wallet/summary', adminProtect, async (req, res) => {
             }
         }
 
-        // If price errors, still return data with error flag
         if (priceErrors.length > 0) {
             return res.status(207).json({
                 status: 'partial_success',
@@ -36048,7 +36045,6 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, async (req, res)
 
         const supportedAssets = platformWallet.getSupportedAssets().map(a => a.symbol);
 
-        // Aggregate balances across all users
         for (const user of users) {
             for (const asset of supportedAssets) {
                 try {
@@ -36064,13 +36060,10 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, async (req, res)
                         if (!networkDistribution[asset]) networkDistribution[asset] = 0;
                         networkDistribution[asset] += usdValue;
                     }
-                } catch (err) {
-                    // Skip errors
-                }
+                } catch (err) {}
             }
         }
 
-        // Get today's transactions
         const todayTxs = await Transaction.find({
             createdAt: { $gte: today },
             status: { $in: ['CONFIRMED', 'PENDING_CONFIRMATION'] }
@@ -36091,12 +36084,17 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, async (req, res)
 
         transactionVolume = todayDeposits + todayWithdrawals;
 
-        // Calculate pending sweeps using existing SWEEP_THRESHOLD
+        // Use existing SWEEP_THRESHOLD
+        const sweepThresholds = typeof SWEEP_THRESHOLD !== 'undefined' ? SWEEP_THRESHOLD : {
+            'BTC': 0.001, 'ETH': 0.01, 'BNB': 0.1, 'MATIC': 1,
+            'SOL': 0.01, 'ADA': 1, 'DOGE': 10, 'LTC': 0.1
+        };
+
         for (const user of users) {
             for (const asset of supportedAssets) {
                 try {
                     const balance = await getBlockchainBalance(user._id, asset);
-                    const threshold = SWEEP_THRESHOLD[asset] || 0.01;
+                    const threshold = sweepThresholds[asset] || 0.01;
                     if (balance && balance > threshold) {
                         pendingSweeps++;
                     }
@@ -36104,7 +36102,6 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, async (req, res)
             }
         }
 
-        // Recent activity (last 10)
         const recentTxs = await Transaction.find({
             status: { $in: ['CONFIRMED', 'PENDING_CONFIRMATION'] }
         })
@@ -36134,7 +36131,7 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, async (req, res)
                 completedDeposits,
                 pendingSweeps,
                 hotWalletBalances,
-                coldWalletBalances: {}, // Placeholder for cold wallet
+                coldWalletBalances: {},
                 transactionVolume,
                 networkDistribution,
                 recentActivity,
@@ -36166,7 +36163,6 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, async (req, res) =
         const search = req.query.search || '';
         const skip = (page - 1) * limit;
 
-        // Build query
         let query = {};
         if (search) {
             const users = await User.find({
@@ -36179,7 +36175,6 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, async (req, res) =
             query.userId = { $in: users.map(u => u._id) };
         }
 
-        // Get deposit addresses with pagination
         const depositAddresses = await DepositAddress.find(query)
             .populate('userId', 'firstName lastName email')
             .skip(skip)
@@ -36188,7 +36183,6 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, async (req, res) =
 
         const total = await DepositAddress.countDocuments(query);
 
-        // Get balances for each address from blockchain
         const wallets = [];
         for (const addr of depositAddresses) {
             const user = addr.userId;
@@ -36199,7 +36193,6 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, async (req, res) =
             const price = await getCryptoPrice(assetUpper);
             const usdValue = balance * (price || 0);
 
-            // Get last transaction
             const lastTx = await Transaction.findOne({
                 user: user._id,
                 asset: addr.asset
@@ -36261,13 +36254,11 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
         const { network, asset, status, direction } = req.query;
         const skip = (page - 1) * limit;
 
-        // Build query for MongoDB (only for indexing, not for balances)
         let query = {};
         if (asset) query.asset = asset.toLowerCase();
         if (network) query.network = network;
         if (status) query.status = status;
 
-        // Get transactions from MongoDB (for indexing)
         const dbTransactions = await Transaction.find(query)
             .populate('user', 'firstName lastName email')
             .populate('processedBy', 'name email')
@@ -36277,14 +36268,12 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
 
         const total = await Transaction.countDocuments(query);
 
-        // For each transaction, get real blockchain data
         const formattedTxs = [];
         for (const tx of dbTransactions) {
             const user = tx.user || {};
             const assetUpper = (tx.asset || '').toUpperCase();
-            const config = NETWORK_CONFIG[assetUpper];
+            const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
             
-            // Get real blockchain data if txHash exists
             let blockchainData = {};
             if (tx.details?.txHash && config) {
                 try {
@@ -36303,7 +36292,6 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
                         }
                     }
                 } catch (err) {
-                    // If blockchain check fails, use stored data
                     blockchainData = {
                         confirmations: tx.details?.confirmations || 0,
                         gasUsed: tx.details?.gasUsed || '0',
@@ -36352,48 +36340,6 @@ app.get('/api/admin/wallet/transactions', adminProtect, async (req, res) => {
             });
         }
 
-        // If no transactions in DB, fetch from blockchain directly
-        if (formattedTxs.length === 0 && req.query.forceBlockchain === 'true') {
-            const admin = req.admin;
-            let user = await User.findOne({ email: admin.email });
-            if (!user) {
-                const firstUser = await User.findOne({});
-                if (firstUser) user = firstUser;
-            }
-            
-            if (user) {
-                const blockchainTxs = await getBlockchainTransactions(
-                    user._id, 
-                    asset || 'ETH', 
-                    page, 
-                    limit
-                );
-                
-                return res.status(200).json({
-                    status: 'success',
-                    data: {
-                        transactions: blockchainTxs.transactions.map(tx => ({
-                            ...tx,
-                            user: {
-                                _id: user._id,
-                                firstName: user.firstName || '',
-                                lastName: user.lastName || '',
-                                email: user.email || '',
-                            },
-                            adminName: 'System',
-                            usdValue: parseFloat(tx.amount) * (await getCryptoPrice(tx.network) || 1),
-                        })),
-                        pagination: {
-                            currentPage: page,
-                            totalPages: blockchainTxs.totalPages || 1,
-                            totalItems: blockchainTxs.total || 0,
-                            itemsPerPage: limit,
-                        }
-                    }
-                });
-            }
-        }
-
         res.status(200).json({
             status: 'success',
             data: {
@@ -36436,7 +36382,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
         }
 
         const assetUpper = asset.toUpperCase();
-        const config = NETWORK_CONFIG[assetUpper];
+        const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
         if (!config) {
             return res.status(400).json({
                 status: 'fail',
@@ -36444,7 +36390,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
             });
         }
 
-        // Get admin's user
         const admin = req.admin;
         let user = await User.findOne({ email: admin.email });
         if (!user) {
@@ -36458,7 +36403,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
             });
         }
 
-        // Get hot wallet
         const hotWallet = await platformWallet.getOrGenerateAddress(user._id, assetUpper);
         const balance = await getBlockchainBalance(user._id, assetUpper);
 
@@ -36469,7 +36413,6 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
             });
         }
 
-        // Create and sign transaction
         const privateKey = hotWallet.privateKey;
         let txHex, txId, fee;
 
@@ -36488,8 +36431,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
             const provider = new ethers.JsonRpcProvider(config.rpc);
             const wallet = new ethers.Wallet(privateKey, provider);
             
-            // Check ERC-20
-            const tokenConfig = ERC20_TOKENS[assetUpper];
+            const tokenConfig = typeof ERC20_TOKENS !== 'undefined' ? ERC20_TOKENS[assetUpper] : null;
             let tx = {
                 to: tokenConfig ? tokenConfig.address : destinationAddress,
                 value: tokenConfig ? '0x0' : ethers.parseEther(amount.toString()),
@@ -36544,12 +36486,11 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
             throw new Error(`Transfer not implemented for ${assetUpper}`);
         }
 
-        // Create transaction record
         const reference = `ADMIN-TRF-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
         const price = await getCryptoPrice(assetUpper);
         const usdValue = amount * (price || 1);
 
-        const transaction = await Transaction.create({
+        await Transaction.create({
             user: user._id,
             type: 'transfer',
             amount: usdValue,
@@ -36589,7 +36530,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, async (req, res) => {
                 status: 'CONFIRMED',
                 explorer: config.explorer ? `${config.explorer}${txId}` : '',
                 transaction: {
-                    id: transaction._id,
+                    id: reference,
                     reference: reference,
                 }
             }
@@ -36755,9 +36696,8 @@ app.get('/api/admin/wallet-management/treasury/assets', adminProtect, async (req
             type: 'native',
         });
 
-        // Check ERC-20 tokens if EVM
-        const config = NETWORK_CONFIG[assetUpper];
-        if (config?.type === 'evm') {
+        const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
+        if (config?.type === 'evm' && typeof ERC20_TOKENS !== 'undefined') {
             for (const [symbol, tokenConfig] of Object.entries(ERC20_TOKENS)) {
                 let tokenBalance = 0;
                 for (const user of users) {
@@ -36820,7 +36760,6 @@ app.get('/api/admin/wallet-management/treasury/wallet-info', adminProtect, async
 
         const assetUpper = asset.toUpperCase();
         
-        // Get system user
         let systemUser = await User.findOne({ email: 'system@bithashcapital.live' });
         if (!systemUser) {
             const admin = await Admin.findOne({});
@@ -36957,7 +36896,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, async (
         }
 
         const assetUpper = asset.toUpperCase();
-        const config = NETWORK_CONFIG[assetUpper];
+        const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
         if (!config) {
             return res.status(400).json({
                 status: 'fail',
@@ -36965,7 +36904,6 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, async (
             });
         }
 
-        // Get system user
         let systemUser = await User.findOne({ email: 'system@bithashcapital.live' });
         if (!systemUser) {
             const admin = await Admin.findOne({});
@@ -37012,7 +36950,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, async (
             const provider = new ethers.JsonRpcProvider(config.rpc);
             const wallet = new ethers.Wallet(privateKey, provider);
             
-            const tokenConfig = ERC20_TOKENS[assetUpper];
+            const tokenConfig = typeof ERC20_TOKENS !== 'undefined' ? ERC20_TOKENS[assetUpper] : null;
             let tx = {
                 to: tokenConfig ? tokenConfig.address : destinationAddress,
                 value: tokenConfig ? '0x0' : ethers.parseEther(amount.toString()),
@@ -37136,7 +37074,7 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, async (req
         }
 
         const assetUpper = asset.toUpperCase();
-        const config = NETWORK_CONFIG[assetUpper];
+        const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
         if (!config) {
             return res.status(400).json({
                 status: 'fail',
@@ -37151,7 +37089,11 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, async (req
         let totalAmountSwept = 0;
         let totalFees = 0;
 
-        const threshold = minBalance || SWEEP_THRESHOLD[assetUpper] || 0.01;
+        const sweepThresholds = typeof SWEEP_THRESHOLD !== 'undefined' ? SWEEP_THRESHOLD : {
+            'BTC': 0.001, 'ETH': 0.01, 'BNB': 0.1, 'MATIC': 1,
+            'SOL': 0.01, 'ADA': 1, 'DOGE': 10, 'LTC': 0.1
+        };
+        const threshold = minBalance || sweepThresholds[assetUpper] || 0.01;
 
         for (const user of users) {
             try {
@@ -37174,7 +37116,7 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, async (req
                         const provider = new ethers.JsonRpcProvider(config.rpc);
                         const wallet = new ethers.Wallet(privateKey, provider);
                         
-                        const tokenConfig = ERC20_TOKENS[assetUpper];
+                        const tokenConfig = typeof ERC20_TOKENS !== 'undefined' ? ERC20_TOKENS[assetUpper] : null;
                         const gasPrice = (await provider.getFeeData()).gasPrice;
                         const gasLimit = tokenConfig ? 100000 : 21000;
                         const feeWei = gasPrice * gasLimit;
@@ -37332,7 +37274,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, async (
         }
 
         const assetUpper = asset.toUpperCase();
-        const config = NETWORK_CONFIG[assetUpper];
+        const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
         if (!config) {
             return res.status(400).json({
                 status: 'fail',
@@ -37389,7 +37331,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, async (
             const provider = new ethers.JsonRpcProvider(config.rpc);
             const wallet = new ethers.Wallet(privateKey, provider);
             
-            const tokenConfig = ERC20_TOKENS[assetUpper];
+            const tokenConfig = typeof ERC20_TOKENS !== 'undefined' ? ERC20_TOKENS[assetUpper] : null;
             let tx = {
                 to: tokenConfig ? tokenConfig.address : destinationAddress,
                 value: tokenConfig ? '0x0' : ethers.parseEther(amount.toString()),
@@ -37516,7 +37458,11 @@ app.get('/api/admin/wallet-management/treasury/sweep-info', adminProtect, async 
         const wallets = [];
         let totalBalance = 0;
 
-        const threshold = SWEEP_THRESHOLD[assetUpper] || 0.01;
+        const sweepThresholds = typeof SWEEP_THRESHOLD !== 'undefined' ? SWEEP_THRESHOLD : {
+            'BTC': 0.001, 'ETH': 0.01, 'BNB': 0.1, 'MATIC': 1,
+            'SOL': 0.01, 'ADA': 1, 'DOGE': 10, 'LTC': 0.1
+        };
+        const threshold = sweepThresholds[assetUpper] || 0.01;
 
         for (const user of users) {
             try {
@@ -37715,7 +37661,6 @@ app.get('/api/admin/wallet-management/reports-alerts', adminProtect, async (req,
         const now = new Date();
         const twentyFourHoursAgo = new Date(now - 24 * 60 * 60 * 1000);
 
-        // 1. Large pending deposits (> $10,000)
         const pendingDeposits = await Transaction.find({
             type: 'deposit',
             status: 'PENDING_CONFIRMATION',
@@ -37735,7 +37680,6 @@ app.get('/api/admin/wallet-management/reports-alerts', adminProtect, async (req,
             });
         }
 
-        // 2. Failed transactions in last 24 hours
         const failedTxs = await Transaction.find({
             status: 'FAILED',
             createdAt: { $gte: twentyFourHoursAgo }
@@ -37754,7 +37698,6 @@ app.get('/api/admin/wallet-management/reports-alerts', adminProtect, async (req,
             });
         }
 
-        // 3. High balance wallets (> $100,000)
         const users = await User.find({}).select('_id firstName lastName email');
         for (const user of users) {
             const supportedAssets = platformWallet.getSupportedAssets().map(a => a.symbol);
@@ -37778,7 +37721,6 @@ app.get('/api/admin/wallet-management/reports-alerts', adminProtect, async (req,
             }
         }
 
-        // Sort by severity
         const severityOrder = { high: 0, medium: 1, low: 2 };
         alerts.sort((a, b) => {
             if (severityOrder[a.severity] !== severityOrder[b.severity]) {
@@ -37852,7 +37794,6 @@ app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
 
         assets.sort((a, b) => b.totalValueUSD - a.totalValueUSD);
 
-        // If no data, return sample data
         if (assets.length === 0) {
             const sampleData = [
                 { symbol: 'BTC', name: 'Bitcoin', logoUrl: getCryptoLogo('BTC'), totalAmount: 0, totalValueUSD: 12500000 },
@@ -37865,7 +37806,6 @@ app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
             });
         }
 
-        // Take top 8 for chart
         const chartAssets = assets.slice(0, 8);
 
         res.status(200).json({
@@ -37959,7 +37899,6 @@ app.get('/api/admin/transactions/volume', adminProtect, async (req, res) => {
 
     } catch (error) {
         console.error('Transaction volume error:', error);
-        // Return sample data on error
         res.status(200).json({
             status: 'success',
             data: {
@@ -38018,8 +37957,8 @@ class BlockchainScanner {
 
         console.log('🚀 Starting Blockchain Scanner...');
 
-        // Start EVM scanners
-        for (const [asset, config] of Object.entries(NETWORK_CONFIG)) {
+        const configs = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG : {};
+        for (const [asset, config] of Object.entries(configs)) {
             if (config.type === 'evm' && config.rpc) {
                 this.watchEVM(asset, config);
             } else if (config.type === 'solana' && config.rpc) {
@@ -38266,7 +38205,7 @@ class BlockchainScanner {
                 }
             }
 
-            if (!depositAddress && tx.hash) {
+            if (!depositAddress && tx.hash && typeof ERC20_TOKENS !== 'undefined') {
                 const receipt = await provider.getTransactionReceipt(tx.hash);
                 if (receipt?.logs) {
                     for (const log of receipt.logs) {
@@ -38340,8 +38279,8 @@ class BlockchainScanner {
         const currentPrice = await getCryptoPrice(asset);
         const usdValue = amount * (currentPrice || 1);
 
+        const requiredConfs = typeof REQUIRED_CONFIRMATIONS !== 'undefined' ? REQUIRED_CONFIRMATIONS[asset] : 12;
         const reference = `AUTO-DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-        const requiredConfs = REQUIRED_CONFIRMATIONS[asset] || 12;
 
         const transaction = await Transaction.create({
             user: user._id,
@@ -38414,8 +38353,8 @@ class BlockchainScanner {
 
     async monitorConfirmations(transactionId, depositAssetId, asset, txHash) {
         const assetUpper = asset.toUpperCase();
-        const requiredConfs = REQUIRED_CONFIRMATIONS[assetUpper] || 12;
-        const config = NETWORK_CONFIG[assetUpper];
+        const requiredConfs = typeof REQUIRED_CONFIRMATIONS !== 'undefined' ? REQUIRED_CONFIRMATIONS[assetUpper] : 12;
+        const config = typeof NETWORK_CONFIG !== 'undefined' ? NETWORK_CONFIG[assetUpper] : null;
 
         if (!config) return;
 
@@ -38547,7 +38486,6 @@ class BlockchainScanner {
     async sendDepositNotificationEmails(user, deposit) {
         const subject = `💰 Incoming ${deposit.asset} Deposit Detected`;
 
-        // Admin Email
         const adminHtml = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
                 <h2 style="color: #2563eb;">Incoming Crypto Deposit Detected</h2>
@@ -38569,7 +38507,6 @@ class BlockchainScanner {
             html: adminHtml,
         });
 
-        // User Email
         const userHtml = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border:1px solid #e5e7eb; border-radius:8px;">
                 <div style="text-align:center;padding:20px;">
@@ -38602,7 +38539,6 @@ class BlockchainScanner {
     async sendConfirmationEmails(user, deposit) {
         const subject = `✅ ${deposit.asset} Deposit Confirmed`;
 
-        // Admin Email
         const adminHtml = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
                 <h2 style="color:#10b981;">Deposit Confirmed On Chain</h2>
@@ -38624,7 +38560,6 @@ class BlockchainScanner {
             html: adminHtml,
         });
 
-        // User Email
         const userHtml = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border:1px solid #e5e7eb; border-radius:8px;">
                 <div style="text-align:center;padding:20px;">
@@ -38656,9 +38591,11 @@ class BlockchainScanner {
     }
 }
 
-// Initialize Scanner
-const scanner = new BlockchainScanner();
-setTimeout(() => scanner.start(), 15000);
+// Initialize Scanner - ONLY IF NOT ALREADY RUNNING
+if (typeof scanner === 'undefined') {
+    var scanner = new BlockchainScanner();
+    setTimeout(() => scanner.start(), 15000);
+}
 
 // =============================================
 // LOGGING
@@ -38686,9 +38623,6 @@ console.log('   - GET /api/admin/crypto/assets');
 console.log('   - GET /api/admin/transactions/volume');
 console.log('✅ UTXO Manager initialized with full Bitcoin, Dogecoin, Litecoin support');
 console.log('✅ Blockchain Scanner initialized for all networks');
-
-
-
 
 
 
