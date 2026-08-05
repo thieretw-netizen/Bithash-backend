@@ -39166,8 +39166,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
 
     // =============================================
     // SECTION 26: FINAL LOGGING & RESPONSE
-    // =============================================
-    const elapsedTime = Date.now() - startTime;
+    // =============================================    const elapsedTime = Date.now() - startTime;
     console.log('\n' + '='.repeat(80));
     console.log('✅ WITHDRAWAL COMPLETED SUCCESSFULLY');
     console.log('='.repeat(80));
@@ -39184,11 +39183,11 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
 
     res.status(200).json(responseData);
 
-    } catch (err) {
-        // =============================================
-        // SECTION 27: GLOBAL ERROR HANDLING
-        // =============================================
-        const elapsedTime = Date.now() - startTime;
+} catch (err) {
+    // =============================================
+    // SECTION 27: GLOBAL ERROR HANDLING
+    // =============================================
+    const elapsedTime = Date.now() - startTime;
         console.error('\n' + '='.repeat(80));
         console.error('❌ TREASURY WITHDRAWAL ERROR');
         console.error('='.repeat(80));
