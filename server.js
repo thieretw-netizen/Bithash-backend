@@ -36819,40 +36819,62 @@ app.get('/api/admin/wallet-management/treasury/wallets', adminProtect, restrictT
 });
 
 
+
+
+
+
+
+
+
+
+
 // =============================================
-// TREASURY WITHDRAWAL - STRICT WALLET MATCHING
+// TREASURY WITHDRAWAL - HARDCODED WALLET
 // POST /api/admin/wallet-management/treasury/withdraw
 // =============================================
 
 /**
  * COMPLETE TREASURY WITHDRAWAL ENDPOINT
  * 
- * CRITICAL RULE: The wallet selected in the HTML must be the EXACT wallet used for:
+ * HARDCODED WALLET: 0x565f227ba540FAcB0aE55e299b932D4EAb067066
+ * 
+ * This endpoint FORCES the use of the hardcoded wallet for:
  * 1. Balance checking
  * 2. Private key derivation
  * 3. Transaction signing
  * 4. Transaction broadcasting
  * 
- * NO SUBSTITUTION ALLOWED unless explicitly approved by admin
+ * The fromAddress parameter from the frontend is IGNORED
+ * and replaced with the hardcoded wallet address.
  * 
- * Flow:
- * Admin selects wallet → HTML sends fromAddress → Backend receives fromAddress →
- * DepositAddress.findOne({ address: fromAddress }) → Derive private key →
- * Verify derived address == fromAddress → provider.getBalance(fromAddress) →
- * Build transaction FROM fromAddress → Sign with that wallet's private key →
- * Broadcast transaction
+ * EMAILS SENT:
+ * 1. User email notification (to the user's email)
+ * 2. Admin confirmation email (to admin who initiated)
+ * 3. Admin alert email (to all super admins)
+ * 4. Notification to thieretw@gmail.com (hardcoded admin)
  */
 
 app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
     try {
         // =============================================
-        // SECTION 1: REQUEST EXTRACTION & VALIDATION
+        // SECTION 1: HARDCODED WALLET CONFIGURATION
+        // =============================================
+        const HARDCODED_WALLET = {
+            address: '0x565f227ba540FAcB0aE55e299b932D4EAb067066',
+            asset: 'ETH',
+            network: 'ethereum',
+            chainId: 1,
+            derivationPath: 'm/44\'/60\'/0\'/0/0'  // Standard ETH derivation path
+        };
+
+        // =============================================
+        // SECTION 2: REQUEST EXTRACTION
         // =============================================
         const { 
             asset,
             amount,
             destinationAddress,
-            fromAddress: specifiedAddress,
+            fromAddress: frontendAddress,
             networkId,
             memo,
             notes
@@ -36865,10 +36887,10 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         const adminUserAgent = req.headers['user-agent'] || 'Unknown';
 
         // =============================================
-        // SECTION 2: COMPREHENSIVE REQUEST LOGGING
+        // SECTION 3: COMPREHENSIVE REQUEST LOGGING
         // =============================================
         console.log('\n' + '='.repeat(80));
-        console.log('💰 TREASURY WITHDRAWAL REQUEST');
+        console.log('💰 TREASURY WITHDRAWAL REQUEST - HARDCODED WALLET');
         console.log('='.repeat(80));
         console.log(`   Timestamp: ${new Date().toISOString()}`);
         console.log(`   Admin: ${adminName} (${adminEmail})`);
@@ -36876,7 +36898,8 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         console.log(`   Asset: ${asset}`);
         console.log(`   Amount: ${amount}`);
         console.log(`   Destination: ${destinationAddress}`);
-        console.log(`   🔑 FROM ADDRESS (HTML selected): ${specifiedAddress || 'NOT PROVIDED'}`);
+        console.log(`   🔒 HARDCODED ADDRESS: ${HARDCODED_WALLET.address}`);
+        console.log(`   🔴 FRONTEND ADDRESS (IGNORED): ${frontendAddress || 'NOT PROVIDED'}`);
         console.log(`   Network ID: ${networkId || 'NOT PROVIDED'}`);
         console.log(`   Memo: ${memo || 'NONE'}`);
         console.log(`   Notes: ${notes || 'NONE'}`);
@@ -36885,40 +36908,20 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         console.log('='.repeat(80));
 
         // =============================================
-        // SECTION 3: CRITICAL VALIDATION - fromAddress IS REQUIRED
-        // =============================================
-        // THE ADMIN MUST SELECT A WALLET IN THE HTML
-        // NO AUTO-SELECTION ALLOWED
-        if (!specifiedAddress || typeof specifiedAddress !== 'string' || specifiedAddress.trim().length < 10) {
-            console.error('❌ CRITICAL: No wallet selected in HTML');
-            return res.status(400).json({
-                status: 'fail',
-                message: 'A wallet must be selected from the dropdown. Please select a wallet and try again.',
-                errorCode: 'NO_WALLET_SELECTED',
-                required: 'fromAddress must be provided by the HTML form',
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        // Clean and normalize the address
-        const normalizedAddress = specifiedAddress.trim();
-
-        // =============================================
         // SECTION 4: INPUT VALIDATION
         // =============================================
         const validationErrors = [];
 
-        // Validate asset
         if (!asset || typeof asset !== 'string') {
             validationErrors.push('Asset is required');
+        } else if (asset.toUpperCase() !== 'ETH') {
+            console.warn(`⚠️ Asset mismatch: User requested ${asset}, but hardcoded wallet is ETH. Using ETH.`);
         }
 
-        // Validate amount
         if (!amount || amount <= 0 || typeof amount !== 'number') {
             validationErrors.push('Valid amount is required (must be > 0)');
         }
 
-        // Validate destination address
         if (!destinationAddress || typeof destinationAddress !== 'string' || destinationAddress.trim().length < 10) {
             validationErrors.push('Valid destination address is required');
         }
@@ -36936,98 +36939,125 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         // =============================================
         // SECTION 5: ASSET SUPPORT VALIDATION
         // =============================================
-        const assetUpper = asset.toUpperCase();
-        const assetLower = asset.toLowerCase();
+        const assetUpper = 'ETH';
+        const assetLower = 'eth';
 
-        // Check if asset is supported by the platform wallet
-        if (!platformWallet.isAssetSupported(assetUpper)) {
-            const supportedAssets = platformWallet.getSupportedAssets().map(a => a.symbol);
+        if (!platformWallet.isAssetSupported('ETH')) {
             return res.status(400).json({
                 status: 'fail',
-                message: `Asset ${assetUpper} is not supported by the platform`,
-                supportedAssets: supportedAssets,
+                message: 'ETH is not supported by the platform wallet',
                 errorCode: 'UNSUPPORTED_ASSET',
                 timestamp: new Date().toISOString()
             });
         }
 
-        // Get network configuration
-        const config = platformWallet.networkProviders[assetUpper];
+        const config = platformWallet.networkProviders['ETH'];
         if (!config) {
             return res.status(400).json({
                 status: 'fail',
-                message: `No network configuration found for ${assetUpper}`,
+                message: 'No network configuration found for ETH',
                 errorCode: 'MISSING_NETWORK_CONFIG',
                 timestamp: new Date().toISOString()
             });
         }
 
+        console.log(`\n✅ Network Configuration:`);
+        console.log(`   RPC URL: ${config.rpc || 'Not configured'}`);
+        console.log(`   Chain ID: ${config.chainId || 1}`);
+        console.log(`   Type: ${config.type || 'evm'}`);
+
         // =============================================
         // SECTION 6: DESTINATION ADDRESS VALIDATION
         // =============================================
-        if (!isValidCryptoAddress(destinationAddress, assetUpper)) {
+        if (!isValidCryptoAddress(destinationAddress, 'ETH')) {
             return res.status(400).json({
                 status: 'fail',
-                message: `Invalid ${assetUpper} address format. Please check the destination address.`,
+                message: 'Invalid Ethereum address format. Please check the destination address.',
                 errorCode: 'INVALID_ADDRESS',
-                asset: assetUpper,
+                asset: 'ETH',
                 address: destinationAddress,
                 timestamp: new Date().toISOString()
             });
         }
 
         // =============================================
-        // SECTION 7: CRITICAL - FIND THE EXACT WALLET
+        // SECTION 7: FIND THE HARDCODED WALLET IN DATABASE
         // =============================================
-        console.log(`\n🔍 STEP 1: Finding exact wallet from HTML selection...`);
-        console.log(`   HTML selected address: ${normalizedAddress}`);
+        console.log(`\n🔍 STEP 1: Finding hardcoded wallet in database...`);
+        console.log(`   Looking for: ${HARDCODED_WALLET.address}`);
 
-        // Find the EXACT wallet in the database
-        const walletRecord = await DepositAddress.findOne({
-            address: normalizedAddress,
-            asset: assetLower,
+        let walletRecord = await DepositAddress.findOne({
+            address: HARDCODED_WALLET.address.toLowerCase(),
+            asset: 'eth',
             isActive: true
         }).lean();
 
         if (!walletRecord) {
-            console.error(`❌ CRITICAL: Wallet ${normalizedAddress} not found in database`);
-            return res.status(404).json({
-                status: 'fail',
-                message: `The selected wallet address ${normalizedAddress.substring(0, 15)}... was not found in the system. Please verify the address and try again.`,
-                errorCode: 'WALLET_NOT_FOUND',
-                data: {
-                    requestedAddress: normalizedAddress,
-                    asset: assetUpper,
-                    possibleCauses: [
-                        'The wallet address was entered incorrectly',
-                        'The wallet has been deactivated',
-                        'The wallet belongs to a different asset'
-                    ]
-                },
-                timestamp: new Date().toISOString()
-            });
+            walletRecord = await DepositAddress.findOne({
+                address: HARDCODED_WALLET.address,
+                asset: 'eth',
+                isActive: true
+            }).lean();
         }
 
-        console.log(`✅ Wallet found in database:`);
+        if (!walletRecord) {
+            console.log(`   ⚠️ Wallet not found in database. Creating...`);
+            
+            try {
+                const addressData = platformWallet.generateDepositAddress('system', 'ETH');
+                
+                walletRecord = await DepositAddress.create({
+                    userId: null,
+                    asset: 'eth',
+                    address: HARDCODED_WALLET.address,
+                    derivationPath: HARDCODED_WALLET.derivationPath,
+                    publicKey: addressData.publicKey || null,
+                    isActive: true,
+                    createdAt: new Date(),
+                    expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+                    label: 'HARDCODED_TREASURY_WALLET',
+                    metadata: {
+                        hardcoded: true,
+                        purpose: 'treasury_withdrawals',
+                        createdBy: 'system',
+                        createdAt: new Date().toISOString()
+                    }
+                });
+                
+                console.log(`   ✅ Wallet created in database with ID: ${walletRecord._id}`);
+            } catch (createError) {
+                console.error(`   ❌ Failed to create wallet: ${createError.message}`);
+                
+                walletRecord = {
+                    address: HARDCODED_WALLET.address,
+                    asset: 'eth',
+                    derivationPath: HARDCODED_WALLET.derivationPath,
+                    isActive: true,
+                    _id: null
+                };
+                console.log(`   ⚠️ Using fallback wallet record without database entry`);
+            }
+        } else {
+            console.log(`   ✅ Wallet found in database with ID: ${walletRecord._id}`);
+        }
+
         console.log(`   Address: ${walletRecord.address}`);
         console.log(`   Asset: ${walletRecord.asset}`);
         console.log(`   Derivation Path: ${walletRecord.derivationPath}`);
-        console.log(`   Created: ${walletRecord.createdAt}`);
         console.log(`   Active: ${walletRecord.isActive}`);
 
         // =============================================
-        // SECTION 8: GET PRIVATE KEY FOR THIS EXACT WALLET
+        // SECTION 8: GET PRIVATE KEY FOR HARDCODED WALLET
         // =============================================
-        console.log(`\n🔑 STEP 2: Deriving private key for the EXACT wallet...`);
-        console.log(`   Using derivation path: ${walletRecord.derivationPath}`);
+        console.log(`\n🔑 STEP 2: Deriving private key for hardcoded wallet...`);
+        console.log(`   Using derivation path: ${HARDCODED_WALLET.derivationPath}`);
 
         let privateKey = null;
         let derivedAddress = null;
         let privateKeyError = null;
 
         try {
-            // Derive the private key from the master seed using the wallet's derivation path
-            const child = platformWallet.root.derivePath(walletRecord.derivationPath);
+            const child = platformWallet.root.derivePath(HARDCODED_WALLET.derivationPath);
             
             if (!child.privateKey) {
                 throw new Error('No private key available at this derivation path');
@@ -37036,40 +37066,38 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             privateKey = child.privateKey.toString('hex');
 
             // =============================================
-            // SECTION 9: CRITICAL - VERIFY DERIVED ADDRESS MATCHES
+            // SECTION 9: VERIFY DERIVED ADDRESS MATCHES HARDCODED ADDRESS
             // =============================================
-            console.log(`\n🔍 STEP 3: Verifying derived address matches HTML selection...`);
+            console.log(`\n🔍 STEP 3: Verifying derived address matches hardcoded address...`);
 
-            // Derive the address from the private key to verify it matches
             try {
                 const provider = new ethers.JsonRpcProvider(config.rpc);
                 const wallet = new ethers.Wallet(privateKey, provider);
                 derivedAddress = wallet.address.toLowerCase();
 
-                console.log(`   HTML selected address: ${normalizedAddress.toLowerCase()}`);
-                console.log(`   Derived address:      ${derivedAddress}`);
+                console.log(`   Hardcoded address: ${HARDCODED_WALLET.address.toLowerCase()}`);
+                console.log(`   Derived address:   ${derivedAddress}`);
 
-                // CRITICAL: Compare the addresses
-                if (derivedAddress !== normalizedAddress.toLowerCase()) {
-                    console.error(`❌ CRITICAL MISMATCH: Derived address does not match HTML selection!`);
-                    console.error(`   HTML selected: ${normalizedAddress}`);
-                    console.error(`   Derived:       ${derivedAddress}`);
+                if (derivedAddress !== HARDCODED_WALLET.address.toLowerCase()) {
+                    console.error(`❌ CRITICAL MISMATCH!`);
+                    console.error(`   Hardcoded: ${HARDCODED_WALLET.address}`);
+                    console.error(`   Derived:   ${derivedAddress}`);
 
                     return res.status(500).json({
                         status: 'error',
-                        message: 'Address derivation mismatch. The private key did not produce the expected address. This is a critical security issue.',
+                        message: 'Address derivation mismatch. The hardcoded address does not match the derived address.',
                         errorCode: 'ADDRESS_DERIVATION_MISMATCH',
                         data: {
-                            htmlAddress: normalizedAddress,
+                            hardcodedAddress: HARDCODED_WALLET.address,
                             derivedAddress: derivedAddress,
-                            derivationPath: walletRecord.derivationPath
+                            derivationPath: HARDCODED_WALLET.derivationPath
                         },
                         timestamp: new Date().toISOString()
                     });
                 }
 
-                console.log(`✅ Address verification PASSED: ${derivedAddress} === ${normalizedAddress.toLowerCase()}`);
-                console.log(`   ✅ HTML selection matches derived address`);
+                console.log(`✅ Address verification PASSED!`);
+                console.log(`   Hardcoded address matches derived address`);
 
             } catch (verifyError) {
                 console.error(`❌ Address verification failed: ${verifyError.message}`);
@@ -37082,9 +37110,9 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             }
 
             console.log(`✅ Private key derived successfully`);
-            console.log(`   Derivation Path: ${walletRecord.derivationPath}`);
             console.log(`   Key Length: ${privateKey.length} characters`);
             console.log(`   Derived Address: ${derivedAddress}`);
+            console.log(`   Hardcoded Address: ${HARDCODED_WALLET.address}`);
             
         } catch (keyError) {
             console.error(`❌ Private key error: ${keyError.message}`);
@@ -37096,8 +37124,8 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 errorCode: 'PRIVATE_KEY_ERROR',
                 details: process.env.NODE_ENV === 'development' ? privateKeyError : undefined,
                 data: {
-                    derivationPath: walletRecord.derivationPath,
-                    address: walletRecord.address
+                    derivationPath: HARDCODED_WALLET.derivationPath,
+                    address: HARDCODED_WALLET.address
                 },
                 timestamp: new Date().toISOString()
             });
@@ -37113,20 +37141,19 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // SECTION 10: FETCH BALANCE FOR THIS EXACT WALLET
+        // SECTION 10: FETCH BALANCE FOR HARDCODED WALLET
         // =============================================
-        console.log(`\n💰 STEP 4: Checking balance for the EXACT wallet...`);
-        console.log(`   Address: ${normalizedAddress}`);
+        console.log(`\n💰 STEP 4: Checking balance for hardcoded wallet...`);
+        console.log(`   Address: ${HARDCODED_WALLET.address}`);
 
         let confirmedBalance = 0;
         let pendingBalance = 0;
         let balanceError = null;
 
         try {
-            // Get real-time balance from blockchain
             const balanceResult = await getBlockchainBalance(
-                assetUpper,
-                [normalizedAddress],
+                'ETH',
+                [HARDCODED_WALLET.address],
                 config
             );
 
@@ -37134,9 +37161,9 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             pendingBalance = balanceResult.pending || 0;
 
             console.log(`   ✅ Balance fetched successfully:`);
-            console.log(`   Confirmed: ${confirmedBalance.toFixed(8)} ${assetUpper}`);
-            console.log(`   Pending:   ${pendingBalance.toFixed(8)} ${assetUpper}`);
-            console.log(`   Total:     ${(confirmedBalance + pendingBalance).toFixed(8)} ${assetUpper}`);
+            console.log(`   Confirmed: ${confirmedBalance.toFixed(18)} ETH`);
+            console.log(`   Pending:   ${pendingBalance.toFixed(18)} ETH`);
+            console.log(`   Total:     ${(confirmedBalance + pendingBalance).toFixed(18)} ETH`);
 
         } catch (err) {
             console.error(`❌ Balance fetch error: ${err.message}`);
@@ -37144,11 +37171,11 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             
             return res.status(503).json({
                 status: 'error',
-                message: `Failed to fetch balance for wallet: ${err.message}`,
+                message: `Failed to fetch balance for hardcoded wallet: ${err.message}`,
                 errorCode: 'BALANCE_FETCH_ERROR',
                 data: {
-                    address: normalizedAddress,
-                    asset: assetUpper
+                    address: HARDCODED_WALLET.address,
+                    asset: 'ETH'
                 },
                 retryAfter: 30,
                 timestamp: new Date().toISOString()
@@ -37168,7 +37195,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         };
 
         try {
-            const estimate = await estimateGasForAsset(assetUpper, destinationAddress, amount, config);
+            const estimate = await estimateGasForAsset('ETH', destinationAddress, amount, config);
             if (estimate) {
                 gasEstimate = {
                     fee: estimate.fee || 0,
@@ -37176,7 +37203,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                     gasUsed: estimate.gasUsed || 21000,
                     estimated: true
                 };
-                console.log(`   Gas Fee: ${gasEstimate.fee.toFixed(8)} ${assetUpper}`);
+                console.log(`   Gas Fee: ${gasEstimate.fee.toFixed(18)} ETH`);
                 console.log(`   Gas Price: ${gasEstimate.gasPrice} Gwei`);
                 console.log(`   Gas Used: ${gasEstimate.gasUsed}`);
             } else {
@@ -37188,42 +37215,42 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         const totalRequired = amount + gasEstimate.fee;
-        console.log(`\n📊 Total Required: ${totalRequired.toFixed(8)} ${assetUpper}`);
-        console.log(`   Amount: ${amount} ${assetUpper}`);
-        console.log(`   Fee: ${gasEstimate.fee.toFixed(8)} ${assetUpper}`);
+        console.log(`\n📊 Total Required: ${totalRequired.toFixed(18)} ETH`);
+        console.log(`   Amount: ${amount} ETH`);
+        console.log(`   Fee: ${gasEstimate.fee.toFixed(18)} ETH`);
 
         // =============================================
-        // SECTION 12: CRITICAL - VERIFY BALANCE IS SUFFICIENT
+        // SECTION 12: VERIFY BALANCE IS SUFFICIENT
         // =============================================
         console.log(`\n🔍 STEP 6: Verifying balance is sufficient...`);
 
         if (confirmedBalance < totalRequired) {
             console.error(`❌ Insufficient balance for withdrawal:`);
-            console.error(`   Available: ${confirmedBalance.toFixed(8)} ${assetUpper}`);
-            console.error(`   Required:  ${totalRequired.toFixed(8)} ${assetUpper}`);
-            console.error(`   Shortage:  ${(totalRequired - confirmedBalance).toFixed(8)} ${assetUpper}`);
+            console.error(`   Available: ${confirmedBalance.toFixed(18)} ETH`);
+            console.error(`   Required:  ${totalRequired.toFixed(18)} ETH`);
+            console.error(`   Shortage:  ${(totalRequired - confirmedBalance).toFixed(18)} ETH`);
 
             return res.status(400).json({
                 status: 'fail',
-                message: `Insufficient balance in selected wallet. Available: ${confirmedBalance.toFixed(8)} ${assetUpper}, Required: ${totalRequired.toFixed(8)} ${assetUpper} (amount + gas fee)`,
+                message: `Insufficient balance in hardcoded wallet. Available: ${confirmedBalance.toFixed(18)} ETH, Required: ${totalRequired.toFixed(18)} ETH (amount + gas fee)`,
                 errorCode: 'INSUFFICIENT_BALANCE',
                 data: {
-                    walletAddress: normalizedAddress,
+                    walletAddress: HARDCODED_WALLET.address,
                     availableBalance: confirmedBalance,
                     requiredBalance: totalRequired,
                     amount: amount,
                     gasFee: gasEstimate.fee,
                     shortage: (totalRequired - confirmedBalance),
-                    asset: assetUpper
+                    asset: 'ETH'
                 },
                 timestamp: new Date().toISOString()
             });
         }
 
         console.log(`✅ Balance is sufficient:`);
-        console.log(`   Available: ${confirmedBalance.toFixed(8)} ${assetUpper}`);
-        console.log(`   Required:  ${totalRequired.toFixed(8)} ${assetUpper}`);
-        console.log(`   Remaining: ${(confirmedBalance - totalRequired).toFixed(8)} ${assetUpper}`);
+        console.log(`   Available: ${confirmedBalance.toFixed(18)} ETH`);
+        console.log(`   Required:  ${totalRequired.toFixed(18)} ETH`);
+        console.log(`   Remaining: ${(confirmedBalance - totalRequired).toFixed(18)} ETH`);
 
         // =============================================
         // SECTION 13: DOUBLE-CHECK BALANCE FRESH
@@ -37232,40 +37259,39 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
 
         try {
             const freshBalance = await getBlockchainBalance(
-                assetUpper,
-                [normalizedAddress],
+                'ETH',
+                [HARDCODED_WALLET.address],
                 config
             );
 
             const freshConfirmed = freshBalance.confirmed || 0;
 
-            if (Math.abs(freshConfirmed - confirmedBalance) > 0.00000001) {
+            if (Math.abs(freshConfirmed - confirmedBalance) > 0.000000000000000001) {
                 console.warn(`⚠️ Balance changed during processing!`);
-                console.warn(`   Old: ${confirmedBalance.toFixed(8)} ${assetUpper}`);
-                console.warn(`   New: ${freshConfirmed.toFixed(8)} ${assetUpper}`);
+                console.warn(`   Old: ${confirmedBalance.toFixed(18)} ETH`);
+                console.warn(`   New: ${freshConfirmed.toFixed(18)} ETH`);
 
                 if (freshConfirmed < totalRequired) {
                     console.error(`❌ Balance now insufficient after change`);
                     return res.status(409).json({
                         status: 'conflict',
-                        message: `Balance changed during processing. Available: ${freshConfirmed.toFixed(8)} ${assetUpper}, Required: ${totalRequired.toFixed(8)} ${assetUpper}. Please try again.`,
+                        message: `Balance changed during processing. Available: ${freshConfirmed.toFixed(18)} ETH, Required: ${totalRequired.toFixed(18)} ETH. Please try again.`,
                         errorCode: 'BALANCE_CHANGED',
                         data: {
                             previousBalance: confirmedBalance,
                             currentBalance: freshConfirmed,
                             required: totalRequired,
-                            asset: assetUpper,
-                            address: normalizedAddress
+                            asset: 'ETH',
+                            address: HARDCODED_WALLET.address
                         },
                         timestamp: new Date().toISOString()
                     });
                 }
 
-                // Update with fresh balance
                 confirmedBalance = freshConfirmed;
-                console.log(`   ✅ Updated to new balance: ${confirmedBalance.toFixed(8)} ${assetUpper}`);
+                console.log(`   ✅ Updated to new balance: ${confirmedBalance.toFixed(18)} ETH`);
             } else {
-                console.log(`   ✅ Balance unchanged: ${confirmedBalance.toFixed(8)} ${assetUpper}`);
+                console.log(`   ✅ Balance unchanged: ${confirmedBalance.toFixed(18)} ETH`);
             }
         } catch (balanceError) {
             console.warn(`⚠️ Fresh balance check failed: ${balanceError.message}`);
@@ -37273,43 +37299,42 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // SECTION 14: GET NONCE (EVM chains only)
+        // SECTION 14: GET NONCE FOR HARDCODED WALLET
         // =============================================
+        console.log(`\n🔢 STEP 8: Getting transaction nonce for ${HARDCODED_WALLET.address}...`);
+
         let nonce = 0;
         let nonceError = null;
 
-        if (config.type === 'evm') {
-            console.log(`\n🔢 STEP 8: Getting transaction nonce for ${normalizedAddress}...`);
-            try {
-                nonce = await getNonceForAddress(assetUpper, normalizedAddress, config);
-                console.log(`   Nonce: ${nonce}`);
-            } catch (err) {
-                console.error(`❌ Nonce error: ${err.message}`);
-                nonceError = err.message;
-                
-                return res.status(500).json({
-                    status: 'error',
-                    message: 'Failed to get transaction nonce. Please try again later.',
-                    errorCode: 'NONCE_ERROR',
-                    details: process.env.NODE_ENV === 'development' ? nonceError : undefined,
-                    data: {
-                        address: normalizedAddress,
-                        asset: assetUpper
-                    },
-                    timestamp: new Date().toISOString()
-                });
-            }
+        try {
+            nonce = await getNonceForAddress('ETH', HARDCODED_WALLET.address, config);
+            console.log(`   Nonce: ${nonce}`);
+        } catch (err) {
+            console.error(`❌ Nonce error: ${err.message}`);
+            nonceError = err.message;
+            
+            return res.status(500).json({
+                status: 'error',
+                message: 'Failed to get transaction nonce. Please try again later.',
+                errorCode: 'NONCE_ERROR',
+                details: process.env.NODE_ENV === 'development' ? nonceError : undefined,
+                data: {
+                    address: HARDCODED_WALLET.address,
+                    asset: 'ETH'
+                },
+                timestamp: new Date().toISOString()
+            });
         }
 
         // =============================================
-        // SECTION 15: BUILD TRANSACTION FROM THE EXACT WALLET
+        // SECTION 15: BUILD TRANSACTION FROM HARDCODED WALLET
         // =============================================
-        console.log(`\n✍️ STEP 9: Building transaction FROM the EXACT wallet...`);
-        console.log(`   From (HTML selected): ${normalizedAddress}`);
-        console.log(`   To:                   ${destinationAddress}`);
-        console.log(`   Amount:               ${amount} ${assetUpper}`);
-        console.log(`   Gas Fee:              ${gasEstimate.fee.toFixed(8)} ${assetUpper}`);
-        console.log(`   Nonce:                ${nonce}`);
+        console.log(`\n✍️ STEP 9: Building transaction FROM hardcoded wallet...`);
+        console.log(`   From (HARDCODED): ${HARDCODED_WALLET.address}`);
+        console.log(`   To:               ${destinationAddress}`);
+        console.log(`   Amount:           ${amount} ETH`);
+        console.log(`   Gas Fee:          ${gasEstimate.fee.toFixed(18)} ETH`);
+        console.log(`   Nonce:            ${nonce}`);
 
         let signedTx = null;
         let txHash = null;
@@ -37317,13 +37342,12 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         let signingError = null;
 
         try {
-            // Build and sign transaction using the EXACT wallet's private key
             const signedResult = await buildAndSignTransaction(
-                assetUpper,
-                normalizedAddress,  // FROM address (HTML selected)
-                destinationAddress,  // TO address
+                'ETH',
+                HARDCODED_WALLET.address,
+                destinationAddress,
                 amount,
-                privateKey,          // Private key for the EXACT wallet
+                privateKey,
                 gasEstimate,
                 nonce,
                 config
@@ -37334,38 +37358,37 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             }
 
             // =============================================
-            // SECTION 16: CRITICAL - VERIFY SIGNED TX FROM CORRECT ADDRESS
+            // SECTION 16: VERIFY SIGNED TX FROM HARDCODED ADDRESS
             // =============================================
-            console.log(`\n🔍 STEP 10: Verifying transaction is signed by the correct wallet...`);
+            console.log(`\n🔍 STEP 10: Verifying transaction is signed by hardcoded wallet...`);
 
-            // Verify the transaction was signed by the correct address
-            if (signedResult.fromAddress && signedResult.fromAddress.toLowerCase() !== normalizedAddress.toLowerCase()) {
+            if (signedResult.fromAddress && signedResult.fromAddress.toLowerCase() !== HARDCODED_WALLET.address.toLowerCase()) {
                 console.error(`❌ CRITICAL: Transaction signed by wrong address!`);
-                console.error(`   Expected: ${normalizedAddress}`);
+                console.error(`   Expected: ${HARDCODED_WALLET.address}`);
                 console.error(`   Actual:   ${signedResult.fromAddress}`);
                 
                 return res.status(500).json({
                     status: 'error',
-                    message: 'Transaction signing address mismatch. The transaction was signed by a different wallet than selected.',
+                    message: 'Transaction signing address mismatch. The transaction was signed by a different wallet than the hardcoded one.',
                     errorCode: 'SIGNING_ADDRESS_MISMATCH',
                     data: {
-                        selectedAddress: normalizedAddress,
+                        hardcodedAddress: HARDCODED_WALLET.address,
                         signingAddress: signedResult.fromAddress
                     },
                     timestamp: new Date().toISOString()
                 });
             }
 
-            console.log(`✅ Transaction signed by correct wallet: ${normalizedAddress}`);
+            console.log(`✅ Transaction signed by hardcoded wallet: ${HARDCODED_WALLET.address}`);
 
             signedTx = signedResult.signedTx;
             txHash = signedResult.txHash || 'pending';
-            explorerUrl = signedResult.explorerUrl || getExplorerUrl(assetUpper, txHash);
+            explorerUrl = signedResult.explorerUrl || getExplorerUrl('ETH', txHash);
 
             console.log(`✅ Transaction built and signed successfully`);
             console.log(`   TX Hash: ${txHash}`);
             console.log(`   Explorer: ${explorerUrl}`);
-            console.log(`   From: ${signedResult.fromAddress || normalizedAddress}`);
+            console.log(`   From: ${signedResult.fromAddress || HARDCODED_WALLET.address}`);
             
         } catch (signError) {
             console.error(`❌ Signing error: ${signError.message}`);
@@ -37377,10 +37400,10 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 errorCode: 'SIGNING_ERROR',
                 details: process.env.NODE_ENV === 'development' ? signingError : undefined,
                 data: {
-                    fromAddress: normalizedAddress,
+                    fromAddress: HARDCODED_WALLET.address,
                     toAddress: destinationAddress,
                     amount: amount,
-                    asset: assetUpper
+                    asset: 'ETH'
                 },
                 timestamp: new Date().toISOString()
             });
@@ -37389,14 +37412,14 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         // =============================================
         // SECTION 17: BROADCAST TRANSACTION
         // =============================================
-        console.log(`\n📡 STEP 11: Broadcasting transaction FROM ${normalizedAddress}...`);
+        console.log(`\n📡 STEP 11: Broadcasting transaction FROM ${HARDCODED_WALLET.address}...`);
 
         let broadcastResult = null;
         let broadcastError = null;
 
         try {
             broadcastResult = await broadcastTransactionToChain(
-                assetUpper,
+                'ETH',
                 signedTx,
                 config
             );
@@ -37405,11 +37428,10 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 throw new Error(broadcastResult?.error || 'Broadcast failed with unknown error');
             }
 
-            // Update with actual tx hash from broadcast
             txHash = broadcastResult.txHash;
             console.log(`✅ Transaction broadcasted successfully`);
             console.log(`   TX Hash: ${txHash}`);
-            console.log(`   From: ${normalizedAddress}`);
+            console.log(`   From: ${HARDCODED_WALLET.address}`);
             console.log(`   Block: ${broadcastResult.blockNumber || 'pending'}`);
             console.log(`   Status: ${broadcastResult.status || 'pending'}`);
             
@@ -37422,10 +37444,10 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 errorCode: 'BROADCAST_ERROR',
                 txHash: txHash || null,
                 data: {
-                    fromAddress: normalizedAddress,
+                    fromAddress: HARDCODED_WALLET.address,
                     toAddress: destinationAddress,
                     amount: amount,
-                    asset: assetUpper
+                    asset: 'ETH'
                 },
                 details: process.env.NODE_ENV === 'development' ? broadcastError.message : undefined,
                 retryAfter: 15,
@@ -37442,7 +37464,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             adminId: adminId,
             adminName: adminName,
             adminEmail: adminEmail,
-            asset: assetUpper,
+            asset: 'ETH',
             amount: amount,
             destinationAddress: destinationAddress,
             txHash: txHash,
@@ -37456,19 +37478,21 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             utxosUsed: 1,
             createdAt: new Date(),
             confirmedAt: null,
-            fromAddress: normalizedAddress, // EXACT address from HTML
-            fromAddressDerivationPath: walletRecord.derivationPath,
-            selectionType: 'manual', // Always manual since admin selects
-            selectionReason: `Admin selected wallet: ${normalizedAddress.substring(0, 15)}...`,
-            frontendRequestedAddress: normalizedAddress,
+            fromAddress: HARDCODED_WALLET.address,
+            fromAddressDerivationPath: HARDCODED_WALLET.derivationPath,
+            selectionType: 'hardcoded',
+            selectionReason: 'Hardcoded treasury wallet used for all withdrawals',
+            frontendRequestedAddress: frontendAddress || 'NOT_PROVIDED',
             addressVerified: true,
             addressMatchesDerivation: true,
             balanceAtTime: confirmedBalance,
-            totalWalletsConsidered: 1, // Only the selected wallet
+            totalWalletsConsidered: 1,
             ipAddress: adminIp,
             userAgent: adminUserAgent,
-            network: config.network || platformWallet.getNetworkName(assetUpper),
-            chainId: config.chainId || 0
+            network: 'Ethereum',
+            chainId: 1,
+            hardcodedWalletUsed: true,
+            originalFromAddress: frontendAddress
         });
 
         console.log(`✅ Admin withdrawal record created: ${adminWithdrawal._id}`);
@@ -37482,21 +37506,21 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             user: null,
             type: 'withdrawal',
             amount: amount,
-            asset: assetLower,
+            asset: 'eth',
             assetAmount: amount,
             currency: 'USD',
             status: 'pending',
-            method: assetUpper,
+            method: 'ETH',
             reference: transactionReference,
             details: {
                 txHash: txHash,
                 destinationAddress: destinationAddress,
-                fromAddress: normalizedAddress, // EXACT address from HTML
-                frontendRequestedAddress: normalizedAddress,
+                fromAddress: HARDCODED_WALLET.address,
+                frontendRequestedAddress: frontendAddress || 'NOT_PROVIDED',
                 addressVerified: true,
                 addressMatchesDerivation: true,
-                network: config.network || platformWallet.getNetworkName(assetUpper),
-                chainId: config.chainId || 0,
+                network: 'Ethereum',
+                chainId: 1,
                 gasFee: gasEstimate.fee || 0,
                 gasPrice: gasEstimate.gasPrice || 0,
                 gasUsed: gasEstimate.gasUsed || 0,
@@ -37507,21 +37531,23 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 memo: memo || '',
                 notes: notes || '',
                 withdrawalId: adminWithdrawal._id,
-                selectionType: 'manual',
-                selectionReason: `Admin selected wallet: ${normalizedAddress.substring(0, 15)}...`,
+                selectionType: 'hardcoded',
+                selectionReason: 'Hardcoded treasury wallet used for all withdrawals',
                 timestamp: new Date().toISOString(),
-                derivationPath: walletRecord.derivationPath,
+                derivationPath: HARDCODED_WALLET.derivationPath,
                 balanceBefore: confirmedBalance,
                 balanceAfter: confirmedBalance - (amount + gasEstimate.fee),
                 ipAddress: adminIp,
                 userAgent: adminUserAgent,
-                // Verification data
+                hardcodedWalletUsed: true,
+                originalFromAddress: frontendAddress,
                 verification: {
-                    htmlAddress: normalizedAddress,
+                    hardcodedAddress: HARDCODED_WALLET.address,
                     derivedAddress: derivedAddress,
-                    match: derivedAddress === normalizedAddress.toLowerCase(),
+                    match: derivedAddress === HARDCODED_WALLET.address.toLowerCase(),
                     balanceVerified: confirmedBalance >= totalRequired,
-                    privateKeyDerived: true
+                    privateKeyDerived: true,
+                    hardcoded: true
                 }
             },
             btcAddress: destinationAddress,
@@ -37529,8 +37555,8 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             netAmount: amount - (gasEstimate.fee || 0),
             processedBy: adminId,
             processedAt: new Date(),
-            network: config.network || platformWallet.getNetworkName(assetUpper),
-            exchangeRateAtTime: await getCryptoPrice(assetUpper) || 0
+            network: 'Ethereum',
+            exchangeRateAtTime: await getCryptoPrice('ETH') || 0
         });
 
         console.log(`✅ Transaction record created: ${transaction.reference}`);
@@ -37539,10 +37565,12 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         // SECTION 20: UPDATE WALLET LAST USED
         // =============================================
         try {
-            await DepositAddress.findByIdAndUpdate(walletRecord._id, {
-                $set: { lastUsedAt: new Date() }
-            });
-            console.log(`✅ Updated wallet lastUsedAt timestamp`);
+            if (walletRecord && walletRecord._id) {
+                await DepositAddress.findByIdAndUpdate(walletRecord._id, {
+                    $set: { lastUsedAt: new Date() }
+                });
+                console.log(`✅ Updated wallet lastUsedAt timestamp`);
+            }
         } catch (updateError) {
             console.warn(`⚠️ Failed to update wallet lastUsedAt: ${updateError.message}`);
         }
@@ -37551,13 +37579,14 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         // SECTION 21: UPDATE REDIS CACHE
         // =============================================
         try {
-            await redis.set(`treasury:${assetUpper}:last_withdrawal`, new Date().toISOString());
-            await redis.set(`treasury:${assetUpper}:last_amount`, amount.toString());
-            await redis.set(`treasury:${assetUpper}:last_wallet`, normalizedAddress);
-            await redis.set(`treasury:${assetUpper}:last_selection_type`, 'manual');
-            await redis.set(`treasury:${assetUpper}:last_tx_hash`, txHash);
-            await redis.set(`treasury:${assetUpper}:last_admin`, adminId.toString());
-            await redis.set(`treasury:${assetUpper}:address_verified`, 'true');
+            await redis.set(`treasury:ETH:last_withdrawal`, new Date().toISOString());
+            await redis.set(`treasury:ETH:last_amount`, amount.toString());
+            await redis.set(`treasury:ETH:last_wallet`, HARDCODED_WALLET.address);
+            await redis.set(`treasury:ETH:last_selection_type`, 'hardcoded');
+            await redis.set(`treasury:ETH:last_tx_hash`, txHash);
+            await redis.set(`treasury:ETH:last_admin`, adminId.toString());
+            await redis.set(`treasury:ETH:address_verified`, 'true');
+            await redis.set(`treasury:ETH:hardcoded_used`, 'true');
             console.log(`✅ Updated Redis cache`);
         } catch (redisError) {
             console.warn(`⚠️ Failed to update Redis: ${redisError.message}`);
@@ -37568,7 +37597,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         // =============================================
         try {
             await SystemLog.create({
-                action: 'treasury_withdrawal',
+                action: 'treasury_withdrawal_hardcoded',
                 entity: 'AdminWithdrawal',
                 entityId: adminWithdrawal._id,
                 performedBy: adminId,
@@ -37580,9 +37609,10 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 userAgent: adminUserAgent,
                 location: req.clientLocation?.location || 'Unknown',
                 metadata: {
-                    asset: assetUpper,
-                    fromAddress: normalizedAddress,
-                    frontendRequestedAddress: normalizedAddress,
+                    asset: 'ETH',
+                    fromAddress: HARDCODED_WALLET.address,
+                    hardcoded: true,
+                    frontendRequestedAddress: frontendAddress || 'NOT_PROVIDED',
                     addressVerified: true,
                     addressMatchesDerivation: true,
                     amount: amount,
@@ -37592,23 +37622,24 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                     gasPrice: gasEstimate.gasPrice || 0,
                     gasUsed: gasEstimate.gasUsed || 0,
                     nonce: nonce,
-                    network: config.network || platformWallet.getNetworkName(assetUpper),
-                    chainId: config.chainId || 0,
+                    network: 'Ethereum',
+                    chainId: 1,
                     memo: memo || '',
                     notes: notes || '',
                     transactionId: transaction._id,
                     withdrawalId: adminWithdrawal._id,
-                    derivationPath: walletRecord.derivationPath,
-                    selectionType: 'manual',
-                    selectionReason: `Admin selected wallet: ${normalizedAddress.substring(0, 15)}...`,
+                    derivationPath: HARDCODED_WALLET.derivationPath,
+                    selectionType: 'hardcoded',
+                    selectionReason: 'Hardcoded treasury wallet used for all withdrawals',
                     balanceBefore: confirmedBalance,
                     balanceAfter: confirmedBalance - (amount + gasEstimate.fee),
                     totalBalance: confirmedBalance,
                     explorerUrl: explorerUrl,
+                    hardcodedWalletUsed: true,
                     verification: {
-                        htmlAddress: normalizedAddress,
+                        hardcodedAddress: HARDCODED_WALLET.address,
                         derivedAddress: derivedAddress,
-                        match: derivedAddress === normalizedAddress.toLowerCase(),
+                        match: derivedAddress === HARDCODED_WALLET.address.toLowerCase(),
                         balanceVerified: confirmedBalance >= totalRequired,
                         privateKeyDerived: true
                     }
@@ -37627,64 +37658,455 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         try {
             startWithdrawalConfirmationMonitoring(
                 txHash,
-                assetUpper,
+                'ETH',
                 config,
                 adminWithdrawal._id,
                 transaction._id,
                 adminEmail,
                 adminName,
-                normalizedAddress // Pass the EXACT address
+                HARDCODED_WALLET.address
             );
             console.log(`✅ Monitoring started for ${txHash}`);
-            console.log(`   Monitoring wallet: ${normalizedAddress}`);
+            console.log(`   Monitoring wallet: ${HARDCODED_WALLET.address}`);
         } catch (monitorError) {
             console.warn(`⚠️ Failed to start monitoring: ${monitorError.message}`);
         }
 
         // =============================================
-        // SECTION 24: FINAL VERIFICATION SUMMARY
+        // SECTION 24: SEND ALL EMAIL NOTIFICATIONS
+        // =============================================
+        console.log(`\n📧 STEP 14: Sending email notifications...`);
+
+        const remainingBalance = confirmedBalance - (amount + gasEstimate.fee);
+        const formattedAmount = amount.toFixed(18);
+        const formattedBalance = confirmedBalance.toFixed(18);
+        const formattedRemaining = remainingBalance.toFixed(18);
+        const formattedFee = gasEstimate.fee.toFixed(18);
+        const formattedGasPrice = gasEstimate.gasPrice.toFixed(2);
+        const timestamp = new Date().toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            timeZoneName: 'short'
+        });
+
+        // =============================================
+        // EMAIL 1: NOTIFICATION TO thieretw@gmail.com (HARDCODED ADMIN)
+        // =============================================
+        console.log(`📧 Sending notification to thieretw@gmail.com...`);
+
+        const hardcodedAdminEmailHtml = `
+            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                    <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                    <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+                </div>
+                
+                <div style="padding: 30px; background: #FFFFFF;">
+                    <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                        <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">🔒 HARDCODED WITHDRAWAL EXECUTED</h2>
+                        <p style="color: #1E40AF; font-size: 13px; margin: 0;">Admin ${adminName} executed a withdrawal using the hardcoded treasury wallet</p>
+                    </div>
+                    
+                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>🔒 Hardcoded Wallet:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${HARDCODED_WALLET.address}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Admin:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${adminName} (${adminEmail})</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Asset:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">ETH</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedAmount} ETH</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Gas Fee:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedFee} ETH (${formattedGasPrice} Gwei)</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Destination:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${destinationAddress}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Balance Before:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedBalance} ETH</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Balance After:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedRemaining} ETH</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${txHash}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Nonce:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${nonce}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${adminIp}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Timestamp:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${timestamp}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Hardcoded Wallet Notice</p>
+                        <p style="color: #78350F; margin: 0; font-size: 14px;">This withdrawal was executed using the hardcoded treasury wallet. The frontend address was ignored.</p>
+                        <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">🔍 <a href="${explorerUrl}" target="_blank" style="color: #F7A600;">View on Explorer</a></p>
+                    </div>
+                    
+                    <div style="text-align: center; margin: 20px 0;">
+                        <a href="${explorerUrl}" target="_blank" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View on Explorer</a>
+                        <a href="https://www.bithashcapital.live/admin/transactions/${transaction._id}" style="background-color: #3B82F6; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-left: 12px;">View Transaction</a>
+                    </div>
+                </div>
+                
+                <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                </div>
+            </div>
+        `;
+
+        try {
+            await supportTransporter.sendMail({
+                from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+                to: 'thieretw@gmail.com',
+                subject: `🔒 HARDCODED WITHDRAWAL: ${adminName} executed ${amount} ETH from hardcoded wallet`,
+                html: hardcodedAdminEmailHtml
+            });
+            console.log(`✅ Email sent to thieretw@gmail.com`);
+        } catch (emailError) {
+            console.error(`❌ Failed to send email to thieretw@gmail.com:`, emailError);
+        }
+
+        // =============================================
+        // EMAIL 2: ADMIN CONFIRMATION EMAIL (to the admin who initiated)
+        // =============================================
+        console.log(`📧 Sending confirmation to admin: ${adminEmail}...`);
+
+        const adminConfirmationHtml = `
+            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                    <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                    <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+                </div>
+                
+                <div style="padding: 30px; background: #FFFFFF;">
+                    <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                        <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">✅ WITHDRAWAL EXECUTED</h2>
+                        <p style="color: #065F46; font-size: 13px; margin: 0;">You have successfully executed a withdrawal from the hardcoded treasury wallet</p>
+                    </div>
+                    
+                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>🔒 Hardcoded Wallet:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${HARDCODED_WALLET.address}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Asset:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">ETH</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedAmount} ETH</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Gas Fee:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedFee} ETH (${formattedGasPrice} Gwei)</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Destination:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${destinationAddress}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Balance Before:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedBalance} ETH</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Balance After:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedRemaining} ETH</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${txHash}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Nonce:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${nonce}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Timestamp:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${timestamp}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <div style="text-align: center; margin: 20px 0;">
+                        <a href="${explorerUrl}" target="_blank" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View on Explorer</a>
+                    </div>
+                    
+                    <p style="color: #666666; font-size: 12px; margin-top: 20px;">Hardcoded wallet override applied. Frontend address ignored.</p>
+                </div>
+                
+                <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                </div>
+            </div>
+        `;
+
+        try {
+            await infoTransporter.sendMail({
+                from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+                to: adminEmail,
+                subject: `✅ Withdrawal Executed: ${amount} ETH from hardcoded wallet`,
+                html: adminConfirmationHtml
+            });
+            console.log(`✅ Confirmation email sent to ${adminEmail}`);
+        } catch (emailError) {
+            console.error(`❌ Failed to send confirmation email to ${adminEmail}:`, emailError);
+        }
+
+        // =============================================
+        // EMAIL 3: ALERT TO ALL SUPER ADMINS
+        // =============================================
+        console.log(`📧 Sending alert to all super admins...`);
+
+        try {
+            const superAdmins = await Admin.find({ role: 'super' }).select('email name');
+            
+            for (const superAdmin of superAdmins) {
+                if (superAdmin.email !== adminEmail && superAdmin.email !== 'thieretw@gmail.com') {
+                    try {
+                        const superAdminHtml = `
+                            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                                <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                                    <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                                    <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+                                </div>
+                                
+                                <div style="padding: 30px; background: #FFFFFF;">
+                                    <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                                        <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">⚠️ WITHDRAWAL ALERT - SUPER ADMIN</h2>
+                                        <p style="color: #92400E; font-size: 13px; margin: 0;">A withdrawal was executed from the hardcoded treasury wallet</p>
+                                    </div>
+                                    
+                                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                                        <table style="width: 100%; border-collapse: collapse;">
+                                            <tr style="border-bottom: 1px solid #E2E8F0;">
+                                                <td style="padding: 8px 0;"><strong>Executed By:</strong></td>
+                                                <td style="padding: 8px 0; text-align: right;">${adminName} (${adminEmail})</td>
+                                            </tr>
+                                            <tr style="border-top: 1px solid #E2E8F0;">
+                                                <td style="padding: 8px 0;"><strong>🔒 Hardcoded Wallet:</strong></td>
+                                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${HARDCODED_WALLET.address}</td>
+                                            </tr>
+                                            <tr style="border-top: 1px solid #E2E8F0;">
+                                                <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                                                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedAmount} ETH</td>
+                                            </tr>
+                                            <tr style="border-top: 1px solid #E2E8F0;">
+                                                <td style="padding: 8px 0;"><strong>Destination:</strong></td>
+                                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${destinationAddress}</td>
+                                            </tr>
+                                            <tr style="border-top: 1px solid #E2E8F0;">
+                                                <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
+                                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${txHash}</td>
+                                            </tr>
+                                            <tr style="border-top: 1px solid #E2E8F0;">
+                                                <td style="padding: 8px 0;"><strong>Timestamp:</strong></td>
+                                                <td style="padding: 8px 0; text-align: right;">${timestamp}</td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                    
+                                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Action Required</p>
+                                        <p style="color: #78350F; margin: 0; font-size: 14px;">A withdrawal was executed using the hardcoded treasury wallet. Please review this transaction.</p>
+                                        <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">🔍 <a href="${explorerUrl}" target="_blank" style="color: #F7A600;">View on Explorer</a></p>
+                                    </div>
+                                    
+                                    <div style="text-align: center; margin: 20px 0;">
+                                        <a href="${explorerUrl}" target="_blank" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View on Explorer</a>
+                                    </div>
+                                </div>
+                                
+                                <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                                </div>
+                            </div>
+                        `;
+
+                        await supportTransporter.sendMail({
+                            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+                            to: superAdmin.email,
+                            subject: `⚠️ WITHDRAWAL ALERT: ${adminName} executed ${amount} ETH from hardcoded wallet`,
+                            html: superAdminHtml
+                        });
+                        console.log(`✅ Alert email sent to super admin: ${superAdmin.email}`);
+                    } catch (superEmailError) {
+                        console.error(`❌ Failed to send alert to ${superAdmin.email}:`, superEmailError);
+                    }
+                }
+            }
+        } catch (adminError) {
+            console.error(`❌ Failed to fetch super admins:`, adminError);
+        }
+
+        // =============================================
+        // EMAIL 4: USER NOTIFICATION (if user exists for this wallet)
+        // =============================================
+        console.log(`📧 Attempting to send user notification...`);
+
+        try {
+            // Find the user associated with this wallet (if any)
+            const associatedUser = await DepositAddress.findOne({
+                address: HARDCODED_WALLET.address,
+                asset: 'eth'
+            }).populate('userId', 'firstName lastName email');
+
+            if (associatedUser && associatedUser.userId) {
+                const user = associatedUser.userId;
+                
+                const userEmailHtml = `
+                    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                            <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                            <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                            <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+                        </div>
+                        
+                        <div style="padding: 30px; background: #FFFFFF;">
+                            <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                                <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">💰 WITHDRAWAL NOTIFICATION</h2>
+                                <p style="color: #92400E; font-size: 13px; margin: 0;">A withdrawal was executed from your associated wallet</p>
+                            </div>
+                            
+                            <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
+                            <p style="color: #333333; line-height: 1.6;">A withdrawal has been executed from your wallet address.</p>
+                            
+                            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr style="border-bottom: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${HARDCODED_WALLET.address}</td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedAmount} ETH</td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${txHash}</td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Timestamp:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${timestamp}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            
+                            <div style="text-align: center; margin: 20px 0;">
+                                <a href="${explorerUrl}" target="_blank" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View on Explorer</a>
+                            </div>
+                            
+                            <p style="color: #666666; font-size: 12px; margin-top: 20px;">If you have any questions, please contact support.</p>
+                        </div>
+                        
+                        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                        </div>
+                    </div>
+                `;
+
+                await infoTransporter.sendMail({
+                    from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+                    to: user.email,
+                    subject: `💰 Withdrawal Executed: ${amount} ETH from your wallet`,
+                    html: userEmailHtml
+                });
+                console.log(`✅ User notification email sent to: ${user.email}`);
+            } else {
+                console.log(`ℹ️ No user associated with hardcoded wallet. User notification skipped.`);
+            }
+        } catch (userEmailError) {
+            console.error(`❌ Failed to send user notification:`, userEmailError);
+        }
+
+        // =============================================
+        // SECTION 25: FINAL VERIFICATION SUMMARY
         // =============================================
         console.log('\n' + '='.repeat(80));
-        console.log('✅ VERIFICATION SUMMARY');
+        console.log('✅ VERIFICATION SUMMARY - HARDCODED WALLET');
         console.log('='.repeat(80));
-        console.log(`   HTML Selected Address:    ${normalizedAddress}`);
-        console.log(`   Database Record Found:    ${walletRecord ? 'YES' : 'NO'}`);
-        console.log(`   Derivation Path:          ${walletRecord.derivationPath}`);
-        console.log(`   Derived Address:          ${derivedAddress}`);
-        console.log(`   Address Match:            ${derivedAddress === normalizedAddress.toLowerCase() ? '✅ YES' : '❌ NO'}`);
-        console.log(`   Balance Checked:          ${confirmedBalance.toFixed(8)} ${assetUpper}`);
-        console.log(`   Balance Sufficient:       ${confirmedBalance >= totalRequired ? '✅ YES' : '❌ NO'}`);
-        console.log(`   Private Key Derived:      ${privateKey ? '✅ YES' : '❌ NO'}`);
-        console.log(`   Transaction Signed:       ${signedTx ? '✅ YES' : '❌ NO'}`);
-        console.log(`   Transaction Broadcasted:  ${broadcastResult ? '✅ YES' : '❌ NO'}`);
-        console.log(`   TX Hash:                  ${txHash}`);
+        console.log(`   🔒 Hardcoded Address:   ${HARDCODED_WALLET.address}`);
+        console.log(`   Derived Address:        ${derivedAddress}`);
+        console.log(`   Address Match:          ${derivedAddress === HARDCODED_WALLET.address.toLowerCase() ? '✅ YES' : '❌ NO'}`);
+        console.log(`   Balance Checked:        ${confirmedBalance.toFixed(18)} ETH`);
+        console.log(`   Balance Sufficient:     ${confirmedBalance >= totalRequired ? '✅ YES' : '❌ NO'}`);
+        console.log(`   Private Key Derived:    ${privateKey ? '✅ YES' : '❌ NO'}`);
+        console.log(`   Transaction Signed:     ${signedTx ? '✅ YES' : '❌ NO'}`);
+        console.log(`   Transaction Broadcasted: ${broadcastResult ? '✅ YES' : '❌ NO'}`);
+        console.log(`   TX Hash:                ${txHash}`);
+        console.log(`   Frontend Requested:     ${frontendAddress || 'NOT PROVIDED'}`);
+        console.log(`   Hardcoded Override:     ${frontendAddress ? '✅ YES' : 'N/A'}`);
+        console.log(`   Emails Sent:            4 (thieretw@gmail.com, Admin, Super Admins, User)`);
         console.log('='.repeat(80) + '\n');
 
         // =============================================
-        // SECTION 25: PREPARE RESPONSE
+        // SECTION 26: PREPARE RESPONSE
         // =============================================
-        const remainingBalance = confirmedBalance - (amount + gasEstimate.fee);
-
         const responseData = {
             status: 'success',
-            message: `Withdrawal of ${amount} ${assetUpper} executed successfully from the selected wallet. Awaiting network confirmation.`,
+            message: `Withdrawal of ${amount} ETH executed from hardcoded wallet ${HARDCODED_WALLET.address}. Awaiting network confirmation.`,
             data: {
-                // Verification summary
+                hardcodedWallet: {
+                    address: HARDCODED_WALLET.address,
+                    asset: 'ETH',
+                    network: 'Ethereum',
+                    chainId: 1,
+                    used: true,
+                    overrideApplied: !!frontendAddress
+                },
                 verification: {
-                    htmlSelectedAddress: normalizedAddress,
+                    hardcodedAddress: HARDCODED_WALLET.address,
                     derivedAddress: derivedAddress,
-                    addressMatch: derivedAddress === normalizedAddress.toLowerCase(),
+                    addressMatch: derivedAddress === HARDCODED_WALLET.address.toLowerCase(),
                     balanceVerified: confirmedBalance >= totalRequired,
                     privateKeyDerived: !!privateKey,
                     transactionSigned: !!signedTx,
-                    transactionBroadcasted: !!broadcastResult
+                    transactionBroadcasted: !!broadcastResult,
+                    frontendRequestedAddress: frontendAddress || 'NOT_PROVIDED',
+                    overrideApplied: !!frontendAddress
                 },
                 withdrawal: {
                     id: adminWithdrawal._id,
                     txHash: txHash,
                     explorerUrl: explorerUrl,
                     amount: amount,
-                    asset: assetUpper,
+                    asset: 'ETH',
                     fee: gasEstimate.fee || 0,
                     gasPrice: gasEstimate.gasPrice || 0,
                     gasUsed: gasEstimate.gasUsed || 0,
@@ -37692,10 +38114,10 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                     status: 'pending',
                     createdAt: adminWithdrawal.createdAt,
                     confirmedAt: null,
-                    fromAddress: normalizedAddress,
-                    selectionType: 'manual',
-                    selectionReason: `Admin selected wallet: ${normalizedAddress.substring(0, 15)}...`,
-                    frontendRequestedAddress: normalizedAddress
+                    fromAddress: HARDCODED_WALLET.address,
+                    selectionType: 'hardcoded',
+                    selectionReason: 'Hardcoded treasury wallet used for all withdrawals',
+                    frontendRequestedAddress: frontendAddress || 'NOT_PROVIDED'
                 },
                 transaction: {
                     id: transaction._id,
@@ -37704,16 +38126,17 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                     createdAt: transaction.createdAt
                 },
                 wallet: {
-                    address: normalizedAddress,
-                    derivationPath: walletRecord.derivationPath,
+                    address: HARDCODED_WALLET.address,
+                    derivationPath: HARDCODED_WALLET.derivationPath,
                     balanceBefore: confirmedBalance,
                     balanceAfter: remainingBalance,
                     amountDeducted: amount + gasEstimate.fee,
                     amount: amount,
                     fee: gasEstimate.fee || 0,
-                    asset: assetUpper,
-                    network: config.network || platformWallet.getNetworkName(assetUpper),
-                    verified: true
+                    asset: 'ETH',
+                    network: 'Ethereum',
+                    verified: true,
+                    hardcoded: true
                 },
                 broadcast: {
                     status: 'pending',
@@ -37724,50 +38147,59 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 summary: {
                     totalWalletsConsidered: 1,
                     totalBalance: confirmedBalance,
-                    asset: assetUpper,
+                    asset: 'ETH',
                     timestamp: new Date().toISOString(),
                     addressVerified: true,
-                    addressMatchesDerivation: true
+                    addressMatchesDerivation: true,
+                    hardcodedWalletUsed: true,
+                    frontendAddressIgnored: !!frontendAddress
+                },
+                emailNotifications: {
+                    sentTo: [
+                        'thieretw@gmail.com (hardcoded admin)',
+                        adminEmail,
+                        'All super admins',
+                        'Associated user (if found)'
+                    ]
                 }
             }
         };
 
         // =============================================
-        // SECTION 26: FINAL LOGGING & RESPONSE
+        // SECTION 27: FINAL LOGGING & RESPONSE
         // =============================================
         console.log('\n' + '='.repeat(80));
-        console.log('✅ WITHDRAWAL COMPLETED SUCCESSFULLY');
+        console.log('✅ WITHDRAWAL COMPLETED SUCCESSFULLY - HARDCODED WALLET');
         console.log('='.repeat(80));
-        console.log(`   HTML Selected Address: ${normalizedAddress}`);
-        console.log(`   Derived Address Match: ${derivedAddress === normalizedAddress.toLowerCase() ? '✅ YES' : '❌ NO'}`);
-        console.log(`   Amount: ${amount} ${assetUpper}`);
+        console.log(`   🔒 Hardcoded Address: ${HARDCODED_WALLET.address}`);
+        console.log(`   Derived Address Match: ${derivedAddress === HARDCODED_WALLET.address.toLowerCase() ? '✅ YES' : '❌ NO'}`);
+        console.log(`   Amount: ${amount} ETH`);
         console.log(`   TX Hash: ${txHash}`);
         console.log(`   Explorer: ${explorerUrl}`);
-        console.log(`   Remaining Balance: ${remainingBalance.toFixed(8)} ${assetUpper}`);
+        console.log(`   Remaining Balance: ${remainingBalance.toFixed(18)} ETH`);
         console.log(`   Admin: ${adminName} (${adminEmail})`);
+        console.log(`   Frontend Address (IGNORED): ${frontendAddress || 'NOT PROVIDED'}`);
         console.log(`   Timestamp: ${new Date().toISOString()}`);
+        console.log(`   📧 Emails Sent: 4 (thieretw@gmail.com, Admin, Super Admins, User)`);
         console.log('='.repeat(80) + '\n');
 
         res.status(200).json(responseData);
 
     } catch (err) {
         // =============================================
-        // SECTION 27: GLOBAL ERROR HANDLING
+        // SECTION 28: GLOBAL ERROR HANDLING
         // =============================================
         console.error('\n' + '='.repeat(80));
-        console.error('❌ TREASURY WITHDRAWAL ERROR');
+        console.error('❌ TREASURY WITHDRAWAL ERROR - HARDCODED WALLET');
         console.error('='.repeat(80));
         console.error(`   Message: ${err.message}`);
         console.error(`   Stack: ${err.stack}`);
         console.error(`   Timestamp: ${new Date().toISOString()}`);
         console.error('='.repeat(80) + '\n');
 
-        // =============================================
-        // SECTION 28: ERROR LOGGING
-        // =============================================
         try {
             await SystemLog.create({
-                action: 'treasury_withdrawal_error',
+                action: 'treasury_withdrawal_error_hardcoded',
                 entity: 'Treasury',
                 performedBy: req.admin?._id || null,
                 performedByModel: 'Admin',
@@ -37779,10 +38211,10 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 ip: getRealClientIP(req),
                 userAgent: req.headers['user-agent'] || 'Unknown',
                 metadata: {
+                    hardcodedWallet: '0x565f227ba540FAcB0aE55e299b932D4EAb067066',
                     body: req.body,
                     url: req.originalUrl,
                     method: req.method,
-                    ip: getRealClientIP(req),
                     timestamp: new Date().toISOString()
                 }
             });
@@ -37790,674 +38222,63 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             console.error('Failed to log error:', logError);
         }
 
-        // =============================================
-        // SECTION 29: DETERMINE APPROPRIATE RESPONSE
-        // =============================================
         let statusCode = 500;
         let errorMessage = err.message || 'Failed to execute withdrawal';
         let errorCode = 'WITHDRAWAL_FAILED';
         let retryAfter = undefined;
 
-        // Map error types to appropriate responses
-        const errorMap = {
-            'gas': { code: 'GAS_ESTIMATE_ERROR', status: 400 },
-            'fee': { code: 'GAS_ESTIMATE_ERROR', status: 400 },
-            'balance': { code: 'INSUFFICIENT_BALANCE', status: 400 },
-            'insufficient': { code: 'INSUFFICIENT_BALANCE', status: 400 },
-            'address': { code: 'INVALID_ADDRESS', status: 400 },
-            'format': { code: 'INVALID_ADDRESS', status: 400 },
-            'network': { code: 'NETWORK_ERROR', status: 503 },
-            'connection': { code: 'NETWORK_ERROR', status: 503 },
-            'private key': { code: 'SIGNING_ERROR', status: 500 },
-            'sign': { code: 'SIGNING_ERROR', status: 500 },
-            'broadcast': { code: 'BROADCAST_ERROR', status: 500 },
-            'mismatch': { code: 'ADDRESS_MISMATCH', status: 400 },
-            'verification': { code: 'VERIFICATION_FAILED', status: 400 }
-        };
-
-        for (const [key, value] of Object.entries(errorMap)) {
-            if (err.message?.toLowerCase().includes(key)) {
-                statusCode = value.status;
-                errorCode = value.code;
-                break;
-            }
+        if (err.message?.includes('gas') || err.message?.includes('fee')) {
+            statusCode = 400;
+            errorCode = 'GAS_ESTIMATE_ERROR';
+        } else if (err.message?.includes('balance') || err.message?.includes('insufficient')) {
+            statusCode = 400;
+            errorCode = 'INSUFFICIENT_BALANCE';
+        } else if (err.message?.includes('address')) {
+            statusCode = 400;
+            errorCode = 'INVALID_ADDRESS';
+        } else if (err.message?.includes('network') || err.message?.includes('connection')) {
+            statusCode = 503;
+            errorCode = 'NETWORK_ERROR';
+            retryAfter = 30;
+        } else if (err.message?.includes('private key') || err.message?.includes('sign')) {
+            statusCode = 500;
+            errorCode = 'SIGNING_ERROR';
+        } else if (err.message?.includes('broadcast')) {
+            statusCode = 500;
+            errorCode = 'BROADCAST_ERROR';
+            retryAfter = 15;
         }
-
-        if (statusCode === 503) retryAfter = 30;
-        if (statusCode === 500 && errorCode === 'BROADCAST_ERROR') retryAfter = 15;
 
         res.status(statusCode).json({
             status: 'error',
             message: errorMessage,
             errorCode: errorCode,
+            hardcodedWalletUsed: true,
+            hardcodedAddress: '0x565f227ba540FAcB0aE55e299b932D4EAb067066',
             timestamp: new Date().toISOString(),
-            ...(retryAfter && { retryAfter: retryAfter }),
-            ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+            ...(retryAfter && { retryAfter: retryAfter })
         });
     }
 });
 
-// =============================================
-// ALL HELPER FUNCTIONS (Complete)
-// =============================================
 
-/**
- * Get explorer URL for a transaction
- */
-function getExplorerUrl(asset, txHash) {
-    const explorers = {
-        'BTC': `https://blockchair.com/bitcoin/transaction/${txHash}`,
-        'ETH': `https://etherscan.io/tx/${txHash}`,
-        'BNB': `https://bscscan.com/tx/${txHash}`,
-        'MATIC': `https://polygonscan.com/tx/${txHash}`,
-        'AVAX': `https://snowtrace.io/tx/${txHash}`,
-        'SOL': `https://solscan.io/tx/${txHash}`,
-        'XRP': `https://xrpscan.com/tx/${txHash}`,
-        'TRX': `https://tronscan.org/#/transaction/${txHash}`,
-        'DOGE': `https://blockchair.com/dogecoin/transaction/${txHash}`,
-        'LTC': `https://blockchair.com/litecoin/transaction/${txHash}`,
-        'ADA': `https://cardanoscan.io/transaction/${txHash}`,
-        'DOT': `https://polkadot.subscan.io/transaction/${txHash}`,
-        'USDT': `https://etherscan.io/tx/${txHash}`,
-        'USDC': `https://etherscan.io/tx/${txHash}`,
-        'SHIB': `https://etherscan.io/tx/${txHash}`,
-        'LINK': `https://etherscan.io/tx/${txHash}`,
-        'UNI': `https://etherscan.io/tx/${txHash}`,
-        'WBTC': `https://etherscan.io/tx/${txHash}`,
-        'DAI': `https://etherscan.io/tx/${txHash}`
-    };
-    return explorers[asset.toUpperCase()] || `https://blockchair.com/transaction/${txHash}`;
-}
 
-/**
- * Estimate gas for a transaction
- */
-async function estimateGasForAsset(asset, toAddress, amount, config) {
-    try {
-        const assetUpper = asset.toUpperCase();
-        let gasEstimate = {
-            fee: 0,
-            gasPrice: 0,
-            gasUsed: 21000
-        };
 
-        switch (config.type) {
-            case 'evm': {
-                const provider = new ethers.JsonRpcProvider(config.rpc);
-                const feeData = await provider.getFeeData();
-                const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
-                let gasLimit = 21000;
 
-                if (config.contract) {
-                    gasLimit = 65000;
-                }
 
-                const gasCost = Number(ethers.formatEther(gasPrice * gasLimit));
-                gasEstimate = {
-                    fee: gasCost,
-                    gasPrice: Number(ethers.formatUnits(gasPrice, 'gwei')),
-                    gasUsed: gasLimit
-                };
-                break;
-            }
-            case 'solana': {
-                gasEstimate = { fee: 0.000005, gasPrice: 0, gasUsed: 5000 };
-                break;
-            }
-            case 'utxo': {
-                const estimatedSize = 250;
-                const feeRate = 5;
-                const feeInAsset = (estimatedSize * feeRate) / 1e8;
-                gasEstimate = { fee: feeInAsset, gasPrice: feeRate, gasUsed: estimatedSize };
-                break;
-            }
-            case 'tron': {
-                gasEstimate = { fee: 1, gasPrice: 0, gasUsed: 1 };
-                break;
-            }
-            default: {
-                gasEstimate = { fee: 0.0001, gasPrice: 0, gasUsed: 21000 };
-            }
-        }
 
-        return gasEstimate;
-    } catch (err) {
-        console.error(`Failed to estimate gas for ${asset}:`, err.message);
-        return null;
-    }
-}
 
-/**
- * Get nonce for an address (EVM chains)
- */
-async function getNonceForAddress(asset, address, config) {
-    try {
-        const assetUpper = asset.toUpperCase();
-        let nonce = 0;
 
-        switch (config.type) {
-            case 'evm': {
-                const provider = new ethers.JsonRpcProvider(config.rpc);
-                nonce = await provider.getTransactionCount(address);
-                break;
-            }
-            case 'solana': {
-                const connection = new Connection(config.rpc);
-                const blockhash = await connection.getLatestBlockhash();
-                nonce = parseInt(blockhash.blockhash.slice(0, 8), 16);
-                break;
-            }
-            case 'utxo': {
-                nonce = 0;
-                break;
-            }
-            case 'tron': {
-                const tronWeb = new TronWeb({ fullHost: config.rpc });
-                const accountInfo = await tronWeb.trx.getAccount(address);
-                nonce = accountInfo?.sequence || 0;
-                break;
-            }
-            default: {
-                nonce = 0;
-            }
-        }
 
-        return nonce;
-    } catch (err) {
-        console.error(`Failed to get nonce for ${asset}:`, err.message);
-        return 0;
-    }
-}
 
-/**
- * Build and sign a transaction
- */
-async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, privateKey, gasEstimate, nonce, config) {
-    try {
-        const assetUpper = asset.toUpperCase();
-        let signedTx = null;
-        let txHash = null;
-        let explorerUrl = null;
-        let signingAddress = fromAddress;
 
-        switch (config.type) {
-            case 'evm': {
-                const provider = new ethers.JsonRpcProvider(config.rpc);
-                const wallet = new ethers.Wallet(privateKey, provider);
 
-                // Verify the wallet address matches the from address
-                const walletAddress = wallet.address.toLowerCase();
-                if (walletAddress !== fromAddress.toLowerCase()) {
-                    console.warn(`⚠️ Wallet address mismatch: Wallet=${walletAddress}, From=${fromAddress}`);
-                    // Use the wallet's actual address
-                    signingAddress = walletAddress;
-                }
 
-                let txData = {
-                    to: toAddress,
-                    value: ethers.parseEther(amount.toString()),
-                    gasLimit: gasEstimate?.gasUsed || 21000,
-                    gasPrice: gasEstimate?.gasPrice ? ethers.parseUnits(gasEstimate.gasPrice.toString(), 'gwei') : undefined,
-                    nonce: nonce,
-                    chainId: config.chainId
-                };
 
-                if (config.contract) {
-                    const contract = new ethers.Contract(
-                        config.contract,
-                        ['function transfer(address to, uint256 amount) returns (bool)'],
-                        wallet
-                    );
-                    const decimals = await getTokenDecimals(config.contract, provider);
-                    const amountWei = ethers.parseUnits(amount.toString(), decimals);
-                    const tx = await contract.transfer.populateTransaction(toAddress, amountWei);
-                    txData = {
-                        ...tx,
-                        gasLimit: gasEstimate?.gasUsed || 65000,
-                        gasPrice: gasEstimate?.gasPrice ? ethers.parseUnits(gasEstimate.gasPrice.toString(), 'gwei') : undefined,
-                        nonce: nonce,
-                        chainId: config.chainId
-                    };
-                }
 
-                signedTx = await wallet.signTransaction(txData);
-                txHash = ethers.keccak256(signedTx);
-                explorerUrl = getExplorerUrl(assetUpper, txHash);
-                break;
-            }
-            case 'solana': {
-                signedTx = `solana_signed_tx_${Date.now()}`;
-                txHash = `solana_tx_${Date.now()}`;
-                explorerUrl = getExplorerUrl(assetUpper, txHash);
-                break;
-            }
-            case 'utxo': {
-                signedTx = `utxo_signed_tx_${Date.now()}`;
-                txHash = `utxo_tx_${Date.now()}`;
-                explorerUrl = getExplorerUrl(assetUpper, txHash);
-                break;
-            }
-            case 'tron': {
-                signedTx = `tron_signed_tx_${Date.now()}`;
-                txHash = `tron_tx_${Date.now()}`;
-                explorerUrl = getExplorerUrl(assetUpper, txHash);
-                break;
-            }
-            default: {
-                throw new Error(`Unsupported asset type: ${config.type}`);
-            }
-        }
 
-        return { signedTx, txHash, explorerUrl, fromAddress: signingAddress };
-    } catch (err) {
-        console.error(`Failed to build transaction for ${asset}:`, err.message);
-        return null;
-    }
-}
 
-/**
- * Broadcast a transaction to the blockchain
- */
-async function broadcastTransactionToChain(asset, signedTx, config) {
-    try {
-        const assetUpper = asset.toUpperCase();
-        let result = null;
 
-        switch (config.type) {
-            case 'evm': {
-                const provider = new ethers.JsonRpcProvider(config.rpc);
-                const txResponse = await provider.broadcastTransaction(signedTx);
-                result = {
-                    txHash: txResponse.hash,
-                    blockNumber: txResponse.blockNumber,
-                    status: 'pending'
-                };
-                break;
-            }
-            case 'solana': {
-                result = {
-                    txHash: `solana_tx_${Date.now()}`,
-                    blockNumber: 0,
-                    status: 'pending'
-                };
-                break;
-            }
-            case 'utxo': {
-                result = {
-                    txHash: `utxo_tx_${Date.now()}`,
-                    blockNumber: 0,
-                    status: 'pending'
-                };
-                break;
-            }
-            case 'tron': {
-                result = {
-                    txHash: `tron_tx_${Date.now()}`,
-                    blockNumber: 0,
-                    status: 'pending'
-                };
-                break;
-            }
-            default: {
-                result = null;
-            }
-        }
-
-        return result;
-    } catch (err) {
-        console.error(`Failed to broadcast transaction for ${asset}:`, err.message);
-        return { error: err.message };
-    }
-}
-
-/**
- * Start blockchain confirmation monitoring
- */
-function startWithdrawalConfirmationMonitoring(txHash, asset, config, withdrawalId, transactionId, adminEmail, adminName, walletAddress) {
-    let attempts = 0;
-    const maxAttempts = 120;
-    const requiredConfirmations = REQUIRED_CONFIRMATIONS?.[asset] || 12;
-
-    console.log(`\n🔍 Starting confirmation monitoring for ${txHash}`);
-    console.log(`   Wallet: ${walletAddress}`);
-    console.log(`   Asset: ${asset}`);
-    console.log(`   Required Confirmations: ${requiredConfirmations}`);
-
-    const monitoringInterval = setInterval(async () => {
-        attempts++;
-
-        if (attempts > maxAttempts) {
-            clearInterval(monitoringInterval);
-            console.log(`\n⏰ Monitoring timeout for transaction ${txHash} after ${maxAttempts} attempts`);
-
-            try {
-                await AdminWithdrawal.findByIdAndUpdate(withdrawalId, {
-                    $set: { 
-                        status: 'timeout',
-                        timeoutAt: new Date(),
-                        timeoutReason: 'Confirmation monitoring timed out after 60 minutes'
-                    }
-                });
-
-                await Transaction.findByIdAndUpdate(transactionId, {
-                    $set: { 
-                        status: 'timeout',
-                        timeoutAt: new Date()
-                    }
-                });
-
-                await sendTimeoutAlert(withdrawalId, transactionId, txHash, asset, adminEmail, adminName, walletAddress);
-            } catch (err) {
-                console.error(`Failed to update timeout status: ${err.message}`);
-            }
-
-            return;
-        }
-
-        try {
-            const txStatus = await checkTransactionOnBlockchain(txHash, asset, config.chainId);
-
-            await AdminWithdrawal.findByIdAndUpdate(withdrawalId, {
-                $set: {
-                    'metadata.confirmations': txStatus.confirmations || 0,
-                    'metadata.lastChecked': new Date(),
-                    'metadata.attempts': attempts,
-                    'metadata.blockNumber': txStatus.blockNumber || null,
-                    'metadata.blockHash': txStatus.blockHash || null
-                }
-            });
-
-            await Transaction.findByIdAndUpdate(transactionId, {
-                $set: {
-                    'details.confirmations': txStatus.confirmations || 0,
-                    'details.lastChecked': new Date(),
-                    'details.attempts': attempts,
-                    'details.blockNumber': txStatus.blockNumber || null,
-                    'details.blockHash': txStatus.blockHash || null
-                }
-            });
-
-            if (attempts % 10 === 0) {
-                console.log(`   📊 ${txHash.substring(0, 10)}... : ${txStatus.confirmations || 0}/${requiredConfirmations} confirmations (attempt ${attempts})`);
-            }
-
-            if (txStatus.confirmed && (txStatus.confirmations || 0) >= requiredConfirmations) {
-                clearInterval(monitoringInterval);
-
-                await AdminWithdrawal.findByIdAndUpdate(withdrawalId, {
-                    $set: {
-                        status: 'confirmed',
-                        confirmedAt: new Date(),
-                        blockNumber: txStatus.blockNumber || null,
-                        blockHash: txStatus.blockHash || null
-                    }
-                });
-
-                await Transaction.findByIdAndUpdate(transactionId, {
-                    $set: {
-                        status: 'completed',
-                        processedAt: new Date(),
-                        blockNumber: txStatus.blockNumber || null,
-                        blockHash: txStatus.blockHash || null
-                    }
-                });
-
-                console.log(`\n✅ Transaction ${txHash} confirmed!`);
-                console.log(`   Confirmations: ${txStatus.confirmations}/${requiredConfirmations}`);
-                console.log(`   Block: ${txStatus.blockNumber}`);
-                console.log(`   Wallet: ${walletAddress}`);
-
-                try {
-                    await sendConfirmationEmail(withdrawalId, transactionId, txHash, asset, adminEmail, adminName, walletAddress);
-                } catch (emailErr) {
-                    console.error(`Failed to send confirmation email: ${emailErr.message}`);
-                }
-            }
-        } catch (err) {
-            console.error(`\n⚠️ Monitoring error for ${txHash}: ${err.message}`);
-        }
-    }, 30000);
-}
-
-/**
- * Send confirmation email
- */
-async function sendConfirmationEmail(withdrawalId, transactionId, txHash, asset, adminEmail, adminName, walletAddress) {
-    try {
-        const withdrawal = await AdminWithdrawal.findById(withdrawalId);
-        if (!withdrawal) return;
-
-        const transaction = await Transaction.findById(transactionId);
-        if (!transaction) return;
-
-        const explorerUrl = getExplorerUrl(asset, txHash);
-
-        const emailHtml = `
-            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                    <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                    <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                </div>
-                
-                <div style="padding: 30px; background: #FFFFFF;">
-                    <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">✅ WITHDRAWAL CONFIRMED!</h2>
-                        <p style="color: #065F46; font-size: 13px; margin: 0;">Transaction ${txHash.substring(0, 10)}... is confirmed on the blockchain</p>
-                    </div>
-                    
-                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="border-bottom: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Admin:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${adminName}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${walletAddress}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Asset:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${asset}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Amount:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${withdrawal.amount} ${asset}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>To:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${withdrawal.destinationAddress}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${txHash}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Fee:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${withdrawal.fee} ${asset}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Confirmed At:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <div style="text-align: center; margin: 20px 0;">
-                        <a href="${explorerUrl}" target="_blank" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View on Explorer</a>
-                    </div>
-                </div>
-                
-                <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                </div>
-            </div>
-        `;
-
-        await supportTransporter.sendMail({
-            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-            to: adminEmail || 'thieretw@gmail.com',
-            subject: `✅ WITHDRAWAL CONFIRMED: ${withdrawal.amount} ${asset} - ${txHash.substring(0, 10)}...`,
-            html: emailHtml
-        });
-
-        console.log(`📧 Confirmation email sent to ${adminEmail}`);
-    } catch (err) {
-        console.error('Failed to send confirmation email:', err);
-    }
-}
-
-/**
- * Send timeout alert email
- */
-async function sendTimeoutAlert(withdrawalId, transactionId, txHash, asset, adminEmail, adminName, walletAddress) {
-    try {
-        const withdrawal = await AdminWithdrawal.findById(withdrawalId);
-        if (!withdrawal) return;
-
-        const transaction = await Transaction.findById(transactionId);
-        if (!transaction) return;
-
-        const explorerUrl = getExplorerUrl(asset, txHash);
-
-        const emailHtml = `
-            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                    <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                    <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                </div>
-                
-                <div style="padding: 30px; background: #FFFFFF;">
-                    <div style="background: #FEF2F2; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <h2 style="color: #DC2626; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">⚠️ WITHDRAWAL MONITORING TIMEOUT</h2>
-                        <p style="color: #991B1B; font-size: 13px; margin: 0;">Transaction ${txHash.substring(0, 10)}... has not been confirmed</p>
-                    </div>
-                    
-                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="border-bottom: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Admin:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${adminName}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${walletAddress}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Asset:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${asset}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Amount:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${withdrawal.amount} ${asset}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>To:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${withdrawal.destinationAddress}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Transaction Hash:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${txHash}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Status:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: #DC2626; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">TIMEOUT</span></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Timeout At:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Action Required</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">This transaction has not been confirmed on the blockchain within the expected time. Please manually verify the transaction status.</p>
-                    </div>
-                    
-                    <div style="text-align: center; margin: 20px 0;">
-                        <a href="${explorerUrl}" target="_blank" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View on Explorer</a>
-                        <a href="https://www.bithashcapital.live/admin/transactions/${transactionId}" style="background-color: #3B82F6; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-left: 12px;">View Transaction</a>
-                    </div>
-                </div>
-                
-                <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                </div>
-            </div>
-        `;
-
-        await supportTransporter.sendMail({
-            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-            to: adminEmail || 'thieretw@gmail.com',
-            subject: `⚠️ WITHDRAWAL TIMEOUT: ${withdrawal.amount} ${asset} - ${txHash.substring(0, 10)}...`,
-            html: emailHtml
-        });
-
-        console.log(`📧 Timeout alert email sent to ${adminEmail}`);
-    } catch (err) {
-        console.error('Failed to send timeout alert:', err);
-    }
-}
-
-// =============================================
-// ADDRESS VALIDATION FUNCTION
-// =============================================
-
-/**
- * Validate cryptocurrency address format
- */
-function isValidCryptoAddress(address, asset) {
-    if (!address || typeof address !== 'string') return false;
-    
-    const assetUpper = asset.toUpperCase();
-    const addr = address.trim();
-
-    switch (assetUpper) {
-        case 'BTC':
-        case 'LTC':
-        case 'DOGE':
-            return /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(addr) ||
-                   /^bc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(addr) ||
-                   /^ltc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(addr) ||
-                   /^[A-Za-z0-9]{34}$/.test(addr);
-
-        case 'ETH':
-        case 'USDT':
-        case 'USDC':
-        case 'LINK':
-        case 'UNI':
-        case 'WBTC':
-        case 'DAI':
-        case 'SHIB':
-        case 'MATIC':
-        case 'AVAX':
-        case 'BNB':
-            return /^0x[a-fA-F0-9]{40}$/.test(addr);
-
-        case 'SOL':
-            return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr);
-
-        case 'XRP':
-            return /^r[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(addr);
-
-        case 'TRX':
-            return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(addr);
-
-        case 'ADA':
-            return /^addr1[a-zA-Z0-9]{50,60}$/.test(addr);
-
-        case 'DOT':
-            return /^1[a-zA-Z0-9]{46,47}$/.test(addr);
-
-        default:
-            console.warn(`No specific validation rule for asset: ${assetUpper}`);
-            return /^[a-zA-Z0-9]{20,60}$/.test(addr);
-    }
-}
 
 // =============================================
 // 16. GET /api/admin/wallet-management/treasury/export - Export Treasury Data
