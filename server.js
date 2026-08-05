@@ -35232,6 +35232,21 @@ console.log('   - GET /api/admin/wallet/* (admin endpoints)');
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // WALLET MANAGEMENT ENDPOINTS - ENTERPRISE PRODUCTION
 // All endpoints use real blockchain data from RPC providers
@@ -36743,28 +36758,6 @@ app.get('/api/admin/wallet-management/treasury/wallets', adminProtect, restrictT
         });
     }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 // =============================================
@@ -38407,32 +38400,6 @@ function isValidCryptoAddress(address, asset) {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
 // 16. GET /api/admin/wallet-management/treasury/export - Export Treasury Data
 // =============================================
@@ -38757,7 +38724,7 @@ async function estimateGas(asset, toAddress, amount, config) {
                 // Get gas price
                 const feeData = await provider.getFeeData();
                 const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
-                const gasLimit = 21000; // Standard ETH transfer
+                let gasLimit = 21000; // Standard ETH transfer
                 
                 // For ERC-20 tokens, gas limit is higher
                 if (config.contract) {
@@ -39261,23 +39228,6 @@ console.log('   - GET /api/admin/wallet-management/treasury/wallets');
 console.log('   - POST /api/admin/wallet-management/treasury/withdraw');
 console.log('   - GET /api/admin/wallet-management/treasury/export');
 console.log('   - GET /api/admin/wallet-management/treasury/history');
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
