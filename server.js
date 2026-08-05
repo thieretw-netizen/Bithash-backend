@@ -370,10 +370,10 @@ const UserSchema = new mongoose.Schema({
     default: 'individual'
   },
   authProvider: {
-    type: String,
-    enum: ['email', 'google', 'web3', 'apple', 'facebook'],
-    default: 'email'
-  },
+  type: String,
+  enum: ['email', 'google', 'web3', 'apple', 'facebook', 'system'],  // Added 'system'
+  default: 'email'
+}
   
   // =============================================
   // WEB3 WALLET - PROPERLY INTEGRATED
