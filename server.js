@@ -38140,7 +38140,6 @@ app.get('/api/admin/wallet-management/treasury/wallets', adminProtect, restrictT
 
 
 
-
 // =============================================
 // TREASURY WITHDRAWAL - STRICT WALLET MATCHING
 // POST /api/admin/wallet-management/treasury/withdraw
@@ -38257,23 +38256,16 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         const assetUpper = asset.toUpperCase();
         const assetLower = asset.toLowerCase();
 
-        if (!platformWallet.isAssetSupported(assetUpper)) {
-            const supportedAssets = platformWallet.getSupportedAssets().map(a => a.symbol);
+        // ✅ FIX #1: Use ASSET_NETWORK_MAP instead of platformWallet.networkProviders
+        const config = ASSET_NETWORK_MAP[assetUpper];
+
+        if (!config) {
+            const supportedAssets = Object.keys(ASSET_NETWORK_MAP);
             return res.status(400).json({
                 status: 'fail',
                 message: `Asset ${assetUpper} is not supported by the platform`,
                 supportedAssets: supportedAssets,
                 errorCode: 'UNSUPPORTED_ASSET',
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        const config = platformWallet.networkProviders[assetUpper];
-        if (!config) {
-            return res.status(400).json({
-                status: 'fail',
-                message: `No network configuration found for ${assetUpper}`,
-                errorCode: 'MISSING_NETWORK_CONFIG',
                 timestamp: new Date().toISOString()
             });
         }
@@ -38429,6 +38421,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         // =============================================
         console.log(`\n💰 STEP 4: Checking balance for the EXACT wallet...`);
         console.log(`   Address: ${normalizedAddress}`);
+        console.log(`   RPC: ${config.rpc}`); // ✅ This will now show the correct RPC URL
 
         let confirmedBalance = 0;
         let pendingBalance = 0;
@@ -38591,7 +38584,8 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         if (config.type === 'evm') {
             console.log(`\n🔢 STEP 8: Getting transaction nonce for ${normalizedAddress}...`);
             try {
-                nonce = await getNonceForAddress(assetUpper, normalizedAddress, config);
+                const provider = new ethers.JsonRpcProvider(config.rpc);
+                nonce = await provider.getTransactionCount(normalizedAddress);
                 console.log(`   Nonce: ${nonce}`);
             } catch (err) {
                 console.error(`❌ Nonce error: ${err.message}`);
@@ -39445,7 +39439,6 @@ async function sendTimeoutAlert(withdrawalId, transactionId, txHash, asset, admi
         console.error('Failed to send timeout alert:', err);
     }
 }
-
 
 
 
