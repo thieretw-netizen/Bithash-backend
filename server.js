@@ -35864,56 +35864,279 @@ function getExplorerUrl(asset, txHash) {
     return explorers[asset.toUpperCase()] || `https://blockchair.com/transaction/${txHash}`;
 }
 
+
+
+
+
+
+
+
+
 // =============================================
 // 10. estimateGasForAsset - Estimate gas for a transaction
+// FIXED: BigInt/Number consistency, EIP-1559 support, accurate gas estimation
 // =============================================
 async function estimateGasForAsset(asset, toAddress, amount, config) {
     try {
         const assetUpper = asset.toUpperCase();
         let gasEstimate = {
-            fee: 0,
-            gasPrice: 0,
-            gasUsed: 21000
+            fee: '0',
+            gasUsed: 21000,
+            gasPrice: null,
+            maxFeePerGas: null,
+            maxPriorityFeePerGas: null
         };
         console.log(`[GAS ESTIMATE] Estimating gas for ${assetUpper} to ${toAddress}...`);
+
+        // Validate addresses before proceeding
+        if (!validateAddress(asset, toAddress, config)) {
+            throw new Error(`Invalid destination address for ${asset}`);
+        }
 
         switch (config.type) {
             case 'evm': {
                 const provider = new ethers.JsonRpcProvider(config.rpc);
-                const feeData = await provider.getFeeData();
-                const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
-                let gasLimit = 21000;
+                const feeData = await withRetry(() => provider.getFeeData(), 3, 1000);
 
-                if (config.contract) {
-                    gasLimit = 65000;
+                let gasLimit;
+                try {
+                    if (config.contract) {
+                        const contract = new ethers.Contract(
+                            config.contract,
+                            ['function transfer(address to, uint256 amount) returns (bool)'],
+                            provider
+                        );
+                        const decimals = await getTokenDecimals(config.contract, provider);
+                        const amountWei = ethers.parseUnits(amount.toString(), decimals);
+                        gasLimit = await contract.transfer.estimateGas(toAddress, amountWei);
+                        gasLimit = (gasLimit * 115n) / 100n;
+                    } else {
+                        const decimals = config.decimals || 18;
+                        gasLimit = await provider.estimateGas({
+                            to: toAddress,
+                            value: ethers.parseUnits(amount.toString(), decimals)
+                        });
+                        gasLimit = (gasLimit * 115n) / 100n;
+                    }
+                } catch (estimateError) {
+                    console.warn(`[GAS ESTIMATE] Estimate failed, using fallback:`, estimateError.message);
+                    gasLimit = config.contract ? 65000n : 21000n;
                 }
 
-                const gasCost = Number(ethers.formatEther(gasPrice * gasLimit));
-                gasEstimate = {
-                    fee: gasCost,
-                    gasPrice: Number(ethers.formatUnits(gasPrice, 'gwei')),
-                    gasUsed: gasLimit
-                };
-                console.log(`[GAS ESTIMATE] ${assetUpper} gas estimate: ${gasCost} (Gas Price: ${gasEstimate.gasPrice} Gwei)`);
+                let gasCost;
+                let gasPriceInGwei = null;
+
+                if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+                    const bufferedMaxFee = (feeData.maxFeePerGas * 110n) / 100n;
+                    const bufferedPriorityFee = (feeData.maxPriorityFeePerGas * 110n) / 100n;
+                    
+                    gasCost = ethers.formatEther(bufferedMaxFee * gasLimit);
+                    gasPriceInGwei = Number(ethers.formatUnits(bufferedMaxFee, 'gwei'));
+
+                    gasEstimate = {
+                        fee: gasCost,
+                        gasUsed: Number(gasLimit),
+                        gasPrice: gasPriceInGwei,
+                        maxFeePerGas: bufferedMaxFee,
+                        maxPriorityFeePerGas: bufferedPriorityFee
+                    };
+                } else if (feeData.gasPrice) {
+                    const bufferedGasPrice = (feeData.gasPrice * 110n) / 100n;
+                    gasCost = ethers.formatEther(bufferedGasPrice * gasLimit);
+                    gasPriceInGwei = Number(ethers.formatUnits(bufferedGasPrice, 'gwei'));
+
+                    gasEstimate = {
+                        fee: gasCost,
+                        gasUsed: Number(gasLimit),
+                        gasPrice: gasPriceInGwei,
+                        maxFeePerGas: bufferedGasPrice,
+                        maxPriorityFeePerGas: bufferedGasPrice
+                    };
+                } else {
+                    const fallbackGasPrice = ethers.parseUnits('20', 'gwei');
+                    gasCost = ethers.formatEther(fallbackGasPrice * gasLimit);
+
+                    gasEstimate = {
+                        fee: gasCost,
+                        gasUsed: Number(gasLimit),
+                        gasPrice: 20,
+                        maxFeePerGas: fallbackGasPrice,
+                        maxPriorityFeePerGas: fallbackGasPrice
+                    };
+                }
+
+                console.log(`[GAS ESTIMATE] ${assetUpper} gas estimate: ${gasCost} native (Gas Used: ${gasLimit}, Price: ${gasPriceInGwei || 'N/A'} Gwei)`);
                 break;
             }
             case 'solana': {
-                gasEstimate = { fee: 0.000005, gasPrice: 0, gasUsed: 5000 };
+                try {
+                    const connection = new Connection(config.rpc, 'confirmed');
+                    const { blockhash, lastValidBlockHeight } = await withRetry(
+                        () => connection.getLatestBlockhash('confirmed'),
+                        3,
+                        1000
+                    );
+                    
+                    const testFrom = new PublicKey('11111111111111111111111111111111');
+                    const testTo = new PublicKey('11111111111111111111111111111111');
+                    
+                    const testTx = new Transaction({
+                        feePayer: testFrom,
+                        recentBlockhash: blockhash,
+                        lastValidBlockHeight: lastValidBlockHeight
+                    });
+                    
+                    testTx.add(SystemProgram.transfer({
+                        fromPubkey: testFrom,
+                        toPubkey: testTo,
+                        lamports: 1
+                    }));
+                    
+                    const fee = await withRetry(
+                        () => connection.getFeeForMessage(testTx.compileMessage(), 'confirmed'),
+                        3,
+                        1000
+                    );
+                    const feeInSol = (fee.value || 5000) / 1e9;
+                    
+                    gasEstimate = {
+                        fee: feeInSol.toString(),
+                        gasPrice: 0,
+                        gasUsed: fee.value || 5000,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null
+                    };
+                } catch (err) {
+                    console.warn('[GAS ESTIMATE] Solana fee estimate failed, using default:', err.message);
+                    gasEstimate = {
+                        fee: '0.000005',
+                        gasPrice: 0,
+                        gasUsed: 5000,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null
+                    };
+                }
                 break;
             }
             case 'utxo': {
-                const estimatedSize = 250;
-                const feeRate = 5;
-                const feeInAsset = (estimatedSize * feeRate) / 1e8;
-                gasEstimate = { fee: feeInAsset, gasPrice: feeRate, gasUsed: estimatedSize };
+                try {
+                    const assetLower = assetUpper.toLowerCase();
+                    let feeRate = 5;
+                    
+                    // Try multiple fee sources with fallback
+                    const feeSources = [
+                        async () => {
+                            const response = await withRetry(
+                                () => axios.get(`https://api.blockchair.com/${assetLower}/stats`, { timeout: 5000 }),
+                                2,
+                                1000
+                            );
+                            if (response.data?.data?.fee_rate) {
+                                return Math.ceil(response.data.data.fee_rate);
+                            }
+                            throw new Error('No fee rate from Blockchair');
+                        },
+                        async () => {
+                            const response = await withRetry(
+                                () => axios.get('https://mempool.space/api/v1/fees/recommended', { timeout: 3000 }),
+                                2,
+                                1000
+                            );
+                            if (response.data?.fastestFee) {
+                                return response.data.fastestFee;
+                            }
+                            throw new Error('No fee rate from Mempool');
+                        },
+                        async () => {
+                            // Fallback to Blockstream
+                            const response = await withRetry(
+                                () => axios.get('https://blockstream.info/api/fee-estimates', { timeout: 3000 }),
+                                2,
+                                1000
+                            );
+                            if (response.data && response.data[1]) {
+                                return Math.ceil(response.data[1]);
+                            }
+                            throw new Error('No fee rate from Blockstream');
+                        }
+                    ];
+
+                    // Try each source until one succeeds
+                    for (const source of feeSources) {
+                        try {
+                            feeRate = await source();
+                            break;
+                        } catch (err) {
+                            console.warn(`[GAS ESTIMATE] Fee source failed:`, err.message);
+                        }
+                    }
+                    
+                    // Estimate actual size based on typical UTXO count
+                    const estimatedSize = calculateTransactionSize(1, 2); // 1 input, 2 outputs (send + change)
+                    const feeInAsset = (estimatedSize * feeRate) / 1e8;
+                    
+                    gasEstimate = {
+                        fee: feeInAsset.toString(),
+                        gasPrice: feeRate,
+                        gasUsed: estimatedSize,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null
+                    };
+                } catch (err) {
+                    console.warn('[GAS ESTIMATE] UTXO fee estimate failed, using default:', err.message);
+                    const estimatedSize = calculateTransactionSize(1, 2);
+                    const feeRate = 5;
+                    const feeInAsset = (estimatedSize * feeRate) / 1e8;
+                    gasEstimate = {
+                        fee: feeInAsset.toString(),
+                        gasPrice: feeRate,
+                        gasUsed: estimatedSize,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null
+                    };
+                }
                 break;
             }
             case 'tron': {
-                gasEstimate = { fee: 1, gasPrice: 0, gasUsed: 1 };
+                try {
+                    const tronWeb = new TronWeb({ fullHost: config.rpc });
+                    const energyPrice = await withRetry(() => tronWeb.trx.getEnergyPrice(), 3, 1000);
+                    const bandwidthPrice = 0.000001;
+                    
+                    let estimatedEnergy = 65000;
+                    if (!config.contract) {
+                        estimatedEnergy = 15000;
+                    }
+                    
+                    const fee = (estimatedEnergy * energyPrice / 1e6) + bandwidthPrice;
+                    
+                    gasEstimate = {
+                        fee: Math.max(fee, 0.1).toString(),
+                        gasPrice: energyPrice || 0,
+                        gasUsed: estimatedEnergy,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null
+                    };
+                } catch (err) {
+                    console.warn('[GAS ESTIMATE] TRON fee estimate failed, using default:', err.message);
+                    gasEstimate = {
+                        fee: '1',
+                        gasPrice: 0,
+                        gasUsed: 1,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null
+                    };
+                }
                 break;
             }
             default: {
-                gasEstimate = { fee: 0.0001, gasPrice: 0, gasUsed: 21000 };
+                gasEstimate = {
+                    fee: '0.0001',
+                    gasPrice: 0,
+                    gasUsed: 21000,
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null
+                };
             }
         }
 
@@ -35926,6 +36149,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
 
 // =============================================
 // 11. buildAndSignTransaction - Build and sign a transaction
+// FIXED: EIP-1559 support, BigInt gasLimit, proper nonce handling
 // =============================================
 async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, privateKey, gasEstimate, nonce, config) {
     try {
@@ -35936,76 +36160,405 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
         let signingAddress = fromAddress;
         console.log(`[SIGN TX] Building transaction for ${assetUpper} from ${fromAddress} to ${toAddress}...`);
 
+        // Validate addresses
+        if (!validateAddress(asset, fromAddress, config) || !validateAddress(asset, toAddress, config)) {
+            throw new Error(`Invalid address for ${asset}`);
+        }
+
+        if (!gasEstimate) {
+            throw new Error('Gas estimate is required but was null');
+        }
+
         switch (config.type) {
             case 'evm': {
                 const provider = new ethers.JsonRpcProvider(config.rpc);
                 const wallet = new ethers.Wallet(privateKey, provider);
 
-                // Verify the wallet address matches the from address
                 const walletAddress = wallet.address.toLowerCase();
                 if (walletAddress !== fromAddress.toLowerCase()) {
                     console.warn(`[SIGN TX] ⚠️ Wallet address mismatch: Wallet=${walletAddress}, From=${fromAddress}`);
                     signingAddress = walletAddress;
                 }
 
+                // Get current nonce if not provided
+                let txNonce = nonce;
+                if (txNonce === undefined || txNonce === null) {
+                    txNonce = await withRetry(
+                        () => provider.getTransactionCount(walletAddress, "pending"),
+                        3,
+                        1000
+                    );
+                    console.log(`[SIGN TX] Using dynamic nonce: ${txNonce}`);
+                }
+
+                const maxFeePerGas = gasEstimate.maxFeePerGas || 
+                    (gasEstimate.gasPrice ? ethers.parseUnits(gasEstimate.gasPrice.toString(), 'gwei') : ethers.parseUnits('10', 'gwei'));
+                const maxPriorityFeePerGas = gasEstimate.maxPriorityFeePerGas ||
+                    (gasEstimate.gasPrice ? ethers.parseUnits(gasEstimate.gasPrice.toString(), 'gwei') : ethers.parseUnits('2', 'gwei'));
+
+                const decimals = config.decimals || 18;
+                const amountWei = ethers.parseUnits(amount.toString(), decimals);
+                
                 let txData = {
                     to: toAddress,
-                    value: ethers.parseEther(amount.toString()),
-                    gasLimit: gasEstimate?.gasUsed || 21000,
-                    gasPrice: gasEstimate?.gasPrice ? ethers.parseUnits(gasEstimate.gasPrice.toString(), 'gwei') : undefined,
-                    nonce: nonce,
-                    chainId: config.chainId
+                    value: amountWei,
+                    gasLimit: BigInt(gasEstimate.gasUsed || 21000),
+                    nonce: txNonce,
+                    chainId: config.chainId,
+                    maxFeePerGas: maxFeePerGas,
+                    maxPriorityFeePerGas: maxPriorityFeePerGas,
+                    type: 2
                 };
 
                 if (config.contract) {
                     const contract = new ethers.Contract(
                         config.contract,
-                        ['function transfer(address to, uint256 amount) returns (bool)'],
+                        ['function transfer(address to, uint256 amount)'],
                         wallet
                     );
-                    const decimals = await getTokenDecimals(config.contract, provider);
-                    const amountWei = ethers.parseUnits(amount.toString(), decimals);
-                    const tx = await contract.transfer.populateTransaction(toAddress, amountWei);
+                    const tokenDecimals = await getTokenDecimals(config.contract, provider);
+                    const tokenAmountWei = ethers.parseUnits(amount.toString(), tokenDecimals);
+                    const tx = await contract.transfer.populateTransaction(toAddress, tokenAmountWei);
+
                     txData = {
                         ...tx,
-                        gasLimit: gasEstimate?.gasUsed || 65000,
-                        gasPrice: gasEstimate?.gasPrice ? ethers.parseUnits(gasEstimate.gasPrice.toString(), 'gwei') : undefined,
-                        nonce: nonce,
-                        chainId: config.chainId
+                        gasLimit: BigInt(gasEstimate.gasUsed || 65000),
+                        nonce: txNonce,
+                        chainId: config.chainId,
+                        maxFeePerGas: maxFeePerGas,
+                        maxPriorityFeePerGas: maxPriorityFeePerGas,
+                        type: 2
                     };
-                    console.log(`[SIGN TX] ERC-20 transfer detected. Contract: ${config.contract}, Amount: ${amountWei}`);
+                    console.log(`[SIGN TX] ERC-20 transfer detected. Contract: ${config.contract}`);
                 }
 
                 signedTx = await wallet.signTransaction(txData);
                 txHash = ethers.keccak256(signedTx);
                 explorerUrl = getExplorerUrl(assetUpper, txHash);
-                console.log(`[SIGN TX] Transaction signed. Hash: ${txHash}`);
+                console.log(`[SIGN TX] EVM transaction signed. Hash: ${txHash}`);
                 break;
             }
+
             case 'solana': {
-                // Simulated signing for now, replace with actual Solana signing
-                signedTx = `solana_signed_tx_${Date.now()}`;
-                txHash = `solana_tx_${Date.now()}`;
+                const connection = new Connection(config.rpc, 'confirmed');
+                
+                let keypair;
+                try {
+                    // Try multiple private key formats
+                    if (privateKey.length === 128) {
+                        // Hex format (64 bytes)
+                        const privateKeyBuffer = Buffer.from(privateKey, 'hex');
+                        keypair = Keypair.fromSecretKey(privateKeyBuffer);
+                    } else if (privateKey.length === 64) {
+                        // Base58 format
+                        const decoded = bs58.decode(privateKey);
+                        keypair = Keypair.fromSecretKey(decoded);
+                    } else if (privateKey.includes('[')) {
+                        // JSON array format
+                        const arr = JSON.parse(privateKey);
+                        keypair = Keypair.fromSecretKey(new Uint8Array(arr));
+                    } else {
+                        // Try as base64
+                        const decoded = Buffer.from(privateKey, 'base64');
+                        keypair = Keypair.fromSecretKey(decoded);
+                    }
+                } catch (err) {
+                    console.error('[SIGN TX] Failed to parse Solana private key:', err.message);
+                    throw new Error('Invalid Solana private key format');
+                }
+
+                const keypairAddress = keypair.publicKey.toBase58();
+                if (keypairAddress !== fromAddress) {
+                    console.warn(`[SIGN TX] ⚠️ Solana address mismatch: Keypair=${keypairAddress}, From=${fromAddress}`);
+                    signingAddress = keypairAddress;
+                }
+
+                const toPubkey = new PublicKey(toAddress);
+                const fromPubkey = new PublicKey(fromAddress);
+
+                // Convert amount to lamports using BigInt
+                const lamports = BigInt(Math.floor(parseFloat(amount) * 1e9));
+
+                const instruction = SystemProgram.transfer({
+                    fromPubkey: fromPubkey,
+                    toPubkey: toPubkey,
+                    lamports: lamports
+                });
+
+                const { blockhash, lastValidBlockHeight } = await withRetry(
+                    () => connection.getLatestBlockhash('confirmed'),
+                    3,
+                    1000
+                );
+
+                const transaction = new Transaction({
+                    feePayer: fromPubkey,
+                    recentBlockhash: blockhash,
+                    lastValidBlockHeight: lastValidBlockHeight
+                });
+
+                transaction.add(instruction);
+                transaction.sign(keypair);
+
+                // Get signature correctly
+                const signature = transaction.signatures[0];
+                txHash = bs58.encode(signature.signature);
+                
+                signedTx = transaction.serialize().toString('base64');
                 explorerUrl = getExplorerUrl(assetUpper, txHash);
-                console.log(`[SIGN TX] Solana transaction signed (simulated).`);
+
+                console.log(`[SIGN TX] Solana transaction signed. Hash: ${txHash}`);
                 break;
             }
+
             case 'utxo': {
-                // Simulated signing for now, replace with actual UTXO signing
-                signedTx = `utxo_signed_tx_${Date.now()}`;
-                txHash = `utxo_tx_${Date.now()}`;
+                const { ECPair, Psbt, address } = require('bitcoinjs-lib');
+                
+                let network;
+                let assetLower = assetUpper.toLowerCase();
+
+                switch (assetUpper) {
+                    case 'BTC':
+                        network = bitcoin.networks.bitcoin;
+                        break;
+                    case 'LTC':
+                        network = {
+                            messagePrefix: '\x19Litecoin Signed Message:\n',
+                            bech32: 'ltc',
+                            bip32: { public: 0x019da462, private: 0x019d9cfe },
+                            pubKeyHash: 0x30,
+                            scriptHash: 0x32,
+                            wif: 0xb0
+                        };
+                        break;
+                    case 'DOGE':
+                        network = {
+                            messagePrefix: '\x19Dogecoin Signed Message:\n',
+                            bech32: 'doge',
+                            bip32: { public: 0x02facafd, private: 0x02fac398 },
+                            pubKeyHash: 0x1e,
+                            scriptHash: 0x16,
+                            wif: 0x9e
+                        };
+                        break;
+                    default:
+                        throw new Error(`Unsupported UTXO asset: ${assetUpper}`);
+                }
+
+                const privateKeyBuffer = Buffer.from(privateKey, 'hex');
+                const keyPair = ECPair.fromPrivateKey(privateKeyBuffer, { network });
+
+                console.log(`[SIGN TX] Fetching UTXOs for ${fromAddress}...`);
+                
+                // Try multiple UTXO sources
+                let utxos = [];
+                const utxoSources = [
+                    async () => {
+                        const response = await withRetry(
+                            () => axios.get(`https://api.blockchair.com/${assetLower}/dashboards/address/${fromAddress}`, { timeout: 10000 }),
+                            2,
+                            1000
+                        );
+                        if (response.data?.data?.[fromAddress]) {
+                            return response.data.data[fromAddress].utxo || [];
+                        }
+                        return [];
+                    },
+                    async () => {
+                        // Fallback to blockstream
+                        const response = await withRetry(
+                            () => axios.get(`https://blockstream.info/api/address/${fromAddress}/utxo`, { timeout: 10000 }),
+                            2,
+                            1000
+                        );
+                        return response.data || [];
+                    }
+                ];
+
+                for (const source of utxoSources) {
+                    try {
+                        utxos = await source();
+                        if (utxos.length > 0) break;
+                    } catch (err) {
+                        console.warn(`[SIGN TX] UTXO source failed:`, err.message);
+                    }
+                }
+
+                if (utxos.length === 0) {
+                    throw new Error(`No UTXOs found for address ${fromAddress}`);
+                }
+
+                console.log(`[SIGN TX] Found ${utxos.length} UTXOs`);
+
+                // Select UTXOs using Largest-First strategy
+                let selectedUtxos = [];
+                let totalSelected = 0;
+                const amountInSatoshis = BigInt(Math.floor(parseFloat(amount) * 1e8));
+                const feeInSatoshis = BigInt(Math.floor(parseFloat(gasEstimate.fee) * 1e8));
+                const required = amountInSatoshis + feeInSatoshis;
+
+                // Sort UTXOs by value descending (largest first)
+                const sortedUtxos = [...utxos].sort((a, b) => b.value - a.value);
+
+                for (const utxo of sortedUtxos) {
+                    if (totalSelected >= required) break;
+                    selectedUtxos.push(utxo);
+                    totalSelected += BigInt(utxo.value);
+                }
+
+                if (totalSelected < required) {
+                    throw new Error(`Insufficient UTXO balance. Available: ${totalSelected}, Required: ${required}`);
+                }
+
+                console.log(`[SIGN TX] Selected ${selectedUtxos.length} UTXOs, total: ${totalSelected} satoshis`);
+
+                const psbt = new Psbt({ network });
+
+                // Add inputs with proper witness handling
+                for (const utxo of selectedUtxos) {
+                    // Determine address type
+                    let scriptType = 'legacy';
+                    if (utxo.script_hex) {
+                        if (utxo.script_hex.startsWith('0014')) {
+                            scriptType = 'segwit';
+                        } else if (utxo.script_hex.startsWith('0020')) {
+                            scriptType = 'taproot';
+                        } else if (utxo.script_hex.startsWith('a914')) {
+                            scriptType = 'p2sh';
+                        }
+                    }
+                    
+                    // Get transaction hex for non-witness UTXOs
+                    let txHex = null;
+                    if (scriptType === 'legacy' || scriptType === 'p2sh') {
+                        try {
+                            const txResponse = await withRetry(
+                                () => axios.get(`https://api.blockchair.com/${assetLower}/raw/transaction/${utxo.transaction_hash}`, { timeout: 10000 }),
+                                2,
+                                1000
+                            );
+                            if (txResponse.data?.data?.[utxo.transaction_hash]) {
+                                txHex = txResponse.data.data[utxo.transaction_hash].raw_transaction;
+                            }
+                        } catch (err) {
+                            console.warn(`[SIGN TX] Failed to fetch tx hex for ${utxo.transaction_hash}:`, err.message);
+                        }
+                    }
+
+                    const inputData = {
+                        hash: utxo.transaction_hash,
+                        index: utxo.index
+                    };
+
+                    if (txHex) {
+                        inputData.nonWitnessUtxo = Buffer.from(txHex, 'hex');
+                    } else {
+                        // For segwit and taproot
+                        const script = utxo.script_hex || '76a914000000000000000000000000000000000000000088ac';
+                        inputData.witnessUtxo = {
+                            script: Buffer.from(script, 'hex'),
+                            value: utxo.value
+                        };
+                    }
+
+                    psbt.addInput(inputData);
+                }
+
+                // Add output for destination
+                const toScript = bitcoin.address.toOutputScript(toAddress, network);
+                psbt.addOutput({
+                    script: toScript,
+                    value: Number(amountInSatoshis)
+                });
+
+                // Add change output if needed
+                const changeAmount = Number(totalSelected - amountInSatoshis - feeInSatoshis);
+                if (changeAmount > 546) {
+                    const changeScript = bitcoin.address.toOutputScript(fromAddress, network);
+                    psbt.addOutput({
+                        script: changeScript,
+                        value: changeAmount
+                    });
+                }
+
+                // Sign inputs
+                for (let i = 0; i < selectedUtxos.length; i++) {
+                    psbt.signInput(i, keyPair);
+                }
+
+                psbt.finalizeAllInputs();
+
+                const tx = psbt.extractTransaction();
+                signedTx = tx.toHex();
+                txHash = tx.getId();
                 explorerUrl = getExplorerUrl(assetUpper, txHash);
-                console.log(`[SIGN TX] UTXO transaction signed (simulated).`);
+
+                console.log(`[SIGN TX] UTXO transaction signed. Hash: ${txHash}`);
                 break;
             }
+
             case 'tron': {
-                // Simulated signing for now, replace with actual TRON signing
-                signedTx = `tron_signed_tx_${Date.now()}`;
-                txHash = `tron_tx_${Date.now()}`;
+                const tronWeb = new TronWeb({
+                    fullHost: config.rpc,
+                    privateKey: privateKey
+                });
+
+                const tronAddress = tronWeb.address.fromPrivateKey(privateKey);
+                if (tronAddress.toLowerCase() !== fromAddress.toLowerCase()) {
+                    console.warn(`[SIGN TX] ⚠️ TRON address mismatch: Derived=${tronAddress}, From=${fromAddress}`);
+                    signingAddress = tronAddress;
+                }
+
+                let transaction;
+
+                if (config.contract) {
+                    console.log(`[SIGN TX] TRC-20 transfer detected. Contract: ${config.contract}`);
+                    const contract = await tronWeb.contract().at(config.contract);
+                    const decimals = config.decimals || 6;
+                    const amountWithDecimals = BigInt(Math.floor(parseFloat(amount) * 10 ** decimals));
+
+                    // Build transaction without broadcasting
+                    const parameters = [
+                        { type: 'address', value: toAddress },
+                        { type: 'uint256', value: amountWithDecimals.toString() }
+                    ];
+                    
+                    const functionSelector = 'transfer(address,uint256)';
+                    transaction = await tronWeb.transactionBuilder.triggerConstantContract(
+                        config.contract,
+                        functionSelector,
+                        parameters,
+                        fromAddress,
+                        {
+                            feeLimit: 1_000_000_000,
+                            callValue: 0
+                        }
+                    );
+                    
+                    // Sign the transaction (important: don't broadcast!)
+                    const signed = await tronWeb.trx.sign(transaction.transaction || transaction, privateKey);
+                    transaction = signed;
+                    txHash = await tronWeb.trx.getTransactionID(signed);
+                } else {
+                    // Native TRX transfer
+                    const amountSun = BigInt(Math.floor(parseFloat(amount) * 1_000_000));
+                    const unsignedTx = await tronWeb.transactionBuilder.sendTrx(
+                        toAddress,
+                        amountSun.toString(),
+                        fromAddress
+                    );
+
+                    // Sign the transaction
+                    const signed = await tronWeb.trx.sign(unsignedTx, privateKey);
+                    transaction = signed;
+                    txHash = await tronWeb.trx.getTransactionID(signed);
+                }
+
                 explorerUrl = getExplorerUrl(assetUpper, txHash);
-                console.log(`[SIGN TX] TRON transaction signed (simulated).`);
+                console.log(`[SIGN TX] TRON transaction signed. Hash: ${txHash}`);
                 break;
             }
+
             default: {
                 throw new Error(`Unsupported asset type: ${config.type}`);
             }
@@ -36030,7 +36583,11 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
         switch (config.type) {
             case 'evm': {
                 const provider = new ethers.JsonRpcProvider(config.rpc);
-                const txResponse = await provider.broadcastTransaction(signedTx);
+                const txResponse = await withRetry(
+                    () => provider.broadcastTransaction(signedTx),
+                    3,
+                    1000
+                );
                 result = {
                     txHash: txResponse.hash,
                     blockNumber: txResponse.blockNumber,
@@ -36039,33 +36596,123 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
                 console.log(`[BROADCAST] EVM transaction broadcasted. Hash: ${result.txHash}`);
                 break;
             }
+
             case 'solana': {
+                const connection = new Connection(config.rpc, 'confirmed');
+                const txBuffer = Buffer.from(signedTx, 'base64');
+
+                const txid = await withRetry(
+                    () => connection.sendRawTransaction(txBuffer, {
+                        skipPreflight: false,
+                        preflightCommitment: 'confirmed',
+                        maxRetries: 3
+                    }),
+                    3,
+                    1000
+                );
+
+                // Use the txid from the node (canonical)
                 result = {
-                    txHash: `solana_tx_${Date.now()}`,
+                    txHash: txid,
                     blockNumber: 0,
                     status: 'pending'
                 };
-                console.log(`[BROADCAST] Solana transaction broadcasted (simulated).`);
+                console.log(`[BROADCAST] Solana transaction broadcasted. Hash: ${result.txHash}`);
                 break;
             }
+
             case 'utxo': {
-                result = {
-                    txHash: `utxo_tx_${Date.now()}`,
-                    blockNumber: 0,
-                    status: 'pending'
+                const assetLower = assetUpper.toLowerCase();
+                
+                // Try multiple broadcast endpoints
+                const broadcastEndpoints = {
+                    'btc': [
+                        'https://api.blockchair.com/bitcoin/push/transaction',
+                        'https://blockstream.info/api/tx'
+                    ],
+                    'doge': [
+                        'https://api.blockchair.com/dogecoin/push/transaction'
+                    ],
+                    'ltc': [
+                        'https://api.blockchair.com/litecoin/push/transaction'
+                    ]
                 };
-                console.log(`[BROADCAST] UTXO transaction broadcasted (simulated).`);
+
+                const endpoints = broadcastEndpoints[assetLower] || [];
+                let broadcastSuccess = false;
+
+                for (const endpoint of endpoints) {
+                    try {
+                        let response;
+                        if (endpoint.includes('blockchair')) {
+                            response = await withRetry(
+                                () => axios.post(endpoint, { data: signedTx }, {
+                                    headers: { 'Content-Type': 'application/json' },
+                                    timeout: 15000
+                                }),
+                                2,
+                                1000
+                            );
+                        } else {
+                            // Blockstream uses raw POST
+                            response = await withRetry(
+                                () => axios.post(endpoint, signedTx, {
+                                    headers: { 'Content-Type': 'text/plain' },
+                                    timeout: 15000
+                                }),
+                                2,
+                                1000
+                            );
+                        }
+
+                        const txHash = response.data?.data?.transaction_hash || 
+                                      response.data?.transaction_hash || 
+                                      response.data || 
+                                      (typeof response.data === 'string' ? response.data : null);
+
+                        if (txHash) {
+                            result = {
+                                txHash: txHash,
+                                blockNumber: 0,
+                                status: 'pending'
+                            };
+                            broadcastSuccess = true;
+                            console.log(`[BROADCAST] UTXO transaction broadcasted via ${endpoint}. Hash: ${result.txHash}`);
+                            break;
+                        }
+                    } catch (err) {
+                        console.warn(`[BROADCAST] Broadcast failed for ${endpoint}:`, err.message);
+                    }
+                }
+
+                if (!broadcastSuccess) {
+                    throw new Error('All broadcast endpoints failed');
+                }
                 break;
             }
+
             case 'tron': {
-                result = {
-                    txHash: `tron_tx_${Date.now()}`,
-                    blockNumber: 0,
-                    status: 'pending'
-                };
-                console.log(`[BROADCAST] TRON transaction broadcasted (simulated).`);
+                const tronWeb = new TronWeb({ fullHost: config.rpc });
+                const broadcastResult = await withRetry(
+                    () => tronWeb.trx.sendRawTransaction(signedTx),
+                    3,
+                    1000
+                );
+
+                if (broadcastResult && broadcastResult.result) {
+                    const txid = broadcastResult.txid || broadcastResult.transaction_id;
+                    result = {
+                        txHash: txid,
+                        blockNumber: 0,
+                        status: 'pending'
+                    };
+                    console.log(`[BROADCAST] TRON transaction broadcasted. Hash: ${result.txHash}`);
+                } else {
+                    throw new Error(`Broadcast failed: ${broadcastResult?.message || 'Unknown error'}`);
+                }
                 break;
             }
+
             default: {
                 result = null;
                 console.error(`[BROADCAST] Unsupported asset type: ${config.type}`);
@@ -36088,22 +36735,22 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
 
     if (!assetConfig) {
         console.error(`[CHECK TX] Unsupported asset: ${assetUpper}`);
-        return { confirmed: false, confirmations: 0, requiredConfirmations: 12, error: `Unsupported asset: ${assetUpper}` };
+        return { confirmed: false, confirmations: 0, requiredConfirmations: getRequiredConfirmations(assetUpper), error: `Unsupported asset: ${assetUpper}` };
     }
 
-    const required = REQUIRED_CONFIRMATIONS[assetUpper] || 12;
+    const required = getRequiredConfirmations(assetUpper);
     console.log(`[CHECK TX] Checking ${assetUpper} transaction ${txHash} on chain ${chainId}...`);
 
     switch (assetConfig.type) {
         case 'evm': {
             try {
                 const provider = new ethers.JsonRpcProvider(assetConfig.rpc);
-                const tx = await provider.getTransaction(txHash);
+                const tx = await withRetry(() => provider.getTransaction(txHash), 3, 1000);
                 if (!tx) {
                     console.warn(`[CHECK TX] Transaction not found: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
                 }
-                const receipt = await provider.getTransactionReceipt(txHash);
+                const receipt = await withRetry(() => provider.getTransactionReceipt(txHash), 3, 1000);
                 if (!receipt) {
                     console.warn(`[CHECK TX] Receipt not found for: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Receipt not found' };
@@ -36112,7 +36759,7 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                     console.warn(`[CHECK TX] Transaction failed: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, failed: true, error: 'Transaction failed' };
                 }
-                const currentBlock = await provider.getBlockNumber();
+                const currentBlock = await withRetry(() => provider.getBlockNumber(), 3, 1000);
                 const confirmations = currentBlock - receipt.blockNumber;
                 const status = {
                     confirmed: confirmations >= required,
@@ -36133,23 +36780,40 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                 return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
             }
         }
+
         case 'solana': {
             try {
-                const connection = new Connection(assetConfig.rpc);
-                const status = await connection.getSignatureStatus(txHash);
+                const connection = new Connection(assetConfig.rpc, 'confirmed');
+                const status = await withRetry(
+                    () => connection.getSignatureStatus(txHash, {
+                        searchTransactionHistory: true
+                    }),
+                    3,
+                    1000
+                );
+
                 if (!status || !status.value) {
                     console.warn(`[CHECK TX] Solana tx not found: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
                 }
+
                 const txStatus = status.value;
                 const confirmations = txStatus.confirmations || 0;
+                
+                // For Solana, "finalized" is the most reliable confirmation state
+                const isConfirmed = txStatus.confirmationStatus === 'finalized' || 
+                                  txStatus.confirmationStatus === 'confirmed' ||
+                                  confirmations >= required;
+
                 const result = {
-                    confirmed: confirmations >= required,
+                    confirmed: isConfirmed,
                     confirmations: confirmations,
                     requiredConfirmations: required,
                     status: txStatus.confirmationStatus || 'pending',
-                    slot: txStatus.slot || 0
+                    slot: txStatus.slot || 0,
+                    err: txStatus.err || null
                 };
+
                 console.log(`[CHECK TX] Solana tx ${txHash} confirmations: ${confirmations}/${required}`);
                 return result;
             } catch (error) {
@@ -36157,25 +36821,32 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                 return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
             }
         }
+
         case 'tron': {
             try {
                 const tronWeb = new TronWeb({ fullHost: assetConfig.rpc });
-                const tx = await tronWeb.trx.getTransactionInfo(txHash);
+                const tx = await withRetry(() => tronWeb.trx.getTransactionInfo(txHash), 3, 1000);
+
                 if (!tx || !tx.id) {
                     console.warn(`[CHECK TX] TRON tx not found: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
                 }
-                const confirmations = tx.blockNumber ? 1 : 0;
+
+                const isConfirmed = !!tx.blockNumber;
+                const isSuccess = tx.receipt?.result === 'SUCCESS';
+
                 const result = {
-                    confirmed: confirmations >= required,
-                    confirmations: confirmations,
+                    confirmed: isConfirmed && isSuccess,
+                    confirmations: isConfirmed ? 1 : 0,
                     requiredConfirmations: required,
                     blockNumber: tx.blockNumber,
-                    status: tx.receipt && tx.receipt.result === 'SUCCESS' ? 'success' : 'failed',
+                    status: isSuccess ? 'success' : 'failed',
                     to: tx.to,
                     from: tx.from,
-                    amount: tx.amount ? tx.amount / 1000000 : 0
+                    amount: tx.amount ? tx.amount / 1000000 : 0,
+                    failed: !isSuccess
                 };
+
                 console.log(`[CHECK TX] TRON tx ${txHash} confirmed: ${result.confirmed}`);
                 return result;
             } catch (error) {
@@ -36183,26 +36854,49 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                 return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
             }
         }
+
         case 'utxo': {
             try {
                 const assetLower = assetUpper.toLowerCase();
                 const explorerMap = {
-                    'btc': 'https://api.blockchair.com/bitcoin',
-                    'doge': 'https://api.blockchair.com/dogecoin',
-                    'ltc': 'https://api.blockchair.com/litecoin'
+                    'btc': [
+                        'https://api.blockchair.com/bitcoin',
+                        'https://blockstream.info/api'
+                    ],
+                    'doge': [
+                        'https://api.blockchair.com/dogecoin'
+                    ],
+                    'ltc': [
+                        'https://api.blockchair.com/litecoin'
+                    ]
                 };
-                const baseUrl = explorerMap[assetLower];
-                if (!baseUrl) {
-                    console.error(`[CHECK TX] Unsupported UTXO asset: ${assetUpper}`);
-                    return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Unsupported UTXO asset' };
+
+                const endpoints = explorerMap[assetLower] || [];
+                let txData = null;
+
+                for (const baseUrl of endpoints) {
+                    try {
+                        const response = await withRetry(
+                            () => axios.get(`${baseUrl}/dashboards/transaction/${txHash}`, { timeout: 10000 }),
+                            2,
+                            1000
+                        );
+                        if (response.data?.data?.[txHash]) {
+                            txData = response.data.data[txHash];
+                            break;
+                        }
+                    } catch (err) {
+                        console.warn(`[CHECK TX] Explorer ${baseUrl} failed:`, err.message);
+                    }
                 }
-                const response = await axios.get(`${baseUrl}/dashboards/transaction/${txHash}`, { timeout: 10000 });
-                if (!response.data || !response.data.data || !response.data.data[txHash]) {
+
+                if (!txData) {
                     console.warn(`[CHECK TX] UTXO tx not found: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
                 }
-                const txData = response.data.data[txHash];
+
                 const confirmations = txData.confirmations || 0;
+
                 const result = {
                     confirmed: confirmations >= required,
                     confirmations: confirmations,
@@ -36213,6 +36907,7 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                     value: txData.output_total || 0,
                     fee: txData.fee || 0
                 };
+
                 console.log(`[CHECK TX] UTXO tx ${txHash} confirmations: ${confirmations}/${required}`);
                 return result;
             } catch (error) {
@@ -36220,12 +36915,133 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                 return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
             }
         }
+
         default: {
             console.error(`[CHECK TX] Unsupported type for asset ${assetUpper}: ${assetConfig.type}`);
             return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: `Unsupported type: ${assetConfig.type}` };
         }
     }
 }
+
+// =============================================
+// Helper: Retry logic with exponential backoff
+// =============================================
+async function withRetry(fn, maxRetries = 3, delay = 1000) {
+    let lastError;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            if (i < maxRetries - 1) {
+                const waitTime = delay * Math.pow(2, i);
+                console.warn(`Retry ${i + 1}/${maxRetries} after ${waitTime}ms:`, error.message);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+    }
+    throw lastError;
+}
+
+// =============================================
+// Helper: Get required confirmations by chain
+// =============================================
+function getRequiredConfirmations(asset) {
+    const confirmationsMap = {
+        'ETH': 2,
+        'BNB': 15,
+        'MATIC': 20,
+        'AVAX': 2,
+        'BTC': 6,
+        'LTC': 6,
+        'DOGE': 20,
+        'SOL': 0, // Solana uses finalization instead
+        'TRX': 1
+    };
+    return confirmationsMap[asset] || 12;
+}
+
+// =============================================
+// Helper: Calculate transaction size based on inputs/outputs
+// =============================================
+function calculateTransactionSize(numInputs, numOutputs, isSegwit = true) {
+    // Approximate transaction size in bytes
+    // Base: 10 bytes (version + locktime)
+    // Inputs: 148 bytes each (legacy) or 68 bytes each (segwit)
+    // Outputs: 34 bytes each
+    const baseSize = 10;
+    const inputSize = isSegwit ? 68 : 148;
+    const outputSize = 34;
+    return baseSize + (numInputs * inputSize) + (numOutputs * outputSize);
+}
+
+// =============================================
+// Helper: Validate addresses for different chains
+// =============================================
+function validateAddress(asset, address, config) {
+    try {
+        const assetUpper = asset.toUpperCase();
+        
+        switch (config.type) {
+            case 'evm': {
+                return ethers.isAddress(address) && address !== '0x0000000000000000000000000000000000000000';
+            }
+            case 'solana': {
+                try {
+                    new PublicKey(address);
+                    return true;
+                } catch {
+                    return false;
+                }
+            }
+            case 'utxo': {
+                try {
+                    const { address: addr } = require('bitcoinjs-lib');
+                    let network;
+                    switch (assetUpper) {
+                        case 'BTC':
+                            network = bitcoin.networks.bitcoin;
+                            break;
+                        case 'LTC':
+                            // Litecoin network params
+                            network = { pubKeyHash: 0x30, scriptHash: 0x32 };
+                            break;
+                        case 'DOGE':
+                            // Dogecoin network params
+                            network = { pubKeyHash: 0x1e, scriptHash: 0x16 };
+                            break;
+                        default:
+                            return false;
+                    }
+                    addr.toOutputScript(address, network);
+                    return true;
+                } catch {
+                    return false;
+                }
+            }
+            case 'tron': {
+                const tronWeb = new TronWeb({ fullHost: config.rpc });
+                return tronWeb.isAddress(address);
+            }
+            default:
+                return false;
+        }
+    } catch (err) {
+        return false;
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // 14. getPrivateKeyForAddress - Get private key for a specific address
