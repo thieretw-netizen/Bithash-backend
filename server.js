@@ -35872,14 +35872,102 @@ function getExplorerUrl(asset, txHash) {
 
 
 // =============================================
-// 10. estimateGasForAsset - Estimate gas for a transaction
-// FIXED: Returns fee as NUMBER, BigInt consistency, EIP-1559 support
+// FIXED: validateAddress - DEFINED FIRST
+// =============================================
+
+/**
+ * Validate a cryptocurrency address based on asset type
+ * @param {string} asset - Asset symbol (BTC, ETH, etc.)
+ * @param {string} address - Address to validate
+ * @param {object} config - Network configuration
+ * @returns {boolean} - True if valid, false otherwise
+ */
+function validateAddress(asset, address, config) {
+    // Basic validation
+    if (!address || typeof address !== 'string') {
+        return false;
+    }
+
+    const addr = address.trim();
+    if (addr.length === 0) {
+        return false;
+    }
+
+    const assetUpper = (asset || '').toUpperCase();
+
+    // EVM chains (Ethereum, BSC, Polygon, etc.)
+    if (config && config.type === 'evm') {
+        try {
+            return ethers.isAddress(addr);
+        } catch {
+            return false;
+        }
+    }
+
+    // EVM-style addresses
+    const evmAssets = ['ETH', 'USDT', 'USDC', 'BNB', 'MATIC', 'AVAX', 'LINK', 'UNI', 'WBTC', 'DAI', 'SHIB'];
+    if (evmAssets.includes(assetUpper)) {
+        try {
+            return ethers.isAddress(addr);
+        } catch {
+            return false;
+        }
+    }
+
+    // Bitcoin
+    if (assetUpper === 'BTC') {
+        return /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(addr) ||
+               /^bc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(addr);
+    }
+
+    // Litecoin
+    if (assetUpper === 'LTC') {
+        return /^[LM3][a-km-zA-HJ-NP-Z1-9]{26,33}$/.test(addr) ||
+               /^ltc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(addr);
+    }
+
+    // Dogecoin
+    if (assetUpper === 'DOGE') {
+        return /^D{1}[5-9A-HJ-NP-U]{1}[1-9A-HJ-NP-Za-km-z]{32,34}$/.test(addr);
+    }
+
+    // Solana
+    if (assetUpper === 'SOL') {
+        return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr);
+    }
+
+    // XRP
+    if (assetUpper === 'XRP') {
+        return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(addr);
+    }
+
+    // TRON
+    if (assetUpper === 'TRX') {
+        return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(addr);
+    }
+
+    // Cardano
+    if (assetUpper === 'ADA') {
+        return /^addr1[a-zA-Z0-9]{50,60}$/.test(addr);
+    }
+
+    // Polkadot
+    if (assetUpper === 'DOT') {
+        return /^1[a-zA-Z0-9]{46,47}$/.test(addr);
+    }
+
+    // Fallback: basic alphanumeric check
+    return /^[a-zA-Z0-9]{20,60}$/.test(addr);
+}
+
+// =============================================
+// 10. estimateGasForAsset - COMPLETE REWRITE
 // =============================================
 async function estimateGasForAsset(asset, toAddress, amount, config) {
     try {
         const assetUpper = asset.toUpperCase();
         let gasEstimate = {
-            fee: 0,  // ✅ FIX: Now a number, not a string
+            fee: 0,
             gasUsed: 21000,
             gasPrice: null,
             maxFeePerGas: null,
@@ -35933,7 +36021,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                     gasPriceInGwei = Number(ethers.formatUnits(bufferedMaxFee, 'gwei'));
 
                     gasEstimate = {
-                        fee: parseFloat(gasCost),  // ✅ FIX: Convert to number
+                        fee: parseFloat(gasCost),
                         gasUsed: Number(gasLimit),
                         gasPrice: gasPriceInGwei,
                         maxFeePerGas: bufferedMaxFee,
@@ -35945,7 +36033,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                     gasPriceInGwei = Number(ethers.formatUnits(bufferedGasPrice, 'gwei'));
 
                     gasEstimate = {
-                        fee: parseFloat(gasCost),  // ✅ FIX: Convert to number
+                        fee: parseFloat(gasCost),
                         gasUsed: Number(gasLimit),
                         gasPrice: gasPriceInGwei,
                         maxFeePerGas: bufferedGasPrice,
@@ -35956,7 +36044,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                     gasCost = ethers.formatEther(fallbackGasPrice * gasLimit);
 
                     gasEstimate = {
-                        fee: parseFloat(gasCost),  // ✅ FIX: Convert to number
+                        fee: parseFloat(gasCost),
                         gasUsed: Number(gasLimit),
                         gasPrice: 20,
                         maxFeePerGas: fallbackGasPrice,
@@ -35996,7 +36084,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                         3,
                         1000
                     );
-                    const feeInSol = parseFloat(((fee.value || 5000) / 1e9).toFixed(9)); // ✅ FIX: Convert to number
+                    const feeInSol = parseFloat(((fee.value || 5000) / 1e9).toFixed(9));
                     
                     gasEstimate = {
                         fee: feeInSol,
@@ -36008,7 +36096,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                 } catch (err) {
                     console.warn('[GAS ESTIMATE] Solana fee estimate failed, using default:', err.message);
                     gasEstimate = {
-                        fee: 0.000005,  // ✅ FIX: Now a number
+                        fee: 0.000005,
                         gasPrice: 0,
                         gasUsed: 5000,
                         maxFeePerGas: null,
@@ -36022,7 +36110,6 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                     const assetLower = assetUpper.toLowerCase();
                     let feeRate = 5;
                     
-                    // Try multiple fee sources
                     const feeSources = [
                         async () => {
                             const response = await withRetry(
@@ -36068,9 +36155,8 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                         }
                     }
                     
-                    // Calculate actual size based on inputs/outputs
                     const estimatedSize = calculateTransactionSize(1, 2);
-                    const feeInAsset = parseFloat(((estimatedSize * feeRate) / 1e8).toFixed(8)); // ✅ FIX: Convert to number
+                    const feeInAsset = parseFloat(((estimatedSize * feeRate) / 1e8).toFixed(8));
                     
                     gasEstimate = {
                         fee: feeInAsset,
@@ -36105,7 +36191,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                         estimatedEnergy = 15000;
                     }
                     
-                    const fee = parseFloat(Math.max((estimatedEnergy * energyPrice / 1e6) + bandwidthPrice, 0.1).toFixed(6)); // ✅ FIX: Convert to number
+                    const fee = parseFloat(Math.max((estimatedEnergy * energyPrice / 1e6) + bandwidthPrice, 0.1).toFixed(6));
                     
                     gasEstimate = {
                         fee: fee,
@@ -36117,7 +36203,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                 } catch (err) {
                     console.warn('[GAS ESTIMATE] TRON fee estimate failed, using default:', err.message);
                     gasEstimate = {
-                        fee: 1,  // ✅ FIX: Now a number
+                        fee: 1,
                         gasPrice: 0,
                         gasUsed: 1,
                         maxFeePerGas: null,
@@ -36128,7 +36214,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
             }
             default: {
                 gasEstimate = {
-                    fee: 0.0001,  // ✅ FIX: Now a number
+                    fee: 0.0001,
                     gasPrice: 0,
                     gasUsed: 21000,
                     maxFeePerGas: null,
@@ -36137,7 +36223,6 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
             }
         }
 
-        // ✅ FIX: Ensure fee is always a number
         if (typeof gasEstimate.fee !== 'number' || isNaN(gasEstimate.fee)) {
             console.warn(`[GAS ESTIMATE] Invalid fee detected, resetting to 0`);
             gasEstimate.fee = 0;
@@ -36151,8 +36236,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
 }
 
 // =============================================
-// 11. buildAndSignTransaction - Build and sign a transaction
-// FIXED: Dynamic nonce, BigInt handling, proper TRON signing
+// 11. buildAndSignTransaction - COMPLETE REWRITE
 // =============================================
 async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, privateKey, gasEstimate, nonce, config) {
     try {
@@ -36169,7 +36253,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
             throw new Error(`Invalid address for ${assetUpper}`);
         }
 
-        // ✅ FIX: Ensure gasEstimate has valid numbers
         const gasFee = typeof gasEstimate?.fee === 'number' ? gasEstimate.fee : 0;
         const gasPrice = typeof gasEstimate?.gasPrice === 'number' ? gasEstimate.gasPrice : 0;
         const gasUsed = typeof gasEstimate?.gasUsed === 'number' ? gasEstimate.gasUsed : 21000;
@@ -36189,7 +36272,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                     signingAddress = walletAddress;
                 }
 
-                // Get dynamic nonce if not provided
                 let txNonce = nonce;
                 if (txNonce === undefined || txNonce === null) {
                     txNonce = await withRetry(
@@ -36200,7 +36282,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                     console.log(`[SIGN TX] Using dynamic nonce: ${txNonce}`);
                 }
 
-                // Parse gas values safely - ensure they're BigInt
                 const maxFeePerGas = gasEstimate.maxFeePerGas || 
                     (gasPrice > 0 ? ethers.parseUnits(gasPrice.toString(), 'gwei') : ethers.parseUnits('10', 'gwei'));
                 const maxPriorityFeePerGas = gasEstimate.maxPriorityFeePerGas ||
@@ -36254,7 +36335,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                 
                 let keypair;
                 try {
-                    // Support multiple private key formats
                     if (privateKey.length === 128) {
                         const privateKeyBuffer = Buffer.from(privateKey, 'hex');
                         keypair = Keypair.fromSecretKey(privateKeyBuffer);
@@ -36281,8 +36361,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 
                 const toPubkey = new PublicKey(toAddress);
                 const fromPubkey = new PublicKey(fromAddress);
-
-                // Use BigInt for lamports
                 const lamports = BigInt(Math.floor(parseFloat(amount) * 1e9));
 
                 const instruction = SystemProgram.transfer({
@@ -36355,7 +36433,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 
                 console.log(`[SIGN TX] Fetching UTXOs for ${fromAddress}...`);
                 
-                // Try multiple UTXO sources
                 let utxos = [];
                 const utxoSources = [
                     async () => {
@@ -36394,12 +36471,10 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 
                 console.log(`[SIGN TX] Found ${utxos.length} UTXOs`);
 
-                // ✅ FIX: Use gasFee (which is already a number)
                 const amountInSatoshis = BigInt(Math.floor(parseFloat(amount) * 1e8));
                 const feeInSatoshis = BigInt(Math.floor(gasFee * 1e8));
                 const required = amountInSatoshis + feeInSatoshis;
 
-                // Select UTXOs
                 let selectedUtxos = [];
                 let totalSelected = 0n;
                 const sortedUtxos = [...utxos].sort((a, b) => b.value - a.value);
@@ -36418,7 +36493,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 
                 const psbt = new Psbt({ network });
 
-                // Add inputs with proper witness handling
                 for (const utxo of selectedUtxos) {
                     let scriptType = 'legacy';
                     if (utxo.script_hex) {
@@ -36465,14 +36539,12 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                     psbt.addInput(inputData);
                 }
 
-                // Add output for destination
                 const toScript = bitcoin.address.toOutputScript(toAddress, network);
                 psbt.addOutput({
                     script: toScript,
                     value: Number(amountInSatoshis)
                 });
 
-                // Add change output if needed
                 const changeAmount = Number(totalSelected - amountInSatoshis - feeInSatoshis);
                 if (changeAmount > 546) {
                     const changeScript = bitcoin.address.toOutputScript(fromAddress, network);
@@ -36482,7 +36554,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                     });
                 }
 
-                // Sign inputs
                 for (let i = 0; i < selectedUtxos.length; i++) {
                     psbt.signInput(i, keyPair);
                 }
@@ -36519,7 +36590,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                     const decimals = config.decimals || 6;
                     const amountWithDecimals = BigInt(Math.floor(parseFloat(amount) * 10 ** decimals));
 
-                    // Build transaction WITHOUT broadcasting
                     const parameters = [
                         { type: 'address', value: toAddress },
                         { type: 'uint256', value: amountWithDecimals.toString() }
@@ -36537,12 +36607,10 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                         }
                     );
                     
-                    // Sign the transaction (DO NOT broadcast)
                     const signed = await tronWeb.trx.sign(unsignedTx.transaction || unsignedTx, privateKey);
                     transaction = signed;
                     txHash = await tronWeb.trx.getTransactionID(signed);
                 } else {
-                    // Native TRX transfer
                     const amountSun = BigInt(Math.floor(parseFloat(amount) * 1_000_000));
                     unsignedTx = await tronWeb.transactionBuilder.sendTrx(
                         toAddress,
@@ -36550,7 +36618,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                         fromAddress
                     );
 
-                    // Sign the transaction
                     const signed = await tronWeb.trx.sign(unsignedTx, privateKey);
                     transaction = signed;
                     txHash = await tronWeb.trx.getTransactionID(signed);
@@ -36574,8 +36641,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 }
 
 // =============================================
-// 12. broadcastTransactionToChain - Broadcast a transaction
-// FIXED: Multiple endpoints, retry logic
+// 12. broadcastTransactionToChain - COMPLETE REWRITE
 // =============================================
 async function broadcastTransactionToChain(asset, signedTx, config) {
     try {
@@ -36726,8 +36792,7 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
 }
 
 // =============================================
-// 13. checkTransactionOnBlockchain - Check transaction status
-// FIXED: Chain-specific confirmations, multiple explorers
+// 13. checkTransactionOnBlockchain - COMPLETE REWRITE
 // =============================================
 async function checkTransactionOnBlockchain(txHash, asset, chainId) {
     const assetUpper = asset.toUpperCase();
