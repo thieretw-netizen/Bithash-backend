@@ -40030,6 +40030,24 @@ async function getBlockchainBalance(asset, addresses, config) {
                     try {
                         let balance = 0;
 
+
+
+
+
+
+
+console.log("RPC:", config.rpc);
+console.log("Address:", address);
+
+const chainId = await provider.getNetwork();
+
+console.log(chainId.chainId);
+
+
+
+
+
+                        
                         // Check if it's an ERC-20 token
                         if (config.contract) {
                             const contract = new ethers.Contract(
