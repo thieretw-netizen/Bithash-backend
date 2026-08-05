@@ -35867,86 +35867,207 @@ function getExplorerUrl(asset, txHash) {
 
 
 
-
-
-
 // =============================================
-// 0. validateAddress - DEFINED FIRST
+// 0. withRetry - RETRY HELPER (DEFINED FIRST)
 // =============================================
 
+/**
+ * Retry an async function with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retry attempts
+ * @param {number} delayMs - Initial delay in milliseconds
+ * @returns {Promise<any>} - Result of the function
+ */
+async function withRetry(fn, maxRetries = 3, delayMs = 1000) {
+    let lastError;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            lastError = err;
+            console.warn(`[RETRY] Attempt ${attempt}/${maxRetries} failed: ${err.message}`);
+            
+            if (attempt < maxRetries) {
+                const waitTime = delayMs * Math.pow(2, attempt - 1);
+                console.log(`[RETRY] Waiting ${waitTime}ms before retry...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+    }
+    
+    throw lastError;
+}
+
+// =============================================
+// 1. validateAddress - ADDRESS VALIDATOR
+// =============================================
+
+/**
+ * Validate a cryptocurrency address based on asset type
+ * @param {string} asset - Asset symbol (BTC, ETH, etc.)
+ * @param {string} address - Address to validate
+ * @param {object} config - Network configuration
+ * @returns {boolean} - True if valid, false otherwise
+ */
 function validateAddress(asset, address, config) {
-    if (!address || typeof address !== 'string') return false;
+    // Basic validation
+    if (!address || typeof address !== 'string') {
+        return false;
+    }
+
     const addr = address.trim();
-    if (addr.length === 0) return false;
-    
+    if (addr.length === 0) {
+        return false;
+    }
+
     const assetUpper = (asset || '').toUpperCase();
-    
+
     // EVM chains (Ethereum, BSC, Polygon, etc.)
     if (config && config.type === 'evm') {
-        try { return ethers.isAddress(addr); } catch { return false; }
+        try {
+            return ethers.isAddress(addr);
+        } catch {
+            return false;
+        }
     }
-    
-    // EVM-style addresses (0x + 40 hex chars)
+
+    // EVM-style addresses
     const evmAssets = ['ETH', 'USDT', 'USDC', 'BNB', 'MATIC', 'AVAX', 'LINK', 'UNI', 'WBTC', 'DAI', 'SHIB'];
     if (evmAssets.includes(assetUpper)) {
-        try { return ethers.isAddress(addr); } catch { return false; }
+        try {
+            return ethers.isAddress(addr);
+        } catch {
+            return false;
+        }
     }
-    
+
     // Bitcoin
     if (assetUpper === 'BTC') {
         return /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(addr) ||
                /^bc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(addr);
     }
-    
+
     // Litecoin
     if (assetUpper === 'LTC') {
         return /^[LM3][a-km-zA-HJ-NP-Z1-9]{26,33}$/.test(addr) ||
                /^ltc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(addr);
     }
-    
+
     // Dogecoin
     if (assetUpper === 'DOGE') {
         return /^D{1}[5-9A-HJ-NP-U]{1}[1-9A-HJ-NP-Za-km-z]{32,34}$/.test(addr);
     }
-    
+
     // Solana
     if (assetUpper === 'SOL') {
         return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr);
     }
-    
+
     // XRP
     if (assetUpper === 'XRP') {
         return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(addr);
     }
-    
+
     // TRON
     if (assetUpper === 'TRX') {
         return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(addr);
     }
-    
+
     // Cardano
     if (assetUpper === 'ADA') {
         return /^addr1[a-zA-Z0-9]{50,60}$/.test(addr);
     }
-    
+
     // Polkadot
     if (assetUpper === 'DOT') {
         return /^1[a-zA-Z0-9]{46,47}$/.test(addr);
     }
-    
+
     // Fallback: basic alphanumeric check
     return /^[a-zA-Z0-9]{20,60}$/.test(addr);
 }
 
 // =============================================
-// 10. estimateGasForAsset - COMPLETE REWRITE
+// 2. getExplorerUrl - EXPLORER URL HELPER
+// =============================================
+
+function getExplorerUrl(asset, txHash) {
+    const explorers = {
+        'BTC': `https://blockchair.com/bitcoin/transaction/${txHash}`,
+        'ETH': `https://etherscan.io/tx/${txHash}`,
+        'BNB': `https://bscscan.com/tx/${txHash}`,
+        'MATIC': `https://polygonscan.com/tx/${txHash}`,
+        'AVAX': `https://snowtrace.io/tx/${txHash}`,
+        'SOL': `https://solscan.io/tx/${txHash}`,
+        'XRP': `https://xrpscan.com/tx/${txHash}`,
+        'TRX': `https://tronscan.org/#/transaction/${txHash}`,
+        'DOGE': `https://blockchair.com/dogecoin/transaction/${txHash}`,
+        'LTC': `https://blockchair.com/litecoin/transaction/${txHash}`,
+        'ADA': `https://cardanoscan.io/transaction/${txHash}`,
+        'DOT': `https://polkadot.subscan.io/transaction/${txHash}`
+    };
+    return explorers[asset.toUpperCase()] || `https://etherscan.io/tx/${txHash}`;
+}
+
+// =============================================
+// 3. getTokenDecimals - TOKEN DECIMALS HELPER
+// =============================================
+
+async function getTokenDecimals(contractAddress, provider) {
+    try {
+        const contract = new ethers.Contract(
+            contractAddress,
+            ['function decimals() view returns (uint8)'],
+            provider
+        );
+        return await contract.decimals();
+    } catch (err) {
+        console.warn(`Failed to get token decimals for ${contractAddress}:`, err.message);
+        return 18;
+    }
+}
+
+// =============================================
+// 4. getRequiredConfirmations - CONFIRMATIONS HELPER
+// =============================================
+
+function getRequiredConfirmations(asset) {
+    const confirmations = {
+        'BTC': 3,
+        'ETH': 12,
+        'BNB': 15,
+        'MATIC': 30,
+        'AVAX': 15,
+        'SOL': 32,
+        'TRX': 19,
+        'XRP': 4,
+        'DOGE': 6,
+        'LTC': 6,
+        'ADA': 15,
+        'DOT': 10
+    };
+    return confirmations[asset.toUpperCase()] || 12;
+}
+
+// =============================================
+// 5. calculateTransactionSize - UTXO SIZE CALCULATOR
+// =============================================
+
+function calculateTransactionSize(inputCount, outputCount) {
+    const baseSize = 10;
+    const inputSize = 148;
+    const outputSize = 34;
+    return baseSize + (inputCount * inputSize) + (outputCount * outputSize);
+}
+
+// =============================================
+// 6. estimateGasForAsset - COMPLETE REWRITE
 // =============================================
 
 async function estimateGasForAsset(asset, toAddress, amount, config) {
     try {
         const assetUpper = asset.toUpperCase();
-        
-        // Default gas estimate
         let gasEstimate = {
             fee: 0,
             gasUsed: 21000,
@@ -35954,15 +36075,13 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
             maxFeePerGas: null,
             maxPriorityFeePerGas: null
         };
-        
         console.log(`[GAS ESTIMATE] Estimating gas for ${assetUpper} to ${toAddress}...`);
 
-        // Validate address - NOW THIS WORKS
+        // Validate address before proceeding
         if (!validateAddress(assetUpper, toAddress, config)) {
             throw new Error(`Invalid destination address for ${assetUpper}`);
         }
 
-        // Validate config
         if (!config || !config.type) {
             console.error(`[GAS ESTIMATE] Missing config for ${assetUpper}`);
             return null;
@@ -36048,7 +36167,6 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                 console.log(`[GAS ESTIMATE] ${assetUpper} gas estimate: ${gasEstimate.fee} native (Gas Used: ${gasLimit}, Price: ${gasPriceInGwei || 'N/A'} Gwei)`);
                 break;
             }
-            
             case 'solana': {
                 try {
                     const connection = new Connection(config.rpc, 'confirmed');
@@ -36099,7 +36217,6 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                 }
                 break;
             }
-            
             case 'utxo': {
                 try {
                     const assetLower = assetUpper.toLowerCase();
@@ -36175,7 +36292,6 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                 }
                 break;
             }
-            
             case 'tron': {
                 try {
                     const tronWeb = new TronWeb({ fullHost: config.rpc });
@@ -36208,7 +36324,6 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                 }
                 break;
             }
-            
             default: {
                 gasEstimate = {
                     fee: 0.0001,
@@ -36220,14 +36335,12 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
             }
         }
 
-        // Ensure fee is always a valid number
         if (typeof gasEstimate.fee !== 'number' || isNaN(gasEstimate.fee)) {
             console.warn(`[GAS ESTIMATE] Invalid fee detected, resetting to 0`);
             gasEstimate.fee = 0;
         }
 
         return gasEstimate;
-        
     } catch (err) {
         console.error(`[GAS ESTIMATE] Failed to estimate gas for ${asset}:`, err.message);
         return null;
@@ -36235,7 +36348,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
 }
 
 // =============================================
-// 11. buildAndSignTransaction - COMPLETE REWRITE
+// 7. buildAndSignTransaction - COMPLETE REWRITE
 // =============================================
 
 async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, privateKey, gasEstimate, nonce, config) {
@@ -36245,16 +36358,14 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
         let txHash = null;
         let explorerUrl = null;
         let signingAddress = fromAddress;
-        
         console.log(`[SIGN TX] Building transaction for ${assetUpper} from ${fromAddress} to ${toAddress}...`);
 
-        // Validate addresses - NOW THIS WORKS
+        // Validate addresses
         if (!validateAddress(assetUpper, fromAddress, config) || 
             !validateAddress(assetUpper, toAddress, config)) {
             throw new Error(`Invalid address for ${assetUpper}`);
         }
 
-        // Extract gas values safely
         const gasFee = typeof gasEstimate?.fee === 'number' ? gasEstimate.fee : 0;
         const gasPrice = typeof gasEstimate?.gasPrice === 'number' ? gasEstimate.gasPrice : 0;
         const gasUsed = typeof gasEstimate?.gasUsed === 'number' ? gasEstimate.gasUsed : 21000;
@@ -36333,17 +36444,300 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
             }
 
             case 'solana': {
-                // ... Solana implementation (same as your original)
+                const connection = new Connection(config.rpc, 'confirmed');
+                
+                let keypair;
+                try {
+                    if (privateKey.length === 128) {
+                        const privateKeyBuffer = Buffer.from(privateKey, 'hex');
+                        keypair = Keypair.fromSecretKey(privateKeyBuffer);
+                    } else if (privateKey.length === 64) {
+                        const decoded = bs58.decode(privateKey);
+                        keypair = Keypair.fromSecretKey(decoded);
+                    } else if (privateKey.includes('[')) {
+                        const arr = JSON.parse(privateKey);
+                        keypair = Keypair.fromSecretKey(new Uint8Array(arr));
+                    } else {
+                        const decoded = Buffer.from(privateKey, 'base64');
+                        keypair = Keypair.fromSecretKey(decoded);
+                    }
+                } catch (err) {
+                    console.error('[SIGN TX] Failed to parse Solana private key:', err.message);
+                    throw new Error('Invalid Solana private key format');
+                }
+
+                const keypairAddress = keypair.publicKey.toBase58();
+                if (keypairAddress !== fromAddress) {
+                    console.warn(`[SIGN TX] ⚠️ Solana address mismatch: Keypair=${keypairAddress}, From=${fromAddress}`);
+                    signingAddress = keypairAddress;
+                }
+
+                const toPubkey = new PublicKey(toAddress);
+                const fromPubkey = new PublicKey(fromAddress);
+                const lamports = BigInt(Math.floor(parseFloat(amount) * 1e9));
+
+                const instruction = SystemProgram.transfer({
+                    fromPubkey: fromPubkey,
+                    toPubkey: toPubkey,
+                    lamports: lamports
+                });
+
+                const { blockhash, lastValidBlockHeight } = await withRetry(
+                    () => connection.getLatestBlockhash('confirmed'),
+                    3,
+                    1000
+                );
+
+                const transaction = new Transaction({
+                    feePayer: fromPubkey,
+                    recentBlockhash: blockhash,
+                    lastValidBlockHeight: lastValidBlockHeight
+                });
+
+                transaction.add(instruction);
+                transaction.sign(keypair);
+
+                const signature = transaction.signatures[0];
+                txHash = bs58.encode(signature.signature);
+                
+                signedTx = transaction.serialize().toString('base64');
+                explorerUrl = getExplorerUrl(assetUpper, txHash);
+
+                console.log(`[SIGN TX] Solana transaction signed. Hash: ${txHash}`);
                 break;
             }
 
             case 'utxo': {
-                // ... UTXO implementation (same as your original)
+                const { ECPair, Psbt, address } = require('bitcoinjs-lib');
+                
+                let network;
+                let assetLower = assetUpper.toLowerCase();
+
+                switch (assetUpper) {
+                    case 'BTC':
+                        network = bitcoin.networks.bitcoin;
+                        break;
+                    case 'LTC':
+                        network = {
+                            messagePrefix: '\x19Litecoin Signed Message:\n',
+                            bech32: 'ltc',
+                            bip32: { public: 0x019da462, private: 0x019d9cfe },
+                            pubKeyHash: 0x30,
+                            scriptHash: 0x32,
+                            wif: 0xb0
+                        };
+                        break;
+                    case 'DOGE':
+                        network = {
+                            messagePrefix: '\x19Dogecoin Signed Message:\n',
+                            bech32: 'doge',
+                            bip32: { public: 0x02facafd, private: 0x02fac398 },
+                            pubKeyHash: 0x1e,
+                            scriptHash: 0x16,
+                            wif: 0x9e
+                        };
+                        break;
+                    default:
+                        throw new Error(`Unsupported UTXO asset: ${assetUpper}`);
+                }
+
+                const privateKeyBuffer = Buffer.from(privateKey, 'hex');
+                const keyPair = ECPair.fromPrivateKey(privateKeyBuffer, { network });
+
+                console.log(`[SIGN TX] Fetching UTXOs for ${fromAddress}...`);
+                
+                let utxos = [];
+                const utxoSources = [
+                    async () => {
+                        const response = await withRetry(
+                            () => axios.get(`https://api.blockchair.com/${assetLower}/dashboards/address/${fromAddress}`, { timeout: 10000 }),
+                            2,
+                            1000
+                        );
+                        if (response.data?.data?.[fromAddress]) {
+                            return response.data.data[fromAddress].utxo || [];
+                        }
+                        return [];
+                    },
+                    async () => {
+                        const response = await withRetry(
+                            () => axios.get(`https://blockstream.info/api/address/${fromAddress}/utxo`, { timeout: 10000 }),
+                            2,
+                            1000
+                        );
+                        return response.data || [];
+                    }
+                ];
+
+                for (const source of utxoSources) {
+                    try {
+                        utxos = await source();
+                        if (utxos.length > 0) break;
+                    } catch (err) {
+                        console.warn(`[SIGN TX] UTXO source failed:`, err.message);
+                    }
+                }
+
+                if (utxos.length === 0) {
+                    throw new Error(`No UTXOs found for address ${fromAddress}`);
+                }
+
+                console.log(`[SIGN TX] Found ${utxos.length} UTXOs`);
+
+                const amountInSatoshis = BigInt(Math.floor(parseFloat(amount) * 1e8));
+                const feeInSatoshis = BigInt(Math.floor(gasFee * 1e8));
+                const required = amountInSatoshis + feeInSatoshis;
+
+                let selectedUtxos = [];
+                let totalSelected = 0n;
+                const sortedUtxos = [...utxos].sort((a, b) => b.value - a.value);
+
+                for (const utxo of sortedUtxos) {
+                    if (totalSelected >= required) break;
+                    selectedUtxos.push(utxo);
+                    totalSelected += BigInt(utxo.value);
+                }
+
+                if (totalSelected < required) {
+                    throw new Error(`Insufficient UTXO balance. Available: ${totalSelected}, Required: ${required}`);
+                }
+
+                console.log(`[SIGN TX] Selected ${selectedUtxos.length} UTXOs, total: ${totalSelected} satoshis`);
+
+                const psbt = new Psbt({ network });
+
+                for (const utxo of selectedUtxos) {
+                    let scriptType = 'legacy';
+                    if (utxo.script_hex) {
+                        if (utxo.script_hex.startsWith('0014')) {
+                            scriptType = 'segwit';
+                        } else if (utxo.script_hex.startsWith('0020')) {
+                            scriptType = 'taproot';
+                        } else if (utxo.script_hex.startsWith('a914')) {
+                            scriptType = 'p2sh';
+                        }
+                    }
+                    
+                    let txHex = null;
+                    if (scriptType === 'legacy' || scriptType === 'p2sh') {
+                        try {
+                            const txResponse = await withRetry(
+                                () => axios.get(`https://api.blockchair.com/${assetLower}/raw/transaction/${utxo.transaction_hash}`, { timeout: 10000 }),
+                                2,
+                                1000
+                            );
+                            if (txResponse.data?.data?.[utxo.transaction_hash]) {
+                                txHex = txResponse.data.data[utxo.transaction_hash].raw_transaction;
+                            }
+                        } catch (err) {
+                            console.warn(`[SIGN TX] Failed to fetch tx hex:`, err.message);
+                        }
+                    }
+
+                    const inputData = {
+                        hash: utxo.transaction_hash,
+                        index: utxo.index
+                    };
+
+                    if (txHex) {
+                        inputData.nonWitnessUtxo = Buffer.from(txHex, 'hex');
+                    } else {
+                        const script = utxo.script_hex || '76a914000000000000000000000000000000000000000088ac';
+                        inputData.witnessUtxo = {
+                            script: Buffer.from(script, 'hex'),
+                            value: utxo.value
+                        };
+                    }
+
+                    psbt.addInput(inputData);
+                }
+
+                const toScript = bitcoin.address.toOutputScript(toAddress, network);
+                psbt.addOutput({
+                    script: toScript,
+                    value: Number(amountInSatoshis)
+                });
+
+                const changeAmount = Number(totalSelected - amountInSatoshis - feeInSatoshis);
+                if (changeAmount > 546) {
+                    const changeScript = bitcoin.address.toOutputScript(fromAddress, network);
+                    psbt.addOutput({
+                        script: changeScript,
+                        value: changeAmount
+                    });
+                }
+
+                for (let i = 0; i < selectedUtxos.length; i++) {
+                    psbt.signInput(i, keyPair);
+                }
+
+                psbt.finalizeAllInputs();
+
+                const tx = psbt.extractTransaction();
+                signedTx = tx.toHex();
+                txHash = tx.getId();
+                explorerUrl = getExplorerUrl(assetUpper, txHash);
+
+                console.log(`[SIGN TX] UTXO transaction signed. Hash: ${txHash}`);
                 break;
             }
 
             case 'tron': {
-                // ... TRON implementation (same as your original)
+                const tronWeb = new TronWeb({
+                    fullHost: config.rpc,
+                    privateKey: privateKey
+                });
+
+                const tronAddress = tronWeb.address.fromPrivateKey(privateKey);
+                if (tronAddress.toLowerCase() !== fromAddress.toLowerCase()) {
+                    console.warn(`[SIGN TX] ⚠️ TRON address mismatch: Derived=${tronAddress}, From=${fromAddress}`);
+                    signingAddress = tronAddress;
+                }
+
+                let transaction;
+                let unsignedTx;
+
+                if (config.contract) {
+                    console.log(`[SIGN TX] TRC-20 transfer detected. Contract: ${config.contract}`);
+                    const contract = await tronWeb.contract().at(config.contract);
+                    const decimals = config.decimals || 6;
+                    const amountWithDecimals = BigInt(Math.floor(parseFloat(amount) * 10 ** decimals));
+
+                    const parameters = [
+                        { type: 'address', value: toAddress },
+                        { type: 'uint256', value: amountWithDecimals.toString() }
+                    ];
+                    
+                    const functionSelector = 'transfer(address,uint256)';
+                    unsignedTx = await tronWeb.transactionBuilder.triggerConstantContract(
+                        config.contract,
+                        functionSelector,
+                        parameters,
+                        fromAddress,
+                        {
+                            feeLimit: 1_000_000_000,
+                            callValue: 0
+                        }
+                    );
+                    
+                    const signed = await tronWeb.trx.sign(unsignedTx.transaction || unsignedTx, privateKey);
+                    transaction = signed;
+                    txHash = await tronWeb.trx.getTransactionID(signed);
+                } else {
+                    const amountSun = BigInt(Math.floor(parseFloat(amount) * 1_000_000));
+                    unsignedTx = await tronWeb.transactionBuilder.sendTrx(
+                        toAddress,
+                        amountSun.toString(),
+                        fromAddress
+                    );
+
+                    const signed = await tronWeb.trx.sign(unsignedTx, privateKey);
+                    transaction = signed;
+                    txHash = await tronWeb.trx.getTransactionID(signed);
+                }
+
+                explorerUrl = getExplorerUrl(assetUpper, txHash);
+                console.log(`[SIGN TX] TRON transaction signed. Hash: ${txHash}`);
                 break;
             }
 
@@ -36353,7 +36747,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
         }
 
         return { signedTx, txHash, explorerUrl, fromAddress: signingAddress };
-        
     } catch (err) {
         console.error(`[SIGN TX] Failed to build transaction for ${asset}:`, err.message);
         return null;
@@ -36361,7 +36754,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 }
 
 // =============================================
-// 12. broadcastTransactionToChain - COMPLETE REWRITE
+// 8. broadcastTransactionToChain - COMPLETE REWRITE
 // =============================================
 
 async function broadcastTransactionToChain(asset, signedTx, config) {
@@ -36372,6 +36765,10 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
 
         switch (config.type) {
             case 'evm': {
+                if (!config.rpc) {
+                    console.error(`[BROADCAST] Missing RPC URL for ${assetUpper}`);
+                    return { error: 'Missing RPC URL' };
+                }
                 const provider = new ethers.JsonRpcProvider(config.rpc);
                 const txResponse = await withRetry(
                     () => provider.broadcastTransaction(signedTx),
@@ -36388,17 +36785,114 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
             }
 
             case 'solana': {
-                // ... Solana implementation
+                const connection = new Connection(config.rpc, 'confirmed');
+                const txBuffer = Buffer.from(signedTx, 'base64');
+
+                const txid = await withRetry(
+                    () => connection.sendRawTransaction(txBuffer, {
+                        skipPreflight: false,
+                        preflightCommitment: 'confirmed',
+                        maxRetries: 3
+                    }),
+                    3,
+                    1000
+                );
+
+                result = {
+                    txHash: txid,
+                    blockNumber: 0,
+                    status: 'pending'
+                };
+                console.log(`[BROADCAST] Solana transaction broadcasted. Hash: ${result.txHash}`);
                 break;
             }
 
             case 'utxo': {
-                // ... UTXO implementation
+                const assetLower = assetUpper.toLowerCase();
+                const broadcastEndpoints = {
+                    'btc': [
+                        'https://api.blockchair.com/bitcoin/push/transaction',
+                        'https://blockstream.info/api/tx'
+                    ],
+                    'doge': [
+                        'https://api.blockchair.com/dogecoin/push/transaction'
+                    ],
+                    'ltc': [
+                        'https://api.blockchair.com/litecoin/push/transaction'
+                    ]
+                };
+
+                const endpoints = broadcastEndpoints[assetLower] || [];
+                let broadcastSuccess = false;
+
+                for (const endpoint of endpoints) {
+                    try {
+                        let response;
+                        if (endpoint.includes('blockchair')) {
+                            response = await withRetry(
+                                () => axios.post(endpoint, { data: signedTx }, {
+                                    headers: { 'Content-Type': 'application/json' },
+                                    timeout: 15000
+                                }),
+                                2,
+                                1000
+                            );
+                        } else {
+                            response = await withRetry(
+                                () => axios.post(endpoint, signedTx, {
+                                    headers: { 'Content-Type': 'text/plain' },
+                                    timeout: 15000
+                                }),
+                                2,
+                                1000
+                            );
+                        }
+
+                        const txHash = response.data?.data?.transaction_hash || 
+                                      response.data?.transaction_hash || 
+                                      response.data || 
+                                      (typeof response.data === 'string' ? response.data : null);
+
+                        if (txHash) {
+                            result = {
+                                txHash: txHash,
+                                blockNumber: 0,
+                                status: 'pending'
+                            };
+                            broadcastSuccess = true;
+                            console.log(`[BROADCAST] UTXO transaction broadcasted via ${endpoint}. Hash: ${result.txHash}`);
+                            break;
+                        }
+                    } catch (err) {
+                        console.warn(`[BROADCAST] Broadcast failed for ${endpoint}:`, err.message);
+                    }
+                }
+
+                if (!broadcastSuccess) {
+                    throw new Error('All broadcast endpoints failed');
+                }
                 break;
             }
 
             case 'tron': {
-                // ... TRON implementation
+                const tronWeb = new TronWeb({ fullHost: config.rpc });
+                const broadcastResult = await withRetry(
+                    () => tronWeb.trx.sendRawTransaction(signedTx),
+                    3,
+                    1000
+                );
+
+                if (broadcastResult && broadcastResult.result) {
+                    const txid = broadcastResult.txid || broadcastResult.transaction_id;
+                    result = {
+                        txHash: txid,
+                        blockNumber: 0,
+                        status: 'pending'
+                    };
+                    console.log(`[BROADCAST] TRON transaction broadcasted. Hash: ${result.txHash}`);
+                } else {
+                    throw new Error(`Broadcast failed: ${broadcastResult?.message || 'Unknown error'}`);
+                }
                 break;
             }
 
@@ -36409,7 +36903,6 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
         }
 
         return result;
-        
     } catch (err) {
         console.error(`[BROADCAST] Failed to broadcast transaction for ${asset}:`, err.message);
         return { error: err.message };
@@ -36417,7 +36910,7 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
 }
 
 // =============================================
-// 13. checkTransactionOnBlockchain - COMPLETE REWRITE
+// 9. checkTransactionOnBlockchain - COMPLETE REWRITE
 // =============================================
 
 async function checkTransactionOnBlockchain(txHash, asset, chainId) {
@@ -36434,23 +36927,176 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
 
     switch (assetConfig.type) {
         case 'evm': {
-            // ... EVM implementation
-            break;
+            try {
+                const provider = new ethers.JsonRpcProvider(assetConfig.rpc);
+                const tx = await withRetry(() => provider.getTransaction(txHash), 3, 1000);
+                if (!tx) {
+                    console.warn(`[CHECK TX] Transaction not found: ${txHash}`);
+                    return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
+                }
+                const receipt = await withRetry(() => provider.getTransactionReceipt(txHash), 3, 1000);
+                if (!receipt) {
+                    console.warn(`[CHECK TX] Receipt not found for: ${txHash}`);
+                    return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Receipt not found' };
+                }
+                if (receipt.status !== 1) {
+                    console.warn(`[CHECK TX] Transaction failed: ${txHash}`);
+                    return { confirmed: false, confirmations: 0, requiredConfirmations: required, failed: true, error: 'Transaction failed' };
+                }
+                const currentBlock = await withRetry(() => provider.getBlockNumber(), 3, 1000);
+                const confirmations = currentBlock - receipt.blockNumber;
+                const status = {
+                    confirmed: confirmations >= required,
+                    confirmations: confirmations,
+                    requiredConfirmations: required,
+                    blockNumber: receipt.blockNumber,
+                    blockHash: receipt.blockHash,
+                    status: 'success',
+                    to: receipt.to,
+                    from: tx.from,
+                    value: tx.value ? ethers.formatEther(tx.value) : '0',
+                    gasUsed: receipt.gasUsed ? receipt.gasUsed.toString() : '0'
+                };
+                console.log(`[CHECK TX] ${assetUpper} tx ${txHash} confirmations: ${confirmations}/${required}`);
+                return status;
+            } catch (error) {
+                console.error('[CHECK TX] EVM check error:', error.message);
+                return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
+            }
         }
 
         case 'solana': {
-            // ... Solana implementation
-            break;
+            try {
+                const connection = new Connection(assetConfig.rpc, 'confirmed');
+                const status = await withRetry(
+                    () => connection.getSignatureStatus(txHash, {
+                        searchTransactionHistory: true
+                    }),
+                    3,
+                    1000
+                );
+
+                if (!status || !status.value) {
+                    console.warn(`[CHECK TX] Solana tx not found: ${txHash}`);
+                    return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
+                }
+
+                const txStatus = status.value;
+                const confirmations = txStatus.confirmations || 0;
+                
+                const isConfirmed = txStatus.confirmationStatus === 'finalized' || 
+                                  txStatus.confirmationStatus === 'confirmed' ||
+                                  confirmations >= required;
+
+                const result = {
+                    confirmed: isConfirmed,
+                    confirmations: confirmations,
+                    requiredConfirmations: required,
+                    status: txStatus.confirmationStatus || 'pending',
+                    slot: txStatus.slot || 0,
+                    err: txStatus.err || null
+                };
+
+                console.log(`[CHECK TX] Solana tx ${txHash} confirmations: ${confirmations}/${required}`);
+                return result;
+            } catch (error) {
+                console.error('[CHECK TX] Solana check error:', error.message);
+                return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
+            }
         }
 
         case 'tron': {
-            // ... TRON implementation
-            break;
+            try {
+                const tronWeb = new TronWeb({ fullHost: assetConfig.rpc });
+                const tx = await withRetry(() => tronWeb.trx.getTransactionInfo(txHash), 3, 1000);
+
+                if (!tx || !tx.id) {
+                    console.warn(`[CHECK TX] TRON tx not found: ${txHash}`);
+                    return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
+                }
+
+                const isConfirmed = !!tx.blockNumber;
+                const isSuccess = tx.receipt?.result === 'SUCCESS';
+
+                const result = {
+                    confirmed: isConfirmed && isSuccess,
+                    confirmations: isConfirmed ? 1 : 0,
+                    requiredConfirmations: required,
+                    blockNumber: tx.blockNumber,
+                    status: isSuccess ? 'success' : 'failed',
+                    to: tx.to,
+                    from: tx.from,
+                    amount: tx.amount ? tx.amount / 1000000 : 0,
+                    failed: !isSuccess
+                };
+
+                console.log(`[CHECK TX] TRON tx ${txHash} confirmed: ${result.confirmed}`);
+                return result;
+            } catch (error) {
+                console.error('[CHECK TX] TRON check error:', error.message);
+                return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
+            }
         }
 
         case 'utxo': {
-            // ... UTXO implementation
-            break;
+            try {
+                const assetLower = assetUpper.toLowerCase();
+                const explorerMap = {
+                    'btc': [
+                        'https://api.blockchair.com/bitcoin',
+                        'https://blockstream.info/api'
+                    ],
+                    'doge': [
+                        'https://api.blockchair.com/dogecoin'
+                    ],
+                    'ltc': [
+                        'https://api.blockchair.com/litecoin'
+                    ]
+                };
+
+                const endpoints = explorerMap[assetLower] || [];
+                let txData = null;
+
+                for (const baseUrl of endpoints) {
+                    try {
+                        const response = await withRetry(
+                            () => axios.get(`${baseUrl}/dashboards/transaction/${txHash}`, { timeout: 10000 }),
+                            2,
+                            1000
+                        );
+                        if (response.data?.data?.[txHash]) {
+                            txData = response.data.data[txHash];
+                            break;
+                        }
+                    } catch (err) {
+                        console.warn(`[CHECK TX] Explorer ${baseUrl} failed:`, err.message);
+                    }
+                }
+
+                if (!txData) {
+                    console.warn(`[CHECK TX] UTXO tx not found: ${txHash}`);
+                    return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
+                }
+
+                const confirmations = txData.confirmations || 0;
+
+                const result = {
+                    confirmed: confirmations >= required,
+                    confirmations: confirmations,
+                    requiredConfirmations: required,
+                    blockHash: txData.block_hash,
+                    blockId: txData.block_id,
+                    status: confirmations > 0 ? 'success' : 'pending',
+                    value: txData.output_total || 0,
+                    fee: txData.fee || 0
+                };
+
+                console.log(`[CHECK TX] UTXO tx ${txHash} confirmations: ${confirmations}/${required}`);
+                return result;
+            } catch (error) {
+                console.error('[CHECK TX] UTXO check error:', error.message);
+                return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
+            }
         }
 
         default: {
