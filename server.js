@@ -35237,25 +35237,6 @@ console.log('   - GET /api/admin/wallet/* (admin endpoints)');
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
 // getBlockchainBalance - Fetch REAL blockchain balance for any asset
 // Supports: EVM (ETH, BSC, Polygon, etc.), Solana, TRON, UTXO (BTC, DOGE, LTC)
@@ -35265,28 +35246,32 @@ async function getBlockchainBalance(asset, addresses, config) {
         const assetUpper = asset.toUpperCase();
         let totalConfirmed = 0;
         let totalPending = 0;
-        
+        const logPrefix = `[BALANCE:${assetUpper}]`;
+
         // If addresses is a string, convert to array
         if (typeof addresses === 'string') {
             addresses = [addresses];
         }
-        
+
         // If no addresses provided, return zero
         if (!addresses || addresses.length === 0) {
+            console.log(`${logPrefix} No addresses provided.`);
             return { confirmed: 0, pending: 0, total: 0 };
         }
 
-        console.log(`🔍 Fetching ${assetUpper} balance for ${addresses.length} address(es)...`);
+        console.log(`${logPrefix} Fetching balance for ${addresses.length} address(es)...`);
 
         switch (config.type) {
             case 'evm': {
-                // EVM chains: Ethereum, BSC, Polygon, Avalanche, etc.
+                // EVM chains: Ethereum, BSC, Polygon, etc.
                 const provider = new ethers.JsonRpcProvider(config.rpc);
-                
+                console.log(`${logPrefix} Using RPC: ${config.rpc}`);
+
                 for (const address of addresses) {
                     try {
                         let balance = 0;
-                        
+                        let balanceWei;
+
                         // Check if it's an ERC-20 token (has contract address)
                         if (config.contract) {
                             const contract = new ethers.Contract(
@@ -35294,23 +35279,25 @@ async function getBlockchainBalance(asset, addresses, config) {
                                 ['function balanceOf(address) view returns (uint256)'],
                                 provider
                             );
-                            const balanceWei = await contract.balanceOf(address);
+                            balanceWei = await contract.balanceOf(address);
                             const decimals = await getTokenDecimals(config.contract, provider);
                             balance = Number(ethers.formatUnits(balanceWei, decimals));
+                            console.log(`${logPrefix} Address ${address} token balance: ${balance} (decimals: ${decimals})`);
                         } else {
                             // Native coin (ETH, BNB, MATIC, etc.)
-                            const balanceWei = await provider.getBalance(address);
+                            balanceWei = await provider.getBalance(address);
                             balance = Number(ethers.formatEther(balanceWei));
+                            console.log(`${logPrefix} Address ${address} native balance: ${balance}`);
                         }
-                        
+
                         totalConfirmed += balance;
                     } catch (err) {
-                        console.warn(`Failed to get EVM balance for ${address}:`, err.message);
+                        console.warn(`${logPrefix} Failed to get EVM balance for ${address}:`, err.message);
                     }
                 }
                 break;
             }
-            
+
             case 'solana': {
                 // Solana blockchain
                 const connection = new Connection(config.rpc);
@@ -35318,14 +35305,16 @@ async function getBlockchainBalance(asset, addresses, config) {
                     try {
                         const pubKey = new PublicKey(address);
                         const balance = await connection.getBalance(pubKey);
-                        totalConfirmed += balance / 1e9; // Convert lamports to SOL
+                        const solBalance = balance / 1e9;
+                        totalConfirmed += solBalance;
+                        console.log(`${logPrefix} Address ${address} SOL balance: ${solBalance}`);
                     } catch (err) {
-                        console.warn(`Failed to get Solana balance for ${address}:`, err.message);
+                        console.warn(`${logPrefix} Failed to get Solana balance for ${address}:`, err.message);
                     }
                 }
                 break;
             }
-            
+
             case 'utxo': {
                 // UTXO chains: Bitcoin, Dogecoin, Litecoin
                 const assetLower = assetUpper.toLowerCase();
@@ -35334,7 +35323,7 @@ async function getBlockchainBalance(asset, addresses, config) {
                     'doge': 'https://api.blockchair.com/dogecoin',
                     'ltc': 'https://api.blockchair.com/litecoin'
                 };
-                
+
                 const baseUrl = explorerMap[assetLower];
                 if (baseUrl) {
                     // Process in batches to avoid URL length limits
@@ -35342,13 +35331,14 @@ async function getBlockchainBalance(asset, addresses, config) {
                     for (let i = 0; i < addresses.length; i += batchSize) {
                         const batch = addresses.slice(i, i + batchSize);
                         const addressParam = batch.join(',');
-                        
+
                         try {
+                            console.log(`${logPrefix} Fetching UTXO data for batch...`);
                             const response = await axios.get(
                                 `${baseUrl}/dashboards/address/${addressParam}`,
                                 { timeout: 15000 }
                             );
-                            
+
                             if (response.data && response.data.data) {
                                 for (const addr of batch) {
                                     const data = response.data.data[addr];
@@ -35359,56 +35349,62 @@ async function getBlockchainBalance(asset, addresses, config) {
                                         const divisor = assetLower === 'btc' ? 1e8 : 
                                                        assetLower === 'doge' ? 1e8 : 
                                                        assetLower === 'ltc' ? 1e8 : 1e8;
-                                        totalConfirmed += balanceInAsset / divisor;
-                                        
+                                        const confirmed = balanceInAsset / divisor;
+                                        totalConfirmed += confirmed;
+
                                         // Pending balance (unconfirmed)
                                         if (data.address.received && data.address.spent) {
                                             const pending = data.address.received - data.address.spent - data.address.balance;
                                             totalPending += pending / divisor;
                                         }
+                                        console.log(`${logPrefix} Address ${addr} UTXO confirmed balance: ${confirmed}`);
                                     }
                                 }
                             }
                         } catch (err) {
-                            console.warn(`Failed to get UTXO balance for batch:`, err.message);
+                            console.warn(`${logPrefix} Failed to get UTXO balance for batch:`, err.message);
                         }
                     }
                 } else {
-                    console.warn(`No UTXO explorer for ${assetUpper}`);
+                    console.warn(`${logPrefix} No UTXO explorer for ${assetUpper}`);
                 }
                 break;
             }
-            
+
             case 'tron': {
                 // TRON blockchain
                 const tronWeb = new TronWeb({ fullHost: config.rpc });
+                console.log(`${logPrefix} Using TRON RPC: ${config.rpc}`);
                 for (const address of addresses) {
                     try {
                         let balance = 0;
-                        
+
                         // Check if it's a TRC-20 token
                         if (config.contract) {
                             const contract = await tronWeb.contract().at(config.contract);
                             const balanceWei = await contract.balanceOf(address).call();
                             const decimals = config.decimals || 6;
                             balance = balanceWei / 10 ** decimals;
+                            console.log(`${logPrefix} Address ${address} TRC-20 balance: ${balance}`);
                         } else {
                             // Native TRX
                             const balanceSun = await tronWeb.trx.getBalance(address);
                             balance = balanceSun / 1e6; // Convert SUN to TRX
+                            console.log(`${logPrefix} Address ${address} TRX balance: ${balance}`);
                         }
-                        
+
                         totalConfirmed += balance;
                     } catch (err) {
-                        console.warn(`Failed to get TRON balance for ${address}:`, err.message);
+                        console.warn(`${logPrefix} Failed to get TRON balance for ${address}:`, err.message);
                     }
                 }
                 break;
             }
-            
+
             case 'xrp': {
                 // XRP Ledger
                 const client = new xrpl.Client(config.rpc);
+                console.log(`${logPrefix} Connecting to XRP Ledger...`);
                 await client.connect();
                 try {
                     for (const address of addresses) {
@@ -35421,9 +35417,10 @@ async function getBlockchainBalance(asset, addresses, config) {
                             if (accountInfo.result && accountInfo.result.account_data) {
                                 const balance = accountInfo.result.account_data.Balance / 1e6; // drops to XRP
                                 totalConfirmed += balance;
+                                console.log(`${logPrefix} Address ${address} XRP balance: ${balance}`);
                             }
                         } catch (err) {
-                            console.warn(`Failed to get XRP balance for ${address}:`, err.message);
+                            console.warn(`${logPrefix} Failed to get XRP balance for ${address}:`, err.message);
                         }
                     }
                 } finally {
@@ -35431,18 +35428,14 @@ async function getBlockchainBalance(asset, addresses, config) {
                 }
                 break;
             }
-            
+
             case 'cardano': {
                 // Cardano blockchain
-                // Using Blockfrost API or similar
-                // This is a simplified implementation
                 for (const address of addresses) {
                     try {
-                        // You would need a Blockfrost API key or similar service
-                        // For now, we'll use a placeholder
                         const response = await axios.get(
                             `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}`,
-                            { 
+                            {
                                 headers: { 'project_id': process.env.BLOCKFROST_API_KEY || '' },
                                 timeout: 10000
                             }
@@ -35450,56 +35443,60 @@ async function getBlockchainBalance(asset, addresses, config) {
                         if (response.data && response.data.amount) {
                             const lovelace = response.data.amount.find(a => a.unit === 'lovelace');
                             if (lovelace) {
-                                totalConfirmed += lovelace.quantity / 1e6; // lovelace to ADA
+                                const adaBalance = lovelace.quantity / 1e6;
+                                totalConfirmed += adaBalance;
+                                console.log(`${logPrefix} Address ${address} ADA balance: ${adaBalance}`);
                             }
                         }
                     } catch (err) {
-                        console.warn(`Failed to get Cardano balance for ${address}:`, err.message);
+                        console.warn(`${logPrefix} Failed to get Cardano balance for ${address}:`, err.message);
                     }
                 }
                 break;
             }
-            
+
             case 'polkadot': {
                 // Polkadot blockchain
                 try {
                     const wsProvider = new WsProvider(config.rpc || 'wss://rpc.polkadot.io');
                     const api = await ApiPromise.create({ provider: wsProvider });
+                    console.log(`${logPrefix} Connected to Polkadot.`);
                     try {
                         for (const address of addresses) {
                             try {
                                 const { data: balance } = await api.query.system.account(address);
                                 const freeBalance = balance.free.toNumber() / 1e10; // Planck to DOT
                                 totalConfirmed += freeBalance;
+                                console.log(`${logPrefix} Address ${address} DOT balance: ${freeBalance}`);
                             } catch (err) {
-                                console.warn(`Failed to get Polkadot balance for ${address}:`, err.message);
+                                console.warn(`${logPrefix} Failed to get Polkadot balance for ${address}:`, err.message);
                             }
                         }
                     } finally {
                         await api.disconnect();
                     }
                 } catch (err) {
-                    console.warn('Failed to connect to Polkadot:', err.message);
+                    console.warn(`${logPrefix} Failed to connect to Polkadot:`, err.message);
                 }
                 break;
             }
-            
+
             default: {
-                console.warn(`Unsupported asset type for balance check: ${config.type}`);
+                console.warn(`${logPrefix} Unsupported asset type for balance check: ${config.type}`);
                 return { confirmed: 0, pending: 0, total: 0 };
             }
         }
 
-        console.log(`✅ ${assetUpper} balance: ${totalConfirmed.toFixed(8)} (confirmed), ${totalPending.toFixed(8)} (pending)`);
+        console.log(`${logPrefix} ✅ Balance: ${totalConfirmed.toFixed(8)} (confirmed), ${totalPending.toFixed(8)} (pending)`);
 
         return {
             confirmed: totalConfirmed,
             pending: totalPending,
             total: totalConfirmed + totalPending
         };
-        
+
     } catch (err) {
-        console.error(`Failed to get blockchain balance for ${asset}:`, err.message);
+        console.error(`[BALANCE] Failed to get blockchain balance for ${asset}:`, err.message);
         return { confirmed: 0, pending: 0, total: 0 };
     }
 }
@@ -35515,9 +35512,10 @@ async function getTokenDecimals(contractAddress, provider) {
             provider
         );
         const decimals = await contract.decimals();
+        console.log(`[DECIMALS] Contract ${contractAddress} decimals: ${decimals}`);
         return decimals;
     } catch (err) {
-        console.warn(`Failed to get token decimals for ${contractAddress}:`, err.message);
+        console.warn(`[DECIMALS] Failed to get token decimals for ${contractAddress}:`, err.message);
         return 18; // Default for most ERC-20 tokens
     }
 }
@@ -35533,18 +35531,19 @@ async function getRealTimeAssetBalances() {
     try {
         const balances = [];
         const assets = Object.keys(ASSET_NETWORK_MAP);
-        
+        console.log('[ASSET BALANCES] Fetching balances for all assets...');
+
         for (const asset of assets) {
             const addresses = await DepositAddress.find({
                 asset: asset.toLowerCase(),
                 isActive: true
             }).distinct('address');
-            
+
             if (addresses.length > 0) {
                 const config = ASSET_NETWORK_MAP[asset];
                 const balanceResult = await getBlockchainBalance(asset, addresses, config);
                 const price = await getCryptoPrice(asset);
-                
+
                 balances.push({
                     asset: asset,
                     balance: balanceResult.confirmed || 0,
@@ -35552,12 +35551,13 @@ async function getRealTimeAssetBalances() {
                     price: price || 0,
                     addresses: addresses.length
                 });
+                console.log(`[ASSET BALANCES] ${asset}: ${balanceResult.confirmed} (USD: $${(balanceResult.confirmed * (price || 0)).toFixed(2)})`);
             }
         }
-        
+
         return balances;
     } catch (err) {
-        console.error('Failed to get real-time asset balances:', err.message);
+        console.error('[ASSET BALANCES] Failed to get real-time asset balances:', err.message);
         return [];
     }
 }
@@ -35568,7 +35568,8 @@ async function getRealTimeAssetBalances() {
 async function getDepositsPerHourWithHashes(hours) {
     try {
         const startTime = new Date(Date.now() - hours * 60 * 60 * 1000);
-        
+        console.log(`[DEPOSITS/HOUR] Fetching deposits for last ${hours} hours...`);
+
         const result = await Transaction.aggregate([
             {
                 $match: {
@@ -35586,13 +35587,14 @@ async function getDepositsPerHourWithHashes(hours) {
             },
             { $sort: { '_id': 1 } }
         ]);
-        
+
         const labels = result.map(r => `${r._id}:00`);
         const values = result.map(r => r.total);
-        
+        console.log(`[DEPOSITS/HOUR] Found data for ${labels.length} hours.`);
+
         return { labels, values };
     } catch (err) {
-        console.error('Failed to get deposits per hour with hashes:', err.message);
+        console.error('[DEPOSITS/HOUR] Failed to get deposits per hour:', err.message);
         return { labels: [], values: [] };
     }
 }
@@ -35603,7 +35605,8 @@ async function getDepositsPerHourWithHashes(hours) {
 async function getDepositsPerDayWithHashes(days) {
     try {
         const startTime = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-        
+        console.log(`[DEPOSITS/DAY] Fetching deposits for last ${days} days...`);
+
         const result = await Transaction.aggregate([
             {
                 $match: {
@@ -35621,13 +35624,14 @@ async function getDepositsPerDayWithHashes(days) {
             },
             { $sort: { '_id': 1 } }
         ]);
-        
+
         const labels = result.map(r => r._id);
         const values = result.map(r => r.total);
-        
+        console.log(`[DEPOSITS/DAY] Found data for ${labels.length} days.`);
+
         return { labels, values };
     } catch (err) {
-        console.error('Failed to get deposits per day with hashes:', err.message);
+        console.error('[DEPOSITS/DAY] Failed to get deposits per day:', err.message);
         return { labels: [], values: [] };
     }
 }
@@ -35639,34 +35643,36 @@ async function getNetworkDistribution() {
     try {
         const distribution = {};
         const assets = Object.keys(ASSET_NETWORK_MAP);
-        
+        console.log('[DISTRIBUTION] Calculating network distribution...');
+
         for (const asset of assets) {
             const config = ASSET_NETWORK_MAP[asset];
             const network = config.network || 'Unknown';
-            
+
             if (!distribution[network]) {
                 distribution[network] = 0;
             }
-            
+
             const addresses = await DepositAddress.find({
                 asset: asset.toLowerCase(),
                 isActive: true
             }).distinct('address');
-            
+
             if (addresses.length > 0) {
                 const balanceResult = await getBlockchainBalance(asset, addresses, config);
                 const price = await getCryptoPrice(asset);
                 distribution[network] += balanceResult.confirmed * (price || 0);
             }
         }
-        
+
         // Format for chart
         const labels = Object.keys(distribution);
         const values = Object.values(distribution);
-        
+        console.log(`[DISTRIBUTION] Network labels: ${labels.join(', ')}`);
+
         return { labels, values };
     } catch (err) {
-        console.error('Failed to get network distribution:', err.message);
+        console.error('[DISTRIBUTION] Failed to get network distribution:', err.message);
         return { labels: [], values: [] };
     }
 }
@@ -35678,13 +35684,14 @@ async function getAssetDistribution() {
     try {
         const distribution = {};
         const assets = Object.keys(ASSET_NETWORK_MAP);
-        
+        console.log('[DISTRIBUTION] Calculating asset distribution...');
+
         for (const asset of assets) {
             const addresses = await DepositAddress.find({
                 asset: asset.toLowerCase(),
                 isActive: true
             }).distinct('address');
-            
+
             if (addresses.length > 0) {
                 const config = ASSET_NETWORK_MAP[asset];
                 const balanceResult = await getBlockchainBalance(asset, addresses, config);
@@ -35692,35 +35699,22 @@ async function getAssetDistribution() {
                 distribution[asset] = balanceResult.confirmed * (price || 0);
             }
         }
-        
+
         // Format for chart
         const labels = Object.keys(distribution).filter(k => distribution[k] > 0);
         const values = labels.map(k => distribution[k]);
-        
+        console.log(`[DISTRIBUTION] Asset labels: ${labels.join(', ')}`);
+
         return { labels, values };
     } catch (err) {
-        console.error('Failed to get asset distribution:', err.message);
+        console.error('[DISTRIBUTION] Failed to get asset distribution:', err.message);
         return { labels: [], values: [] };
     }
 }
 
 // =============================================
-// 6. getTokenDecimals - Get ERC-20 token decimals
+// 6. getTokenDecimals - Get ERC-20 token decimals (duplicate removed)
 // =============================================
-async function getTokenDecimals(contractAddress, provider) {
-    try {
-        const contract = new ethers.Contract(
-            contractAddress,
-            ['function decimals() view returns (uint8)'],
-            provider
-        );
-        const decimals = await contract.decimals();
-        return decimals;
-    } catch (err) {
-        console.warn(`Failed to get token decimals for ${contractAddress}:`, err.message);
-        return 18; // Default
-    }
-}
 
 // =============================================
 // 7. getCryptoPriceWithChange - Get price with 24h change
@@ -35729,20 +35723,24 @@ async function getCryptoPriceWithChange(asset) {
     try {
         const assetUpper = asset.toUpperCase();
         const coinGeckoId = mapSymbolToCoinGeckoId(assetUpper);
+        console.log(`[PRICE] Fetching price and 24h change for ${assetUpper}...`);
         const response = await axios.get(
             `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd&include_24hr_change=true`,
             { timeout: 5000 }
         );
-        
+
         if (response.data && response.data[coinGeckoId]) {
-            return {
+            const priceData = {
                 price: response.data[coinGeckoId].usd,
                 change24h: response.data[coinGeckoId].usd_24h_change || 0
             };
+            console.log(`[PRICE] ${assetUpper}: $${priceData.price} (24h: ${priceData.change24h}%)`);
+            return priceData;
         }
+        console.warn(`[PRICE] No data found for ${assetUpper}`);
         return { price: null, change24h: 0 };
     } catch (err) {
-        console.warn(`Could not fetch 24h change for ${asset}:`, err.message);
+        console.warn(`[PRICE] Could not fetch 24h change for ${asset}:`, err.message);
         return { price: null, change24h: 0 };
     }
 }
@@ -35825,6 +35823,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
             gasPrice: 0,
             gasUsed: 21000
         };
+        console.log(`[GAS ESTIMATE] Estimating gas for ${assetUpper} to ${toAddress}...`);
 
         switch (config.type) {
             case 'evm': {
@@ -35843,6 +35842,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                     gasPrice: Number(ethers.formatUnits(gasPrice, 'gwei')),
                     gasUsed: gasLimit
                 };
+                console.log(`[GAS ESTIMATE] ${assetUpper} gas estimate: ${gasCost} (Gas Price: ${gasEstimate.gasPrice} Gwei)`);
                 break;
             }
             case 'solana': {
@@ -35867,7 +35867,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
 
         return gasEstimate;
     } catch (err) {
-        console.error(`Failed to estimate gas for ${asset}:`, err.message);
+        console.error(`[GAS ESTIMATE] Failed to estimate gas for ${asset}:`, err.message);
         return null;
     }
 }
@@ -35882,6 +35882,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
         let txHash = null;
         let explorerUrl = null;
         let signingAddress = fromAddress;
+        console.log(`[SIGN TX] Building transaction for ${assetUpper} from ${fromAddress} to ${toAddress}...`);
 
         switch (config.type) {
             case 'evm': {
@@ -35891,7 +35892,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                 // Verify the wallet address matches the from address
                 const walletAddress = wallet.address.toLowerCase();
                 if (walletAddress !== fromAddress.toLowerCase()) {
-                    console.warn(`⚠️ Wallet address mismatch: Wallet=${walletAddress}, From=${fromAddress}`);
+                    console.warn(`[SIGN TX] ⚠️ Wallet address mismatch: Wallet=${walletAddress}, From=${fromAddress}`);
                     signingAddress = walletAddress;
                 }
 
@@ -35920,29 +35921,37 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                         nonce: nonce,
                         chainId: config.chainId
                     };
+                    console.log(`[SIGN TX] ERC-20 transfer detected. Contract: ${config.contract}, Amount: ${amountWei}`);
                 }
 
                 signedTx = await wallet.signTransaction(txData);
                 txHash = ethers.keccak256(signedTx);
                 explorerUrl = getExplorerUrl(assetUpper, txHash);
+                console.log(`[SIGN TX] Transaction signed. Hash: ${txHash}`);
                 break;
             }
             case 'solana': {
+                // Simulated signing for now, replace with actual Solana signing
                 signedTx = `solana_signed_tx_${Date.now()}`;
                 txHash = `solana_tx_${Date.now()}`;
                 explorerUrl = getExplorerUrl(assetUpper, txHash);
+                console.log(`[SIGN TX] Solana transaction signed (simulated).`);
                 break;
             }
             case 'utxo': {
+                // Simulated signing for now, replace with actual UTXO signing
                 signedTx = `utxo_signed_tx_${Date.now()}`;
                 txHash = `utxo_tx_${Date.now()}`;
                 explorerUrl = getExplorerUrl(assetUpper, txHash);
+                console.log(`[SIGN TX] UTXO transaction signed (simulated).`);
                 break;
             }
             case 'tron': {
+                // Simulated signing for now, replace with actual TRON signing
                 signedTx = `tron_signed_tx_${Date.now()}`;
                 txHash = `tron_tx_${Date.now()}`;
                 explorerUrl = getExplorerUrl(assetUpper, txHash);
+                console.log(`[SIGN TX] TRON transaction signed (simulated).`);
                 break;
             }
             default: {
@@ -35952,7 +35961,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 
         return { signedTx, txHash, explorerUrl, fromAddress: signingAddress };
     } catch (err) {
-        console.error(`Failed to build transaction for ${asset}:`, err.message);
+        console.error(`[SIGN TX] Failed to build transaction for ${asset}:`, err.message);
         return null;
     }
 }
@@ -35964,16 +35973,18 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
     try {
         const assetUpper = asset.toUpperCase();
         let result = null;
+        console.log(`[BROADCAST] Broadcasting ${assetUpper} transaction...`);
 
         switch (config.type) {
             case 'evm': {
                 const provider = new ethers.JsonRpcProvider(config.rpc);
                 const txResponse = await provider.broadcastTransaction(signedTx);
                 result = {
-                    txHash: txResponse.hash,  // ✅ REAL blockchain hash
+                    txHash: txResponse.hash,
                     blockNumber: txResponse.blockNumber,
                     status: 'pending'
                 };
+                console.log(`[BROADCAST] EVM transaction broadcasted. Hash: ${result.txHash}`);
                 break;
             }
             case 'solana': {
@@ -35982,6 +35993,7 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
                     blockNumber: 0,
                     status: 'pending'
                 };
+                console.log(`[BROADCAST] Solana transaction broadcasted (simulated).`);
                 break;
             }
             case 'utxo': {
@@ -35990,6 +36002,7 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
                     blockNumber: 0,
                     status: 'pending'
                 };
+                console.log(`[BROADCAST] UTXO transaction broadcasted (simulated).`);
                 break;
             }
             case 'tron': {
@@ -35998,16 +36011,18 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
                     blockNumber: 0,
                     status: 'pending'
                 };
+                console.log(`[BROADCAST] TRON transaction broadcasted (simulated).`);
                 break;
             }
             default: {
                 result = null;
+                console.error(`[BROADCAST] Unsupported asset type: ${config.type}`);
             }
         }
 
         return result;
     } catch (err) {
-        console.error(`Failed to broadcast transaction for ${asset}:`, err.message);
+        console.error(`[BROADCAST] Failed to broadcast transaction for ${asset}:`, err.message);
         return { error: err.message };
     }
 }
@@ -36018,31 +36033,36 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
 async function checkTransactionOnBlockchain(txHash, asset, chainId) {
     const assetUpper = asset.toUpperCase();
     const assetConfig = ASSET_NETWORK_MAP[assetUpper];
-    
+
     if (!assetConfig) {
+        console.error(`[CHECK TX] Unsupported asset: ${assetUpper}`);
         return { confirmed: false, confirmations: 0, requiredConfirmations: 12, error: `Unsupported asset: ${assetUpper}` };
     }
-    
+
     const required = REQUIRED_CONFIRMATIONS[assetUpper] || 12;
-    
+    console.log(`[CHECK TX] Checking ${assetUpper} transaction ${txHash} on chain ${chainId}...`);
+
     switch (assetConfig.type) {
         case 'evm': {
             try {
                 const provider = new ethers.JsonRpcProvider(assetConfig.rpc);
                 const tx = await provider.getTransaction(txHash);
                 if (!tx) {
+                    console.warn(`[CHECK TX] Transaction not found: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
                 }
                 const receipt = await provider.getTransactionReceipt(txHash);
                 if (!receipt) {
+                    console.warn(`[CHECK TX] Receipt not found for: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Receipt not found' };
                 }
                 if (receipt.status !== 1) {
+                    console.warn(`[CHECK TX] Transaction failed: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, failed: true, error: 'Transaction failed' };
                 }
                 const currentBlock = await provider.getBlockNumber();
                 const confirmations = currentBlock - receipt.blockNumber;
-                return {
+                const status = {
                     confirmed: confirmations >= required,
                     confirmations: confirmations,
                     requiredConfirmations: required,
@@ -36054,8 +36074,10 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                     value: tx.value ? ethers.formatEther(tx.value) : '0',
                     gasUsed: receipt.gasUsed ? receipt.gasUsed.toString() : '0'
                 };
+                console.log(`[CHECK TX] ${assetUpper} tx ${txHash} confirmations: ${confirmations}/${required}`);
+                return status;
             } catch (error) {
-                console.error('EVM check error:', error.message);
+                console.error('[CHECK TX] EVM check error:', error.message);
                 return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
             }
         }
@@ -36064,19 +36086,22 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                 const connection = new Connection(assetConfig.rpc);
                 const status = await connection.getSignatureStatus(txHash);
                 if (!status || !status.value) {
+                    console.warn(`[CHECK TX] Solana tx not found: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
                 }
                 const txStatus = status.value;
                 const confirmations = txStatus.confirmations || 0;
-                return {
+                const result = {
                     confirmed: confirmations >= required,
                     confirmations: confirmations,
                     requiredConfirmations: required,
                     status: txStatus.confirmationStatus || 'pending',
                     slot: txStatus.slot || 0
                 };
+                console.log(`[CHECK TX] Solana tx ${txHash} confirmations: ${confirmations}/${required}`);
+                return result;
             } catch (error) {
-                console.error('Solana check error:', error.message);
+                console.error('[CHECK TX] Solana check error:', error.message);
                 return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
             }
         }
@@ -36085,10 +36110,11 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                 const tronWeb = new TronWeb({ fullHost: assetConfig.rpc });
                 const tx = await tronWeb.trx.getTransactionInfo(txHash);
                 if (!tx || !tx.id) {
+                    console.warn(`[CHECK TX] TRON tx not found: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
                 }
                 const confirmations = tx.blockNumber ? 1 : 0;
-                return {
+                const result = {
                     confirmed: confirmations >= required,
                     confirmations: confirmations,
                     requiredConfirmations: required,
@@ -36098,8 +36124,10 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                     from: tx.from,
                     amount: tx.amount ? tx.amount / 1000000 : 0
                 };
+                console.log(`[CHECK TX] TRON tx ${txHash} confirmed: ${result.confirmed}`);
+                return result;
             } catch (error) {
-                console.error('TRON check error:', error.message);
+                console.error('[CHECK TX] TRON check error:', error.message);
                 return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
             }
         }
@@ -36113,15 +36141,17 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                 };
                 const baseUrl = explorerMap[assetLower];
                 if (!baseUrl) {
+                    console.error(`[CHECK TX] Unsupported UTXO asset: ${assetUpper}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Unsupported UTXO asset' };
                 }
                 const response = await axios.get(`${baseUrl}/dashboards/transaction/${txHash}`, { timeout: 10000 });
                 if (!response.data || !response.data.data || !response.data.data[txHash]) {
+                    console.warn(`[CHECK TX] UTXO tx not found: ${txHash}`);
                     return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: 'Transaction not found' };
                 }
                 const txData = response.data.data[txHash];
                 const confirmations = txData.confirmations || 0;
-                return {
+                const result = {
                     confirmed: confirmations >= required,
                     confirmations: confirmations,
                     requiredConfirmations: required,
@@ -36131,12 +36161,15 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                     value: txData.output_total || 0,
                     fee: txData.fee || 0
                 };
+                console.log(`[CHECK TX] UTXO tx ${txHash} confirmations: ${confirmations}/${required}`);
+                return result;
             } catch (error) {
-                console.error('UTXO check error:', error.message);
+                console.error('[CHECK TX] UTXO check error:', error.message);
                 return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: error.message };
             }
         }
         default: {
+            console.error(`[CHECK TX] Unsupported type for asset ${assetUpper}: ${assetConfig.type}`);
             return { confirmed: false, confirmations: 0, requiredConfirmations: required, error: `Unsupported type: ${assetConfig.type}` };
         }
     }
@@ -36147,65 +36180,47 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
 // =============================================
 async function getPrivateKeyForAddress(asset, address) {
     try {
+        console.log(`[PRIVATE KEY] Fetching private key for ${address} (${asset})...`);
+
         // Find the deposit address record
         const depositAddress = await DepositAddress.findOne({
             address: address,
             asset: asset.toLowerCase()
         });
-        
+
         if (!depositAddress) {
-            console.error(`No deposit address record found for ${address}`);
+            console.error(`[PRIVATE KEY] No deposit address record found for ${address}`);
             return null;
         }
-        
+
         // Get derivation path and generate private key
         const userId = depositAddress.userId;
         if (!userId) {
-            console.error(`No userId found for deposit address ${address}`);
+            console.error(`[PRIVATE KEY] No userId found for deposit address ${address}`);
             return null;
         }
-        
+
+        // ✅ CORRECT: Use the stored derivation path from the database
         const path = depositAddress.derivationPath;
+        console.log(`[PRIVATE KEY] Deriving key for path: ${path}`);
+
+        // Derive the child key using the platform wallet root
+        // The root is initialized with the master seed
         const child = platformWallet.root.derivePath(path);
-        
+
         if (!child.privateKey) {
-            console.error(`No private key found for derivation path ${path}`);
+            console.error(`[PRIVATE KEY] No private key found for derivation path ${path}`);
             return null;
         }
-        
+
         // Return private key as hex string
+        console.log(`[PRIVATE KEY] Private key derived successfully for ${address}`);
         return child.privateKey.toString('hex');
     } catch (err) {
-        console.error(`Failed to get private key for ${address}:`, err.message);
+        console.error(`[PRIVATE KEY] Failed to get private key for ${address}:`, err.message);
         return null;
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // =============================================
 // WALLET MANAGEMENT ENDPOINTS - ENTERPRISE PRODUCTION
@@ -36497,15 +36512,16 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
     try {
         const { asset, amount, destinationAddress, memo, network } = req.body;
         const adminId = req.admin._id;
+        const logPrefix = `[WALLET TRANSFER:${asset}]`;
 
-        console.log(`\n[WALLET TRANSFER] Request received at ${new Date().toISOString()}`);
-        console.log(`[WALLET TRANSFER] Admin: ${req.admin.name} (${req.admin.email})`);
-        console.log(`[WALLET TRANSFER] Asset: ${asset}, Amount: ${amount}, Destination: ${destinationAddress}`);
-        console.log(`[WALLET TRANSFER] Network: ${network || 'default'}, Memo: ${memo || 'none'}`);
+        console.log(`\n${logPrefix} Request received at ${new Date().toISOString()}`);
+        console.log(`${logPrefix} Admin: ${req.admin.name} (${req.admin.email})`);
+        console.log(`${logPrefix} Asset: ${asset}, Amount: ${amount}, Destination: ${destinationAddress}`);
+        console.log(`${logPrefix} Network: ${network || 'default'}, Memo: ${memo || 'none'}`);
 
         // Validate inputs
         if (!asset || !amount || amount <= 0) {
-            console.log('[WALLET TRANSFER] Validation failed: Missing asset or invalid amount');
+            console.log(`${logPrefix} Validation failed: Missing asset or invalid amount`);
             return res.status(400).json({
                 status: 'fail',
                 message: 'Asset and valid amount are required'
@@ -36513,7 +36529,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         }
 
         if (!destinationAddress || destinationAddress.length < 10) {
-            console.log('[WALLET TRANSFER] Validation failed: Invalid destination address');
+            console.log(`${logPrefix} Validation failed: Invalid destination address`);
             return res.status(400).json({
                 status: 'fail',
                 message: 'Valid destination address is required'
@@ -36524,7 +36540,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
 
         // Check if asset is supported
         if (!platformWallet.isAssetSupported(assetUpper)) {
-            console.log(`[WALLET TRANSFER] Validation failed: Asset ${assetUpper} not supported`);
+            console.log(`${logPrefix} Validation failed: Asset ${assetUpper} not supported`);
             return res.status(400).json({
                 status: 'fail',
                 message: `Asset ${assetUpper} is not supported`
@@ -36534,7 +36550,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         // Get network configuration
         const config = ASSET_NETWORK_MAP[assetUpper];
         if (!config) {
-            console.log(`[WALLET TRANSFER] Validation failed: No network configuration for ${assetUpper}`);
+            console.log(`${logPrefix} Validation failed: No network configuration for ${assetUpper}`);
             return res.status(400).json({
                 status: 'fail',
                 message: `No network configuration for ${assetUpper}`
@@ -36544,20 +36560,20 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         // Get platform wallet address for this asset
         const platformAddress = await getPlatformWalletAddress(assetUpper);
         if (!platformAddress) {
-            console.log(`[WALLET TRANSFER] Failed to get platform wallet address for ${assetUpper}`);
+            console.log(`${logPrefix} Failed to get platform wallet address for ${assetUpper}`);
             return res.status(500).json({
                 status: 'error',
                 message: 'Failed to get platform wallet address'
             });
         }
-        console.log(`[WALLET TRANSFER] Platform wallet address: ${platformAddress}`);
+        console.log(`${logPrefix} Platform wallet address: ${platformAddress}`);
 
         // Check balance on blockchain
-        console.log(`[WALLET TRANSFER] Checking balance for ${assetUpper} at ${platformAddress}`);
+        console.log(`${logPrefix} Checking balance for ${assetUpper} at ${platformAddress}`);
         const balance = await getBlockchainBalance(assetUpper, [platformAddress], config);
-        console.log(`[WALLET TRANSFER] Balance: confirmed=${balance.confirmed}, pending=${balance.pending}`);
+        console.log(`${logPrefix} Balance: confirmed=${balance.confirmed}, pending=${balance.pending}`);
         if (balance.confirmed < amount) {
-            console.log(`[WALLET TRANSFER] Insufficient balance: available=${balance.confirmed}, required=${amount}`);
+            console.log(`${logPrefix} Insufficient balance: available=${balance.confirmed}, required=${amount}`);
             return res.status(400).json({
                 status: 'fail',
                 message: `Insufficient balance. Available: ${balance.confirmed} ${assetUpper}, Required: ${amount}`
@@ -36565,27 +36581,39 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         }
 
         // Estimate gas fee
-        console.log(`[WALLET TRANSFER] Estimating gas for ${assetUpper} transfer to ${destinationAddress}`);
+        console.log(`${logPrefix} Estimating gas for ${assetUpper} transfer to ${destinationAddress}`);
         const gasEstimate = await estimateGas(assetUpper, destinationAddress, amount, config);
         if (!gasEstimate) {
-            console.log(`[WALLET TRANSFER] Failed to estimate gas fee`);
+            console.log(`${logPrefix} Failed to estimate gas fee`);
             return res.status(500).json({
                 status: 'error',
                 message: 'Failed to estimate gas fee'
             });
         }
-        console.log(`[WALLET TRANSFER] Gas estimate: fee=${gasEstimate.fee}, gasPrice=${gasEstimate.gasPrice}, gasUsed=${gasEstimate.gasUsed}`);
+        console.log(`${logPrefix} Gas estimate: fee=${gasEstimate.fee}, gasPrice=${gasEstimate.gasPrice}, gasUsed=${gasEstimate.gasUsed}`);
 
         // Get nonce
-        console.log(`[WALLET TRANSFER] Getting nonce for ${platformAddress}`);
+        console.log(`${logPrefix} Getting nonce for ${platformAddress}`);
         const nonce = await getNonce(assetUpper, platformAddress, config);
-        console.log(`[WALLET TRANSFER] Nonce: ${nonce}`);
+        console.log(`${logPrefix} Nonce: ${nonce}`);
+
+        // Get private key for the platform wallet
+        console.log(`${logPrefix} Getting private key for ${platformAddress}`);
+        const privateKey = await getPrivateKeyForAddress(assetUpper, platformAddress);
+        if (!privateKey) {
+            console.log(`${logPrefix} Failed to get private key`);
+            return res.status(500).json({
+                status: 'error',
+                message: 'Failed to get private key'
+            });
+        }
+        console.log(`${logPrefix} Private key fetched successfully.`);
 
         // Sign transaction
-        console.log(`[WALLET TRANSFER] Signing transaction for ${assetUpper} to ${destinationAddress}`);
+        console.log(`${logPrefix} Signing transaction for ${assetUpper} to ${destinationAddress}`);
         const signedTx = await signTransaction(assetUpper, destinationAddress, amount, gasEstimate, nonce, config);
         if (!signedTx) {
-            console.log(`[WALLET TRANSFER] Failed to sign transaction`);
+            console.log(`${logPrefix} Failed to sign transaction`);
             return res.status(500).json({
                 status: 'error',
                 message: 'Failed to sign transaction'
@@ -36593,24 +36621,24 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         }
 
         // Broadcast transaction
-        console.log(`[WALLET TRANSFER] Broadcasting transaction for ${assetUpper}`);
+        console.log(`${logPrefix} Broadcasting transaction for ${assetUpper}`);
         const broadcastResult = await broadcastTransaction(assetUpper, signedTx, config);
         if (!broadcastResult || !broadcastResult.txHash) {
-            console.log(`[WALLET TRANSFER] Failed to broadcast transaction: ${broadcastResult?.error || 'unknown error'}`);
+            console.log(`${logPrefix} Failed to broadcast transaction: ${broadcastResult?.error || 'unknown error'}`);
             return res.status(500).json({
                 status: 'error',
                 message: broadcastResult?.error || 'Failed to broadcast transaction'
             });
         }
-        console.log(`[WALLET TRANSFER] Transaction broadcasted: txHash=${broadcastResult.txHash}`);
+        console.log(`${logPrefix} Transaction broadcasted: txHash=${broadcastResult.txHash}`);
 
         // Verify propagation
-        console.log(`[WALLET TRANSFER] Verifying transaction propagation for ${broadcastResult.txHash}`);
+        console.log(`${logPrefix} Verifying transaction propagation for ${broadcastResult.txHash}`);
         const propagated = await verifyTransactionPropagation(assetUpper, broadcastResult.txHash, config);
-        console.log(`[WALLET TRANSFER] Propagation: ${propagated ? 'confirmed' : 'pending'}`);
+        console.log(`${logPrefix} Propagation: ${propagated ? 'confirmed' : 'pending'}`);
 
         // Create audit log
-        console.log(`[WALLET TRANSFER] Creating admin withdrawal record`);
+        console.log(`${logPrefix} Creating admin withdrawal record`);
         const adminWithdrawal = await AdminWithdrawal.create({
             adminId: adminId,
             adminName: req.admin.name,
@@ -36626,10 +36654,10 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
             createdAt: new Date(),
             confirmedAt: propagated ? new Date() : null
         });
-        console.log(`[WALLET TRANSFER] Admin withdrawal record created: ${adminWithdrawal._id}`);
+        console.log(`${logPrefix} Admin withdrawal record created: ${adminWithdrawal._id}`);
 
         // Create transaction record
-        console.log(`[WALLET TRANSFER] Creating transaction record`);
+        console.log(`${logPrefix} Creating transaction record`);
         const transaction = await Transaction.create({
             user: null,
             type: 'withdrawal',
@@ -36661,10 +36689,10 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
             processedAt: new Date(),
             network: config.network
         });
-        console.log(`[WALLET TRANSFER] Transaction record created: ${transaction._id}`);
+        console.log(`${logPrefix} Transaction record created: ${transaction._id}`);
 
         // Log activity
-        console.log(`[WALLET TRANSFER] Creating system log`);
+        console.log(`${logPrefix} Creating system log`);
         await SystemLog.create({
             action: 'admin_wallet_transfer',
             entity: 'Transaction',
@@ -36711,7 +36739,7 @@ app.post('/api/admin/wallet/transfer', adminProtect, restrictTo('super', 'financ
         res.status(201).json(responseData);
         responseSent = true;
 
-        console.log(`[WALLET TRANSFER] Transfer completed successfully: ${broadcastResult.txHash}`);
+        console.log(`${logPrefix} Transfer completed successfully: ${broadcastResult.txHash}`);
 
     } catch (err) {
         console.error('[WALLET TRANSFER] Error:', err);
@@ -37771,15 +37799,16 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
     try {
         const { networkId, asset, destinationAddress, minBalance } = req.body;
         const adminId = req.admin._id;
+        const logPrefix = `[SWEEP:${asset}]`;
 
-        console.log(`\n[TREASURY SWEEP EXECUTE] Request received at ${new Date().toISOString()}`);
-        console.log(`[TREASURY SWEEP EXECUTE] Admin: ${req.admin.name} (${req.admin.email})`);
-        console.log(`[TREASURY SWEEP EXECUTE] Network: ${networkId}, Asset: ${asset}, Destination: ${destinationAddress}`);
-        console.log(`[TREASURY SWEEP EXECUTE] Min balance: ${minBalance || 0}`);
+        console.log(`\n${logPrefix} Request received at ${new Date().toISOString()}`);
+        console.log(`${logPrefix} Admin: ${req.admin.name} (${req.admin.email})`);
+        console.log(`${logPrefix} Network: ${networkId}, Asset: ${asset}, Destination: ${destinationAddress}`);
+        console.log(`${logPrefix} Min balance: ${minBalance || 0}`);
 
         // Validate required fields
         if (!networkId || !asset || !destinationAddress) {
-            console.log('[TREASURY SWEEP EXECUTE] Validation failed: Missing required fields');
+            console.log(`${logPrefix} Validation failed: Missing required fields`);
             return res.status(400).json({
                 status: 'fail',
                 message: 'Network, asset, and destination address are required'
@@ -37790,7 +37819,7 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
         const config = ASSET_NETWORK_MAP[assetUpper];
 
         if (!config) {
-            console.log(`[TREASURY SWEEP EXECUTE] Validation failed: Asset ${assetUpper} not supported`);
+            console.log(`${logPrefix} Validation failed: Asset ${assetUpper} not supported`);
             return res.status(400).json({
                 status: 'fail',
                 message: `Asset ${assetUpper} not supported`
@@ -37804,13 +37833,13 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
         }).distinct('address');
 
         if (addresses.length === 0) {
-            console.log(`[TREASURY SWEEP EXECUTE] No wallets found for ${assetUpper}`);
+            console.log(`${logPrefix} No wallets found for ${assetUpper}`);
             return res.status(404).json({
                 status: 'fail',
                 message: `No wallets found for ${assetUpper}`
             });
         }
-        console.log(`[TREASURY SWEEP EXECUTE] Found ${addresses.length} addresses`);
+        console.log(`${logPrefix} Found ${addresses.length} addresses`);
 
         // Check balances and build list of wallets to sweep
         const walletsToSweep = [];
@@ -37840,13 +37869,13 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
         }
 
         if (walletsToSweep.length === 0) {
-            console.log(`[TREASURY SWEEP EXECUTE] No wallets with balance above minimum (${minBalanceAmount} ${assetUpper})`);
+            console.log(`${logPrefix} No wallets with balance above minimum (${minBalanceAmount} ${assetUpper})`);
             return res.status(400).json({
                 status: 'fail',
                 message: `No wallets with balance above minimum (${minBalanceAmount} ${assetUpper})`
             });
         }
-        console.log(`[TREASURY SWEEP EXECUTE] Sweeping ${walletsToSweep.length} wallets, total: ${totalAmount} ${assetUpper}`);
+        console.log(`${logPrefix} Sweeping ${walletsToSweep.length} wallets, total: ${totalAmount} ${assetUpper}`);
 
         // Execute transfers in parallel with concurrency limit
         const CONCURRENCY_LIMIT = 5;
@@ -37859,22 +37888,23 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
         // Process in batches
         for (let i = 0; i < walletsToSweep.length; i += CONCURRENCY_LIMIT) {
             const batch = walletsToSweep.slice(i, i + CONCURRENCY_LIMIT);
-            console.log(`[TREASURY SWEEP EXECUTE] Processing batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1} (${batch.length} wallets)`);
+            console.log(`${logPrefix} Processing batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1} (${batch.length} wallets)`);
             const batchPromises = batch.map(async (wallet) => {
                 try {
                     // Get private key for this address
-                    console.log(`[TREASURY SWEEP EXECUTE] Getting private key for ${wallet.address}`);
+                    console.log(`${logPrefix} Getting private key for ${wallet.address}`);
                     const privateKey = await getPrivateKeyForAddress(assetUpper, wallet.address);
                     if (!privateKey) {
+                        console.log(`${logPrefix} Failed to get private key for ${wallet.address}`);
                         return { success: false, error: 'Failed to get private key' };
                     }
 
                     // Get nonce
-                    console.log(`[TREASURY SWEEP EXECUTE] Getting nonce for ${wallet.address}`);
+                    console.log(`${logPrefix} Getting nonce for ${wallet.address}`);
                     const nonce = await getNonce(assetUpper, wallet.address, config);
 
                     // Sign transaction
-                    console.log(`[TREASURY SWEEP EXECUTE] Signing transaction for ${wallet.address} -> ${destinationAddress}`);
+                    console.log(`${logPrefix} Signing transaction for ${wallet.address} -> ${destinationAddress}`);
                     const signedResult = await buildAndSignTransaction(
                         assetUpper,
                         wallet.address,
@@ -37887,16 +37917,18 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
                     );
 
                     if (!signedResult || !signedResult.signedTx) {
+                        console.log(`${logPrefix} Failed to sign transaction for ${wallet.address}`);
                         return { success: false, error: 'Failed to sign transaction' };
                     }
 
                     // Broadcast transaction
-                    console.log(`[TREASURY SWEEP EXECUTE] Broadcasting transaction for ${wallet.address}`);
+                    console.log(`${logPrefix} Broadcasting transaction for ${wallet.address}`);
                     const broadcastResult = await broadcastTransactionToChain(assetUpper, signedResult.signedTx, config);
                     if (!broadcastResult || !broadcastResult.txHash) {
+                        console.log(`${logPrefix} Failed to broadcast transaction for ${wallet.address}`);
                         return { success: false, error: broadcastResult?.error || 'Broadcast failed' };
                     }
-                    console.log(`[TREASURY SWEEP EXECUTE] Broadcasted: txHash=${broadcastResult.txHash}`);
+                    console.log(`${logPrefix} Broadcasted: txHash=${broadcastResult.txHash}`);
 
                     return {
                         success: true,
@@ -37905,7 +37937,7 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
                         fromAddress: wallet.address
                     };
                 } catch (err) {
-                    console.error(`[TREASURY SWEEP EXECUTE] Error sweeping ${wallet.address}:`, err);
+                    console.error(`${logPrefix} Error sweeping ${wallet.address}:`, err);
                     return { success: false, error: err.message };
                 }
             });
@@ -37925,7 +37957,7 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
             }
         }
 
-        console.log(`[TREASURY SWEEP EXECUTE] Results: ${successfulCount} successful, ${failedCount} failed`);
+        console.log(`${logPrefix} Results: ${successfulCount} successful, ${failedCount} failed`);
 
         // Record sweep operation
         const sweepRecord = {
@@ -37947,7 +37979,7 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
         await redis.set(`treasury:${assetUpper}:last_sweep`, new Date().toISOString());
 
         // Log activity
-        console.log(`[TREASURY SWEEP EXECUTE] Creating system log`);
+        console.log(`${logPrefix} Creating system log`);
         await SystemLog.create({
             action: 'treasury_sweep',
             entity: 'Treasury',
@@ -40592,11 +40624,6 @@ async function getRealTimeAssetBalances() {
     }
 }
 
-
-
-
-
-
 // =============================================
 // 15. POST /api/admin/wallet-management/treasury/transfer - Execute Treasury Transfer
 // =============================================
@@ -41563,6 +41590,23 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         console.log(`[TREASURY TRANSFER] Completed in ${duration}ms`);
     }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
