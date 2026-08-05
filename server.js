@@ -35285,9 +35285,34 @@ async function getBlockchainBalance(asset, addresses, config) {
                             console.log(`${logPrefix} Address ${address} token balance: ${balance} (decimals: ${decimals})`);
                         } else {
                             // Native coin (ETH, BNB, MATIC, etc.)
-                            balanceWei = await provider.getBalance(address);
-                            balance = Number(ethers.formatEther(balanceWei));
-                            console.log(`${logPrefix} Address ${address} native balance: ${balance}`);
+                            // ===== ENHANCED LOGGING START =====
+                            console.log("========== ETH BALANCE DEBUG ==========");
+                            console.log("Asset:", asset);
+                            console.log("Address:", address);
+                            console.log("Config:", config);
+                            console.log("RPC URL:", config?.rpc);
+                            console.log("=======================================");
+                            // ===== ENHANCED LOGGING END =====
+                            
+                            const provider = new ethers.JsonRpcProvider(config.rpc);
+                            
+                            try {
+                                balanceWei = await provider.getBalance(address);
+                                balance = Number(ethers.formatEther(balanceWei));
+                                console.log(`${logPrefix} Address ${address} native balance: ${balance}`);
+                            } catch (err) {
+                                // ===== ENHANCED ERROR LOGGING START =====
+                                console.error("====================================");
+                                console.error("FAILED TO GET ETH BALANCE");
+                                console.error("Address:", address);
+                                console.error("RPC:", config?.rpc);
+                                console.error("Full Error Object:");
+                                console.error(err);
+                                console.error("Message:", err.message);
+                                console.error("Stack:", err.stack);
+                                console.error("====================================");
+                                // ===== ENHANCED ERROR LOGGING END =====
+                            }
                         }
 
                         totalConfirmed += balance;
@@ -35498,25 +35523,6 @@ async function getBlockchainBalance(asset, addresses, config) {
     } catch (err) {
         console.error(`[BALANCE] Failed to get blockchain balance for ${asset}:`, err.message);
         return { confirmed: 0, pending: 0, total: 0 };
-    }
-}
-
-// =============================================
-// getTokenDecimals - Get ERC-20 token decimals
-// =============================================
-async function getTokenDecimals(contractAddress, provider) {
-    try {
-        const contract = new ethers.Contract(
-            contractAddress,
-            ['function decimals() view returns (uint8)'],
-            provider
-        );
-        const decimals = await contract.decimals();
-        console.log(`[DECIMALS] Contract ${contractAddress} decimals: ${decimals}`);
-        return decimals;
-    } catch (err) {
-        console.warn(`[DECIMALS] Failed to get token decimals for ${contractAddress}:`, err.message);
-        return 18; // Default for most ERC-20 tokens
     }
 }
 
