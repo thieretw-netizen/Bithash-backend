@@ -35256,7 +35256,271 @@ console.log('   - GET /api/admin/wallet/* (admin endpoints)');
 
 
 
+// =============================================
+// getBlockchainBalance - Fetch REAL blockchain balance for any asset
+// Supports: EVM (ETH, BSC, Polygon, etc.), Solana, TRON, UTXO (BTC, DOGE, LTC)
+// =============================================
+async function getBlockchainBalance(asset, addresses, config) {
+    try {
+        const assetUpper = asset.toUpperCase();
+        let totalConfirmed = 0;
+        let totalPending = 0;
+        
+        // If addresses is a string, convert to array
+        if (typeof addresses === 'string') {
+            addresses = [addresses];
+        }
+        
+        // If no addresses provided, return zero
+        if (!addresses || addresses.length === 0) {
+            return { confirmed: 0, pending: 0, total: 0 };
+        }
 
+        console.log(`🔍 Fetching ${assetUpper} balance for ${addresses.length} address(es)...`);
+
+        switch (config.type) {
+            case 'evm': {
+                // EVM chains: Ethereum, BSC, Polygon, Avalanche, etc.
+                const provider = new ethers.JsonRpcProvider(config.rpc);
+                
+                for (const address of addresses) {
+                    try {
+                        let balance = 0;
+                        
+                        // Check if it's an ERC-20 token (has contract address)
+                        if (config.contract) {
+                            const contract = new ethers.Contract(
+                                config.contract,
+                                ['function balanceOf(address) view returns (uint256)'],
+                                provider
+                            );
+                            const balanceWei = await contract.balanceOf(address);
+                            const decimals = await getTokenDecimals(config.contract, provider);
+                            balance = Number(ethers.formatUnits(balanceWei, decimals));
+                        } else {
+                            // Native coin (ETH, BNB, MATIC, etc.)
+                            const balanceWei = await provider.getBalance(address);
+                            balance = Number(ethers.formatEther(balanceWei));
+                        }
+                        
+                        totalConfirmed += balance;
+                    } catch (err) {
+                        console.warn(`Failed to get EVM balance for ${address}:`, err.message);
+                    }
+                }
+                break;
+            }
+            
+            case 'solana': {
+                // Solana blockchain
+                const connection = new Connection(config.rpc);
+                for (const address of addresses) {
+                    try {
+                        const pubKey = new PublicKey(address);
+                        const balance = await connection.getBalance(pubKey);
+                        totalConfirmed += balance / 1e9; // Convert lamports to SOL
+                    } catch (err) {
+                        console.warn(`Failed to get Solana balance for ${address}:`, err.message);
+                    }
+                }
+                break;
+            }
+            
+            case 'utxo': {
+                // UTXO chains: Bitcoin, Dogecoin, Litecoin
+                const assetLower = assetUpper.toLowerCase();
+                const explorerMap = {
+                    'btc': 'https://api.blockchair.com/bitcoin',
+                    'doge': 'https://api.blockchair.com/dogecoin',
+                    'ltc': 'https://api.blockchair.com/litecoin'
+                };
+                
+                const baseUrl = explorerMap[assetLower];
+                if (baseUrl) {
+                    // Process in batches to avoid URL length limits
+                    const batchSize = 20;
+                    for (let i = 0; i < addresses.length; i += batchSize) {
+                        const batch = addresses.slice(i, i + batchSize);
+                        const addressParam = batch.join(',');
+                        
+                        try {
+                            const response = await axios.get(
+                                `${baseUrl}/dashboards/address/${addressParam}`,
+                                { timeout: 15000 }
+                            );
+                            
+                            if (response.data && response.data.data) {
+                                for (const addr of batch) {
+                                    const data = response.data.data[addr];
+                                    if (data && data.address) {
+                                        // Blockchair returns balance in satoshis (BTC) or smallest unit
+                                        const balanceInAsset = data.address.balance || 0;
+                                        // Convert to actual asset units (BTC, DOGE, LTC)
+                                        const divisor = assetLower === 'btc' ? 1e8 : 
+                                                       assetLower === 'doge' ? 1e8 : 
+                                                       assetLower === 'ltc' ? 1e8 : 1e8;
+                                        totalConfirmed += balanceInAsset / divisor;
+                                        
+                                        // Pending balance (unconfirmed)
+                                        if (data.address.received && data.address.spent) {
+                                            const pending = data.address.received - data.address.spent - data.address.balance;
+                                            totalPending += pending / divisor;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (err) {
+                            console.warn(`Failed to get UTXO balance for batch:`, err.message);
+                        }
+                    }
+                } else {
+                    console.warn(`No UTXO explorer for ${assetUpper}`);
+                }
+                break;
+            }
+            
+            case 'tron': {
+                // TRON blockchain
+                const tronWeb = new TronWeb({ fullHost: config.rpc });
+                for (const address of addresses) {
+                    try {
+                        let balance = 0;
+                        
+                        // Check if it's a TRC-20 token
+                        if (config.contract) {
+                            const contract = await tronWeb.contract().at(config.contract);
+                            const balanceWei = await contract.balanceOf(address).call();
+                            const decimals = config.decimals || 6;
+                            balance = balanceWei / 10 ** decimals;
+                        } else {
+                            // Native TRX
+                            const balanceSun = await tronWeb.trx.getBalance(address);
+                            balance = balanceSun / 1e6; // Convert SUN to TRX
+                        }
+                        
+                        totalConfirmed += balance;
+                    } catch (err) {
+                        console.warn(`Failed to get TRON balance for ${address}:`, err.message);
+                    }
+                }
+                break;
+            }
+            
+            case 'xrp': {
+                // XRP Ledger
+                const client = new xrpl.Client(config.rpc);
+                await client.connect();
+                try {
+                    for (const address of addresses) {
+                        try {
+                            const accountInfo = await client.request({
+                                command: 'account_info',
+                                account: address,
+                                ledger_index: 'validated'
+                            });
+                            if (accountInfo.result && accountInfo.result.account_data) {
+                                const balance = accountInfo.result.account_data.Balance / 1e6; // drops to XRP
+                                totalConfirmed += balance;
+                            }
+                        } catch (err) {
+                            console.warn(`Failed to get XRP balance for ${address}:`, err.message);
+                        }
+                    }
+                } finally {
+                    await client.disconnect();
+                }
+                break;
+            }
+            
+            case 'cardano': {
+                // Cardano blockchain
+                // Using Blockfrost API or similar
+                // This is a simplified implementation
+                for (const address of addresses) {
+                    try {
+                        // You would need a Blockfrost API key or similar service
+                        // For now, we'll use a placeholder
+                        const response = await axios.get(
+                            `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}`,
+                            { 
+                                headers: { 'project_id': process.env.BLOCKFROST_API_KEY || '' },
+                                timeout: 10000
+                            }
+                        );
+                        if (response.data && response.data.amount) {
+                            const lovelace = response.data.amount.find(a => a.unit === 'lovelace');
+                            if (lovelace) {
+                                totalConfirmed += lovelace.quantity / 1e6; // lovelace to ADA
+                            }
+                        }
+                    } catch (err) {
+                        console.warn(`Failed to get Cardano balance for ${address}:`, err.message);
+                    }
+                }
+                break;
+            }
+            
+            case 'polkadot': {
+                // Polkadot blockchain
+                try {
+                    const wsProvider = new WsProvider(config.rpc || 'wss://rpc.polkadot.io');
+                    const api = await ApiPromise.create({ provider: wsProvider });
+                    try {
+                        for (const address of addresses) {
+                            try {
+                                const { data: balance } = await api.query.system.account(address);
+                                const freeBalance = balance.free.toNumber() / 1e10; // Planck to DOT
+                                totalConfirmed += freeBalance;
+                            } catch (err) {
+                                console.warn(`Failed to get Polkadot balance for ${address}:`, err.message);
+                            }
+                        }
+                    } finally {
+                        await api.disconnect();
+                    }
+                } catch (err) {
+                    console.warn('Failed to connect to Polkadot:', err.message);
+                }
+                break;
+            }
+            
+            default: {
+                console.warn(`Unsupported asset type for balance check: ${config.type}`);
+                return { confirmed: 0, pending: 0, total: 0 };
+            }
+        }
+
+        console.log(`✅ ${assetUpper} balance: ${totalConfirmed.toFixed(8)} (confirmed), ${totalPending.toFixed(8)} (pending)`);
+
+        return {
+            confirmed: totalConfirmed,
+            pending: totalPending,
+            total: totalConfirmed + totalPending
+        };
+        
+    } catch (err) {
+        console.error(`Failed to get blockchain balance for ${asset}:`, err.message);
+        return { confirmed: 0, pending: 0, total: 0 };
+    }
+}
+
+// =============================================
+// getTokenDecimals - Get ERC-20 token decimals
+// =============================================
+async function getTokenDecimals(contractAddress, provider) {
+    try {
+        const contract = new ethers.Contract(
+            contractAddress,
+            ['function decimals() view returns (uint8)'],
+            provider
+        );
+        const decimals = await contract.decimals();
+        return decimals;
+    } catch (err) {
+        console.warn(`Failed to get token decimals for ${contractAddress}:`, err.message);
+        return 18; // Default for most ERC-20 tokens
+    }
+}
 
 // =============================================
 // MISSING HELPER FUNCTIONS - ADD TO server.js
