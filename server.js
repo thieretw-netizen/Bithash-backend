@@ -35874,7 +35874,7 @@ function getExplorerUrl(asset, txHash) {
 
 // =============================================
 // 10. estimateGasForAsset - Estimate gas for a transaction
-// FIXED: BigInt/Number consistency, EIP-1559 support, accurate gas estimation
+// FIXED: Returns fee as string, BigInt consistency, EIP-1559 support
 // =============================================
 async function estimateGasForAsset(asset, toAddress, amount, config) {
     try {
@@ -35888,9 +35888,9 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
         };
         console.log(`[GAS ESTIMATE] Estimating gas for ${assetUpper} to ${toAddress}...`);
 
-        // Validate addresses before proceeding
-        if (!validateAddress(asset, toAddress, config)) {
-            throw new Error(`Invalid destination address for ${asset}`);
+        // Validate address before proceeding
+        if (!validateAddress(assetUpper, toAddress, config)) {
+            throw new Error(`Invalid destination address for ${assetUpper}`);
         }
 
         switch (config.type) {
@@ -35903,7 +35903,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                     if (config.contract) {
                         const contract = new ethers.Contract(
                             config.contract,
-                            ['function transfer(address to, uint256 amount) returns (bool)'],
+                            ['function transfer(address to, uint256 amount)'],
                             provider
                         );
                         const decimals = await getTokenDecimals(config.contract, provider);
@@ -35997,10 +35997,10 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                         3,
                         1000
                     );
-                    const feeInSol = (fee.value || 5000) / 1e9;
+                    const feeInSol = ((fee.value || 5000) / 1e9).toString();
                     
                     gasEstimate = {
-                        fee: feeInSol.toString(),
+                        fee: feeInSol,
                         gasPrice: 0,
                         gasUsed: fee.value || 5000,
                         maxFeePerGas: null,
@@ -36023,7 +36023,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                     const assetLower = assetUpper.toLowerCase();
                     let feeRate = 5;
                     
-                    // Try multiple fee sources with fallback
+                    // Try multiple fee sources
                     const feeSources = [
                         async () => {
                             const response = await withRetry(
@@ -36048,7 +36048,6 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                             throw new Error('No fee rate from Mempool');
                         },
                         async () => {
-                            // Fallback to Blockstream
                             const response = await withRetry(
                                 () => axios.get('https://blockstream.info/api/fee-estimates', { timeout: 3000 }),
                                 2,
@@ -36061,7 +36060,6 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                         }
                     ];
 
-                    // Try each source until one succeeds
                     for (const source of feeSources) {
                         try {
                             feeRate = await source();
@@ -36071,12 +36069,12 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                         }
                     }
                     
-                    // Estimate actual size based on typical UTXO count
-                    const estimatedSize = calculateTransactionSize(1, 2); // 1 input, 2 outputs (send + change)
-                    const feeInAsset = (estimatedSize * feeRate) / 1e8;
+                    // Calculate actual size based on inputs/outputs
+                    const estimatedSize = calculateTransactionSize(1, 2);
+                    const feeInAsset = ((estimatedSize * feeRate) / 1e8).toString();
                     
                     gasEstimate = {
-                        fee: feeInAsset.toString(),
+                        fee: feeInAsset,
                         gasPrice: feeRate,
                         gasUsed: estimatedSize,
                         maxFeePerGas: null,
@@ -36086,9 +36084,9 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                     console.warn('[GAS ESTIMATE] UTXO fee estimate failed, using default:', err.message);
                     const estimatedSize = calculateTransactionSize(1, 2);
                     const feeRate = 5;
-                    const feeInAsset = (estimatedSize * feeRate) / 1e8;
+                    const feeInAsset = ((estimatedSize * feeRate) / 1e8).toString();
                     gasEstimate = {
-                        fee: feeInAsset.toString(),
+                        fee: feeInAsset,
                         gasPrice: feeRate,
                         gasUsed: estimatedSize,
                         maxFeePerGas: null,
@@ -36108,10 +36106,10 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
                         estimatedEnergy = 15000;
                     }
                     
-                    const fee = (estimatedEnergy * energyPrice / 1e6) + bandwidthPrice;
+                    const fee = Math.max((estimatedEnergy * energyPrice / 1e6) + bandwidthPrice, 0.1);
                     
                     gasEstimate = {
-                        fee: Math.max(fee, 0.1).toString(),
+                        fee: fee.toString(),
                         gasPrice: energyPrice || 0,
                         gasUsed: estimatedEnergy,
                         maxFeePerGas: null,
@@ -36149,7 +36147,7 @@ async function estimateGasForAsset(asset, toAddress, amount, config) {
 
 // =============================================
 // 11. buildAndSignTransaction - Build and sign a transaction
-// FIXED: EIP-1559 support, BigInt gasLimit, proper nonce handling
+// FIXED: Dynamic nonce, BigInt handling, proper TRON signing
 // =============================================
 async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, privateKey, gasEstimate, nonce, config) {
     try {
@@ -36161,8 +36159,9 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
         console.log(`[SIGN TX] Building transaction for ${assetUpper} from ${fromAddress} to ${toAddress}...`);
 
         // Validate addresses
-        if (!validateAddress(asset, fromAddress, config) || !validateAddress(asset, toAddress, config)) {
-            throw new Error(`Invalid address for ${asset}`);
+        if (!validateAddress(assetUpper, fromAddress, config) || 
+            !validateAddress(assetUpper, toAddress, config)) {
+            throw new Error(`Invalid address for ${assetUpper}`);
         }
 
         if (!gasEstimate) {
@@ -36180,7 +36179,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                     signingAddress = walletAddress;
                 }
 
-                // Get current nonce if not provided
+                // Get dynamic nonce if not provided
                 let txNonce = nonce;
                 if (txNonce === undefined || txNonce === null) {
                     txNonce = await withRetry(
@@ -36191,6 +36190,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                     console.log(`[SIGN TX] Using dynamic nonce: ${txNonce}`);
                 }
 
+                // Parse gas values safely
                 const maxFeePerGas = gasEstimate.maxFeePerGas || 
                     (gasEstimate.gasPrice ? ethers.parseUnits(gasEstimate.gasPrice.toString(), 'gwei') : ethers.parseUnits('10', 'gwei'));
                 const maxPriorityFeePerGas = gasEstimate.maxPriorityFeePerGas ||
@@ -36244,21 +36244,17 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                 
                 let keypair;
                 try {
-                    // Try multiple private key formats
+                    // Support multiple private key formats
                     if (privateKey.length === 128) {
-                        // Hex format (64 bytes)
                         const privateKeyBuffer = Buffer.from(privateKey, 'hex');
                         keypair = Keypair.fromSecretKey(privateKeyBuffer);
                     } else if (privateKey.length === 64) {
-                        // Base58 format
                         const decoded = bs58.decode(privateKey);
                         keypair = Keypair.fromSecretKey(decoded);
                     } else if (privateKey.includes('[')) {
-                        // JSON array format
                         const arr = JSON.parse(privateKey);
                         keypair = Keypair.fromSecretKey(new Uint8Array(arr));
                     } else {
-                        // Try as base64
                         const decoded = Buffer.from(privateKey, 'base64');
                         keypair = Keypair.fromSecretKey(decoded);
                     }
@@ -36276,7 +36272,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                 const toPubkey = new PublicKey(toAddress);
                 const fromPubkey = new PublicKey(fromAddress);
 
-                // Convert amount to lamports using BigInt
+                // Use BigInt for lamports
                 const lamports = BigInt(Math.floor(parseFloat(amount) * 1e9));
 
                 const instruction = SystemProgram.transfer({
@@ -36300,7 +36296,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                 transaction.add(instruction);
                 transaction.sign(keypair);
 
-                // Get signature correctly
                 const signature = transaction.signatures[0];
                 txHash = bs58.encode(signature.signature);
                 
@@ -36365,7 +36360,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                         return [];
                     },
                     async () => {
-                        // Fallback to blockstream
                         const response = await withRetry(
                             () => axios.get(`https://blockstream.info/api/address/${fromAddress}/utxo`, { timeout: 10000 }),
                             2,
@@ -36390,14 +36384,19 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 
                 console.log(`[SIGN TX] Found ${utxos.length} UTXOs`);
 
-                // Select UTXOs using Largest-First strategy
-                let selectedUtxos = [];
-                let totalSelected = 0;
+                // Parse fee safely
+                const feeValue = typeof gasEstimate.fee === 'string' 
+                    ? parseFloat(gasEstimate.fee) 
+                    : Number(gasEstimate.fee);
+                
+                // Use BigInt for amounts
                 const amountInSatoshis = BigInt(Math.floor(parseFloat(amount) * 1e8));
-                const feeInSatoshis = BigInt(Math.floor(parseFloat(gasEstimate.fee) * 1e8));
+                const feeInSatoshis = BigInt(Math.floor(feeValue * 1e8));
                 const required = amountInSatoshis + feeInSatoshis;
 
-                // Sort UTXOs by value descending (largest first)
+                // Select UTXOs
+                let selectedUtxos = [];
+                let totalSelected = 0n;
                 const sortedUtxos = [...utxos].sort((a, b) => b.value - a.value);
 
                 for (const utxo of sortedUtxos) {
@@ -36416,7 +36415,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 
                 // Add inputs with proper witness handling
                 for (const utxo of selectedUtxos) {
-                    // Determine address type
                     let scriptType = 'legacy';
                     if (utxo.script_hex) {
                         if (utxo.script_hex.startsWith('0014')) {
@@ -36428,7 +36426,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                         }
                     }
                     
-                    // Get transaction hex for non-witness UTXOs
                     let txHex = null;
                     if (scriptType === 'legacy' || scriptType === 'p2sh') {
                         try {
@@ -36441,7 +36438,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                                 txHex = txResponse.data.data[utxo.transaction_hash].raw_transaction;
                             }
                         } catch (err) {
-                            console.warn(`[SIGN TX] Failed to fetch tx hex for ${utxo.transaction_hash}:`, err.message);
+                            console.warn(`[SIGN TX] Failed to fetch tx hex:`, err.message);
                         }
                     }
 
@@ -36453,7 +36450,6 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                     if (txHex) {
                         inputData.nonWitnessUtxo = Buffer.from(txHex, 'hex');
                     } else {
-                        // For segwit and taproot
                         const script = utxo.script_hex || '76a914000000000000000000000000000000000000000088ac';
                         inputData.witnessUtxo = {
                             script: Buffer.from(script, 'hex'),
@@ -36510,6 +36506,7 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                 }
 
                 let transaction;
+                let unsignedTx;
 
                 if (config.contract) {
                     console.log(`[SIGN TX] TRC-20 transfer detected. Contract: ${config.contract}`);
@@ -36517,14 +36514,14 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                     const decimals = config.decimals || 6;
                     const amountWithDecimals = BigInt(Math.floor(parseFloat(amount) * 10 ** decimals));
 
-                    // Build transaction without broadcasting
+                    // Build transaction WITHOUT broadcasting
                     const parameters = [
                         { type: 'address', value: toAddress },
                         { type: 'uint256', value: amountWithDecimals.toString() }
                     ];
                     
                     const functionSelector = 'transfer(address,uint256)';
-                    transaction = await tronWeb.transactionBuilder.triggerConstantContract(
+                    unsignedTx = await tronWeb.transactionBuilder.triggerConstantContract(
                         config.contract,
                         functionSelector,
                         parameters,
@@ -36535,14 +36532,14 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
                         }
                     );
                     
-                    // Sign the transaction (important: don't broadcast!)
-                    const signed = await tronWeb.trx.sign(transaction.transaction || transaction, privateKey);
+                    // Sign the transaction (DO NOT broadcast)
+                    const signed = await tronWeb.trx.sign(unsignedTx.transaction || unsignedTx, privateKey);
                     transaction = signed;
                     txHash = await tronWeb.trx.getTransactionID(signed);
                 } else {
                     // Native TRX transfer
                     const amountSun = BigInt(Math.floor(parseFloat(amount) * 1_000_000));
-                    const unsignedTx = await tronWeb.transactionBuilder.sendTrx(
+                    unsignedTx = await tronWeb.transactionBuilder.sendTrx(
                         toAddress,
                         amountSun.toString(),
                         fromAddress
@@ -36572,7 +36569,8 @@ async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, pr
 }
 
 // =============================================
-// 12. broadcastTransactionToChain - Broadcast a transaction to the blockchain
+// 12. broadcastTransactionToChain - Broadcast a transaction
+// FIXED: Multiple endpoints, retry logic
 // =============================================
 async function broadcastTransactionToChain(asset, signedTx, config) {
     try {
@@ -36611,7 +36609,6 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
                     1000
                 );
 
-                // Use the txid from the node (canonical)
                 result = {
                     txHash: txid,
                     blockNumber: 0,
@@ -36623,8 +36620,6 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
 
             case 'utxo': {
                 const assetLower = assetUpper.toLowerCase();
-                
-                // Try multiple broadcast endpoints
                 const broadcastEndpoints = {
                     'btc': [
                         'https://api.blockchair.com/bitcoin/push/transaction',
@@ -36654,7 +36649,6 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
                                 1000
                             );
                         } else {
-                            // Blockstream uses raw POST
                             response = await withRetry(
                                 () => axios.post(endpoint, signedTx, {
                                     headers: { 'Content-Type': 'text/plain' },
@@ -36727,7 +36721,8 @@ async function broadcastTransactionToChain(asset, signedTx, config) {
 }
 
 // =============================================
-// 13. checkTransactionOnBlockchain - Check transaction status on blockchain
+// 13. checkTransactionOnBlockchain - Check transaction status
+// FIXED: Chain-specific confirmations, multiple explorers
 // =============================================
 async function checkTransactionOnBlockchain(txHash, asset, chainId) {
     const assetUpper = asset.toUpperCase();
@@ -36800,7 +36795,6 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
                 const txStatus = status.value;
                 const confirmations = txStatus.confirmations || 0;
                 
-                // For Solana, "finalized" is the most reliable confirmation state
                 const isConfirmed = txStatus.confirmationStatus === 'finalized' || 
                                   txStatus.confirmationStatus === 'confirmed' ||
                                   confirmations >= required;
@@ -36924,8 +36918,9 @@ async function checkTransactionOnBlockchain(txHash, asset, chainId) {
 }
 
 // =============================================
-// Helper: Retry logic with exponential backoff
+// Helper Functions
 // =============================================
+
 async function withRetry(fn, maxRetries = 3, delay = 1000) {
     let lastError;
     for (let i = 0; i < maxRetries; i++) {
@@ -36943,9 +36938,6 @@ async function withRetry(fn, maxRetries = 3, delay = 1000) {
     throw lastError;
 }
 
-// =============================================
-// Helper: Get required confirmations by chain
-// =============================================
 function getRequiredConfirmations(asset) {
     const confirmationsMap = {
         'ETH': 2,
@@ -36955,29 +36947,19 @@ function getRequiredConfirmations(asset) {
         'BTC': 6,
         'LTC': 6,
         'DOGE': 20,
-        'SOL': 0, // Solana uses finalization instead
+        'SOL': 0,
         'TRX': 1
     };
     return confirmationsMap[asset] || 12;
 }
 
-// =============================================
-// Helper: Calculate transaction size based on inputs/outputs
-// =============================================
 function calculateTransactionSize(numInputs, numOutputs, isSegwit = true) {
-    // Approximate transaction size in bytes
-    // Base: 10 bytes (version + locktime)
-    // Inputs: 148 bytes each (legacy) or 68 bytes each (segwit)
-    // Outputs: 34 bytes each
     const baseSize = 10;
     const inputSize = isSegwit ? 68 : 148;
     const outputSize = 34;
     return baseSize + (numInputs * inputSize) + (numOutputs * outputSize);
 }
 
-// =============================================
-// Helper: Validate addresses for different chains
-// =============================================
 function validateAddress(asset, address, config) {
     try {
         const assetUpper = asset.toUpperCase();
@@ -37003,11 +36985,9 @@ function validateAddress(asset, address, config) {
                             network = bitcoin.networks.bitcoin;
                             break;
                         case 'LTC':
-                            // Litecoin network params
                             network = { pubKeyHash: 0x30, scriptHash: 0x32 };
                             break;
                         case 'DOGE':
-                            // Dogecoin network params
                             network = { pubKeyHash: 0x1e, scriptHash: 0x16 };
                             break;
                         default:
@@ -37030,7 +37010,6 @@ function validateAddress(asset, address, config) {
         return false;
     }
 }
-
 
 
 
