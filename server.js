@@ -9337,7 +9337,72 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
 
 
 
+// =============================================
+// HELPER FUNCTION: CRYPTO ADDRESS VALIDATION
+// Checks the format of an address for various networks.
+// =============================================
+function isValidCryptoAddress(address, asset) {
+    if (!address || typeof address !== 'string') {
+        return false;
+    }
 
+    // Basic check: address must be at least 20 characters for most networks
+    if (address.length < 20) {
+        return false;
+    }
+
+    const assetUpper = asset.toUpperCase();
+
+    switch (assetUpper) {
+        case 'BTC':
+        case 'LTC':
+        case 'DOGE':
+            // Bitcoin-like addresses: p2pkh (34 chars), p2sh (34 chars), bech32 (42+ chars)
+            return /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(address) || // Legacy
+                   /^bc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(address) ||    // Native SegWit (BTC)
+                   /^ltc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(address) ||   // Native SegWit (LTC)
+                   /^[A-Za-z0-9]{34}$/.test(address);                    // DOGE (simple check)
+
+        case 'ETH':
+        case 'USDT':
+        case 'USDC':
+        case 'LINK':
+        case 'UNI':
+        case 'WBTC':
+        case 'DAI':
+        case 'SHIB':
+        case 'MATIC':
+        case 'AVAX':
+        case 'BNB':
+            // Ethereum and EVM-compatible addresses: 0x + 40 hex characters
+            return /^0x[a-fA-F0-9]{40}$/.test(address);
+
+        case 'SOL':
+            // Solana addresses: base58 encoded, 32-44 characters
+            return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+
+        case 'XRP':
+            // XRP addresses: 'r' followed by 25-34 alphanumeric characters
+            return /^r[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(address);
+
+        case 'TRX':
+            // TRON addresses: 'T' followed by 33 alphanumeric characters
+            return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address);
+
+        case 'ADA':
+            // Cardano addresses: starts with 'addr1' and is ~55-60 chars
+            return /^addr1[a-zA-Z0-9]{50,60}$/.test(address);
+
+        case 'DOT':
+            // Polkadot addresses: starts with '1' and is 47-48 chars (simplified)
+            return /^1[a-zA-Z0-9]{46,47}$/.test(address);
+
+        default:
+            // If asset is not in the list, do a generic alphanumeric check
+            console.warn(`[Address Validation] No specific rule for asset: ${assetUpper}. Performing generic check.`);
+            return /^[a-zA-Z0-9]{20,60}$/.test(address);
+    }
+}
 
 
 
