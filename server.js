@@ -36694,14 +36694,22 @@ app.get('/api/admin/wallet-management/treasury/wallets', adminProtect, restrictT
 
 
 
+
+
+
+
+
+
+
 // =============================================
 // FIXED: TREASURY WITHDRAW ENDPOINT
-// Balance is checked on the PLATFORM WALLET, not the fromAddress
+// Uses the SELECTED wallet address from the dropdown
+// Correctly checks balance on the selected address
 // =============================================
 
 /**
  * POST /api/admin/wallet-management/treasury/withdraw
- * Executes a withdrawal from a treasury wallet to an external address
+ * Executes a withdrawal from the SELECTED treasury wallet to an external address
  * Supports ALL chains using existing platformWallet infrastructure
  */
 app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
@@ -36712,7 +36720,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         const { 
             networkId,
             asset,
-            fromAddress,
+            fromAddress,        // THIS IS THE SELECTED WALLET ADDRESS FROM DROPDOWN
             amount,
             destinationAddress,
             memo,
@@ -36722,6 +36730,12 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         const adminId = req.admin._id;
         const adminName = req.admin.name;
         const adminEmail = req.admin.email;
+
+        console.log(`📝 Withdrawal request:`);
+        console.log(`   Asset: ${asset}`);
+        console.log(`   From Address (selected): ${fromAddress}`);
+        console.log(`   Amount: ${amount}`);
+        console.log(`   Destination: ${destinationAddress}`);
 
         // =============================================
         // 2. VALIDATE REQUIRED FIELDS
@@ -36765,12 +36779,8 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 4. GET THE PLATFORM WALLET ADDRESS
+        // 4. VERIFY THE SELECTED WALLET EXISTS IN OUR SYSTEM
         // =============================================
-        // CRITICAL FIX: The fromAddress is the deposit address, but we need
-        // the platform wallet address that actually holds the funds
-        
-        // First, verify the fromAddress exists
         const depositAddressRecord = await DepositAddress.findOne({
             address: fromAddress,
             asset: assetLower,
@@ -36780,49 +36790,19 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         if (!depositAddressRecord) {
             return res.status(404).json({
                 status: 'fail',
-                message: `Source wallet address ${fromAddress} not found in the system`,
+                message: `Wallet address ${fromAddress} not found in the system`,
                 errorCode: 'WALLET_NOT_FOUND'
             });
         }
 
-        // Now get the platform wallet address - this is the address that holds the funds
-        // The platform wallet is generated from the same derivation path but with the PLATFORM index
-        // For EVM chains, the platform wallet is the first address generated (index 0)
-        const platformDerivationPath = `m/44'/${config.coinType}'/0'/0/0`;
-        const platformChild = platformWallet.root.derivePath(platformDerivationPath);
-        
-        // Get the platform wallet address from the derivation path
-        let platformWalletAddress = null;
-        
-        if (config.type === 'evm') {
-            const privateKeyHex = '0x' + platformChild.privateKey.toString('hex');
-            const wallet = new ethers.Wallet(privateKeyHex);
-            platformWalletAddress = wallet.address;
-        } else {
-            // For other chains, use the existing address from the database
-            const platformAddressRecord = await DepositAddress.findOne({
-                asset: assetLower,
-                isActive: true,
-                derivationPath: platformDerivationPath
-            });
-            
-            if (platformAddressRecord) {
-                platformWalletAddress = platformAddressRecord.address;
-            } else {
-                // Generate the platform address
-                const addressData = platformWallet.generateDepositAddress('system', assetUpper);
-                platformWalletAddress = addressData.address;
-            }
-        }
-
-        console.log(`🔑 Platform wallet address for ${assetUpper}: ${platformWalletAddress}`);
-        console.log(`📝 User's deposit address: ${fromAddress}`);
+        console.log(`✅ Wallet verified: ${fromAddress}`);
+        console.log(`   Derivation Path: ${depositAddressRecord.derivationPath}`);
 
         // =============================================
-        // 5. GET THE PRIVATE KEY FOR THE PLATFORM WALLET
+        // 5. GET THE PRIVATE KEY FOR THE SELECTED WALLET
         // =============================================
         let privateKey = null;
-        let derivationPath = platformDerivationPath;
+        let derivationPath = depositAddressRecord.derivationPath;
         
         try {
             const child = platformWallet.root.derivePath(derivationPath);
@@ -36830,8 +36810,9 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 throw new Error('No private key available');
             }
             privateKey = child.privateKey.toString('hex');
-            console.log(`🔑 Private key retrieved for platform wallet`);
+            console.log(`🔑 Private key retrieved for selected wallet`);
         } catch (keyError) {
+            console.error('Private key error:', keyError);
             return res.status(500).json({
                 status: 'error',
                 message: 'Failed to retrieve wallet private key',
@@ -36852,21 +36833,21 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 7. CHECK BALANCE ON THE PLATFORM WALLET
-        // CRITICAL FIX: Check the PLATFORM WALLET balance, NOT the fromAddress
+        // 7. CHECK BALANCE ON THE SELECTED WALLET
+        // CRITICAL: Check the EXACT address the user selected
         // =============================================
         let currentBalance = 0;
         let pendingBalance = 0;
         
-        console.log(`🔍 Checking balance for ${assetUpper} platform wallet: ${platformWalletAddress}`);
+        console.log(`🔍 Checking balance for selected wallet: ${fromAddress}`);
         
         try {
-            // Check the platform wallet balance
-            const balanceResult = await getBlockchainBalance(assetUpper, [platformWalletAddress], config);
+            // Check balance on the selected address
+            const balanceResult = await getBlockchainBalance(assetUpper, [fromAddress], config);
             currentBalance = balanceResult.confirmed || 0;
             pendingBalance = balanceResult.pending || 0;
             
-            console.log(`📊 Platform wallet balance for ${assetUpper}:`);
+            console.log(`📊 Balance for selected wallet ${fromAddress}:`);
             console.log(`   Confirmed: ${currentBalance} ${assetUpper}`);
             console.log(`   Pending: ${pendingBalance} ${assetUpper}`);
             console.log(`   Withdrawal Amount: ${amount} ${assetUpper}`);
@@ -36874,18 +36855,18 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         } catch (balanceError) {
             console.error('Balance check error:', balanceError);
             
-            // FALLBACK: Check ALL deposit addresses for this asset
+            // FALLBACK: Try alternative RPC or method
             try {
-                const allAddresses = await DepositAddress.find({
-                    asset: assetLower,
-                    isActive: true
-                }).distinct('address');
-                
-                if (allAddresses.length > 0) {
-                    const totalBalanceResult = await getBlockchainBalance(assetUpper, allAddresses, config);
-                    currentBalance = totalBalanceResult.confirmed || 0;
-                    pendingBalance = totalBalanceResult.pending || 0;
-                    console.log(`📊 FALLBACK: Total balance across all ${assetUpper} wallets: ${currentBalance}`);
+                // Try with a different RPC endpoint if available
+                const fallbackRpc = config.fallbackRpc || config.rpc;
+                if (fallbackRpc !== config.rpc) {
+                    const fallbackConfig = { ...config, rpc: fallbackRpc };
+                    const balanceResult = await getBlockchainBalance(assetUpper, [fromAddress], fallbackConfig);
+                    currentBalance = balanceResult.confirmed || 0;
+                    pendingBalance = balanceResult.pending || 0;
+                    console.log(`📊 FALLBACK balance for ${fromAddress}: ${currentBalance} ${assetUpper}`);
+                } else {
+                    throw new Error('No fallback RPC available');
                 }
             } catch (fallbackError) {
                 console.error('Fallback balance check failed:', fallbackError);
@@ -36898,30 +36879,38 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             }
         }
 
+        // =============================================
+        // 8. VERIFY BALANCE IS SUFFICIENT
+        // =============================================
         if (currentBalance < amount) {
+            console.warn(`⚠️ Insufficient balance on ${fromAddress}:`);
+            console.warn(`   Available: ${currentBalance} ${assetUpper}`);
+            console.warn(`   Required: ${amount} ${assetUpper}`);
+            
             return res.status(400).json({
                 status: 'fail',
-                message: `Insufficient platform wallet balance. Available: ${currentBalance.toFixed(8)} ${assetUpper}, Required: ${amount.toFixed(8)} ${assetUpper}`,
+                message: `Insufficient balance on selected wallet. Available: ${currentBalance.toFixed(8)} ${assetUpper}, Required: ${amount.toFixed(8)} ${assetUpper}`,
                 data: {
                     available: currentBalance,
                     pending: pendingBalance,
                     required: amount,
                     asset: assetUpper,
-                    platformWallet: platformWalletAddress,
-                    depositAddress: fromAddress
+                    address: fromAddress
                 },
                 errorCode: 'INSUFFICIENT_BALANCE'
             });
         }
 
         // =============================================
-        // 8. ESTIMATE GAS/FEE
+        // 9. ESTIMATE GAS/FEE
         // =============================================
         let gasEstimate = { fee: 0, gasPrice: 0, gasUsed: 21000 };
         
         try {
             gasEstimate = await estimateGasForAsset(assetUpper, destinationAddress, amount, config);
+            console.log(`⛽ Gas Estimate: ${gasEstimate.fee} ${assetUpper}`);
         } catch (gasError) {
+            console.error('Gas estimation error:', gasError);
             return res.status(500).json({
                 status: 'error',
                 message: 'Failed to estimate transaction fee. Please try again later.',
@@ -36941,21 +36930,22 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                     amount: amount,
                     fee: gasEstimate.fee,
                     asset: assetUpper,
-                    platformWallet: platformWalletAddress
+                    address: fromAddress
                 },
                 errorCode: 'INSUFFICIENT_BALANCE_WITH_FEE'
             });
         }
 
         // =============================================
-        // 9. GET NONCE (for EVM chains)
+        // 10. GET NONCE (for EVM chains)
         // =============================================
         let nonce = 0;
         if (config.type === 'evm') {
             try {
-                nonce = await getNonceForAddress(assetUpper, platformWalletAddress, config);
+                nonce = await getNonceForAddress(assetUpper, fromAddress, config);
                 console.log(`🔢 Nonce: ${nonce}`);
             } catch (nonceError) {
+                console.error('Nonce error:', nonceError);
                 return res.status(500).json({
                     status: 'error',
                     message: 'Failed to get transaction nonce. Please try again later.',
@@ -36965,16 +36955,18 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 10. BUILD AND SIGN TRANSACTION
+        // 11. BUILD AND SIGN TRANSACTION
         // =============================================
         let signedTx;
         let txHash;
         let explorerUrl;
         
         try {
+            console.log(`✍️ Building transaction from ${fromAddress} to ${destinationAddress}`);
+            
             const signedResult = await buildAndSignTransaction(
                 assetUpper,
-                platformWalletAddress,  // Use PLATFORM WALLET as from address
+                fromAddress,        // USE THE SELECTED WALLET ADDRESS
                 destinationAddress,
                 amount,
                 privateKey,
@@ -36993,6 +36985,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             
             console.log(`✅ Transaction signed successfully. TX Hash: ${txHash}`);
         } catch (signError) {
+            console.error('Signing error:', signError);
             return res.status(500).json({
                 status: 'error',
                 message: `Failed to sign transaction: ${signError.message}`,
@@ -37001,10 +36994,11 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 11. BROADCAST TRANSACTION
+        // 12. BROADCAST TRANSACTION
         // =============================================
         let broadcastResult;
         try {
+            console.log(`📡 Broadcasting transaction...`);
             broadcastResult = await broadcastTransactionToChain(
                 assetUpper,
                 signedTx,
@@ -37018,6 +37012,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             txHash = broadcastResult.txHash;
             console.log(`✅ Transaction broadcasted successfully. TX Hash: ${txHash}`);
         } catch (broadcastError) {
+            console.error('Broadcast error:', broadcastError);
             return res.status(500).json({
                 status: 'error',
                 message: `Failed to broadcast transaction: ${broadcastError.message}`,
@@ -37027,7 +37022,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 12. CREATE ADMIN WITHDRAWAL RECORD
+        // 13. CREATE ADMIN WITHDRAWAL RECORD
         // =============================================
         const adminWithdrawal = await AdminWithdrawal.create({
             adminId: adminId,
@@ -37042,11 +37037,14 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             addressesUsed: 1,
             utxosUsed: 1,
             createdAt: new Date(),
-            confirmedAt: null
+            confirmedAt: null,
+            fromAddress: fromAddress  // Store the selected wallet address
         });
 
+        console.log(`📝 Withdrawal record created: ${adminWithdrawal._id}`);
+
         // =============================================
-        // 13. CREATE TRANSACTION RECORD
+        // 14. CREATE TRANSACTION RECORD
         // =============================================
         const transactionReference = `ADMIN-WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
         
@@ -37063,8 +37061,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             details: {
                 txHash: txHash,
                 destinationAddress: destinationAddress,
-                fromAddress: platformWalletAddress,  // Record the platform wallet as source
-                userDepositAddress: fromAddress,     // Record the user's deposit address for reference
+                fromAddress: fromAddress,  // The selected wallet address
                 network: config.network || platformWallet.getNetworkName(assetUpper),
                 gasFee: gasEstimate.fee || 0,
                 gasPrice: gasEstimate.gasPrice || 0,
@@ -37075,7 +37072,8 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 memo: memo || '',
                 notes: notes || '',
                 withdrawalId: adminWithdrawal._id,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                derivationPath: derivationPath
             },
             btcAddress: destinationAddress,
             fee: gasEstimate.fee || 0,
@@ -37086,13 +37084,15 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             exchangeRateAtTime: await getCryptoPrice(assetUpper) || 0
         });
 
+        console.log(`📝 Transaction record created: ${transaction.reference}`);
+
         // =============================================
-        // 14. UPDATE REDIS
+        // 15. UPDATE REDIS
         // =============================================
         await redis.set(`treasury:${assetUpper}:last_withdrawal`, new Date().toISOString());
 
         // =============================================
-        // 15. LOG ACTIVITY
+        // 16. LOG ACTIVITY
         // =============================================
         await SystemLog.create({
             action: 'treasury_withdrawal',
@@ -37105,8 +37105,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             status: 'success',
             metadata: {
                 asset: assetUpper,
-                fromAddress: platformWalletAddress,
-                userDepositAddress: fromAddress,
+                fromAddress: fromAddress,
                 amount: amount,
                 destinationAddress: destinationAddress,
                 txHash: txHash,
@@ -37117,7 +37116,8 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 memo: memo || '',
                 notes: notes || '',
                 transactionId: transaction._id,
-                withdrawalId: adminWithdrawal._id
+                withdrawalId: adminWithdrawal._id,
+                derivationPath: derivationPath
             },
             ip: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown',
@@ -37125,7 +37125,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         });
 
         // =============================================
-        // 16. START BACKGROUND MONITORING
+        // 17. START BACKGROUND MONITORING
         // =============================================
         startWithdrawalConfirmationMonitoring(
             txHash,
@@ -37136,7 +37136,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         );
 
         // =============================================
-        // 17. RESPONSE
+        // 18. RESPONSE
         // =============================================
         const responseData = {
             status: 'success',
@@ -37154,7 +37154,8 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                     nonce: nonce,
                     status: 'pending',
                     createdAt: adminWithdrawal.createdAt,
-                    confirmedAt: null
+                    confirmedAt: null,
+                    fromAddress: fromAddress
                 },
                 transaction: {
                     id: transaction._id,
@@ -37169,22 +37170,15 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 balance: {
                     available: currentBalance - totalCost,
                     asset: assetUpper,
-                    platformWallet: platformWalletAddress
-                },
-                // Include debug info to help troubleshoot
-                debug: {
-                    platformWallet: platformWalletAddress,
-                    userDepositAddress: fromAddress,
-                    derivationPath: derivationPath
+                    address: fromAddress
                 }
             }
         };
 
         console.log(`✅ Withdrawal completed successfully for ${assetUpper}`);
         console.log(`   Amount: ${amount} ${assetUpper}`);
+        console.log(`   From: ${fromAddress}`);
         console.log(`   TX Hash: ${txHash}`);
-        console.log(`   Platform Wallet: ${platformWalletAddress}`);
-        console.log(`   User Deposit Address: ${fromAddress}`);
 
         res.status(200).json(responseData);
 
@@ -37252,6 +37246,25 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         });
     }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
