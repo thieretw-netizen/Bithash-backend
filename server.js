@@ -40616,6 +40616,7 @@ async function getRealTimeAssetBalances() {
 
 
 
+
 // =============================================
 // 15. POST /api/admin/wallet-management/treasury/transfer - Execute Treasury Transfer
 // =============================================
@@ -40624,11 +40625,10 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
     let responseSent = false;
 
     try {
-        const { 
-            asset, 
-            amount, 
-            fromAddress, 
-            toAddress, 
+        const {
+            asset,
+            amount,
+            destinationAddress,
             networkId,
             memo,
             notes
@@ -40651,8 +40651,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         console.log(`   Admin ID: ${adminId}`);
         console.log(`   Asset: ${asset}`);
         console.log(`   Amount: ${amount}`);
-        console.log(`   From Address: ${fromAddress || 'NOT PROVIDED'}`);
-        console.log(`   To Address: ${toAddress}`);
+        console.log(`   Destination: ${destinationAddress}`);
         console.log(`   Network ID: ${networkId || 'NOT PROVIDED'}`);
         console.log(`   Memo: ${memo || 'NONE'}`);
         console.log(`   Notes: ${notes || 'NONE'}`);
@@ -40661,25 +40660,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         console.log('='.repeat(80));
 
         // =============================================
-        // SECTION 2: CRITICAL VALIDATION - fromAddress IS REQUIRED
-        // =============================================
-        if (!fromAddress || typeof fromAddress !== 'string' || fromAddress.trim().length < 10) {
-            console.error('❌ CRITICAL: No source wallet specified');
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Source wallet address is required. Please select a wallet and try again.',
-                errorCode: 'NO_SOURCE_WALLET',
-                required: 'fromAddress must be provided',
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        // Clean and normalize addresses
-        const normalizedFromAddress = fromAddress.trim();
-        const normalizedToAddress = toAddress.trim();
-
-        // =============================================
-        // SECTION 3: INPUT VALIDATION
+        // SECTION 2: INPUT VALIDATION
         // =============================================
         const validationErrors = [];
 
@@ -40694,22 +40675,28 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         }
 
         // Validate destination address
-        if (!toAddress || typeof toAddress !== 'string' || toAddress.trim().length < 10) {
+        if (!destinationAddress || typeof destinationAddress !== 'string' || destinationAddress.trim().length < 10) {
             validationErrors.push('Valid destination address is required');
         }
 
+        // Validate network
+        if (!networkId || typeof networkId !== 'string') {
+            validationErrors.push('Network ID is required');
+        }
+
         if (validationErrors.length > 0) {
+            console.log('[TREASURY TRANSFER] Validation failed:', validationErrors);
             return res.status(400).json({
                 status: 'fail',
                 message: 'Validation failed',
                 errors: validationErrors,
-                requiredFields: ['asset', 'amount', 'fromAddress', 'toAddress'],
+                requiredFields: ['asset', 'amount', 'destinationAddress', 'networkId'],
                 timestamp: new Date().toISOString()
             });
         }
 
         // =============================================
-        // SECTION 4: ASSET SUPPORT VALIDATION
+        // SECTION 3: ASSET SUPPORT VALIDATION
         // =============================================
         const assetUpper = asset.toUpperCase();
         const assetLower = asset.toLowerCase();
@@ -40717,6 +40704,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // Check if asset is supported by the platform wallet
         if (!platformWallet.isAssetSupported(assetUpper)) {
             const supportedAssets = platformWallet.getSupportedAssets().map(a => a.symbol);
+            console.log(`[TREASURY TRANSFER] Asset ${assetUpper} not supported`);
             return res.status(400).json({
                 status: 'fail',
                 message: `Asset ${assetUpper} is not supported by the platform`,
@@ -40729,6 +40717,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // Get network configuration
         const config = platformWallet.networkProviders[assetUpper];
         if (!config) {
+            console.log(`[TREASURY TRANSFER] No network configuration for ${assetUpper}`);
             return res.status(400).json({
                 status: 'fail',
                 message: `No network configuration found for ${assetUpper}`,
@@ -40738,45 +40727,66 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         }
 
         // =============================================
-        // SECTION 5: DESTINATION ADDRESS VALIDATION
+        // SECTION 4: DESTINATION ADDRESS VALIDATION
         // =============================================
-        if (!isValidCryptoAddress(normalizedToAddress, assetUpper)) {
+        if (!isValidCryptoAddress(destinationAddress, assetUpper)) {
+            console.log(`[TREASURY TRANSFER] Invalid ${assetUpper} address format`);
             return res.status(400).json({
                 status: 'fail',
                 message: `Invalid ${assetUpper} address format. Please check the destination address.`,
                 errorCode: 'INVALID_ADDRESS',
                 asset: assetUpper,
-                address: normalizedToAddress,
+                address: destinationAddress,
                 timestamp: new Date().toISOString()
             });
         }
 
         // =============================================
-        // SECTION 6: CRITICAL - FIND THE EXACT SOURCE WALLET
+        // SECTION 5: GET PLATFORM WALLET ADDRESS FOR THIS ASSET
         // =============================================
-        console.log(`\n🔍 STEP 1: Finding exact source wallet...`);
-        console.log(`   Source address: ${normalizedFromAddress}`);
+        console.log(`\n🔍 STEP 1: Getting platform wallet address for ${assetUpper}...`);
+
+        // Get the platform wallet address for this asset
+        const fromAddress = await getPlatformWalletAddress(assetUpper);
+
+        if (!fromAddress) {
+            console.error(`[TREASURY TRANSFER] No platform wallet found for ${assetUpper}`);
+            return res.status(404).json({
+                status: 'fail',
+                message: `No platform wallet found for ${assetUpper}. Please ensure deposit addresses exist for this asset.`,
+                errorCode: 'PLATFORM_WALLET_NOT_FOUND',
+                asset: assetUpper,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        console.log(`✅ Platform wallet found: ${fromAddress}`);
+
+        // =============================================
+        // SECTION 6: CRITICAL - FIND THE EXACT WALLET
+        // =============================================
+        console.log(`\n🔍 STEP 2: Verifying wallet exists in database...`);
 
         // Find the EXACT wallet in the database
         const walletRecord = await DepositAddress.findOne({
-            address: normalizedFromAddress,
+            address: fromAddress,
             asset: assetLower,
             isActive: true
         }).lean();
 
         if (!walletRecord) {
-            console.error(`❌ CRITICAL: Wallet ${normalizedFromAddress} not found in database`);
+            console.error(`❌ CRITICAL: Wallet ${fromAddress} not found in database`);
             return res.status(404).json({
                 status: 'fail',
-                message: `The source wallet address ${normalizedFromAddress.substring(0, 15)}... was not found in the system. Please verify the address and try again.`,
+                message: `The platform wallet address ${fromAddress.substring(0, 15)}... was not found in the system. Please ensure deposit addresses are properly set up.`,
                 errorCode: 'WALLET_NOT_FOUND',
                 data: {
-                    requestedAddress: normalizedFromAddress,
+                    requestedAddress: fromAddress,
                     asset: assetUpper,
                     possibleCauses: [
-                        'The wallet address was entered incorrectly',
+                        'No deposit addresses exist for this asset',
                         'The wallet has been deactivated',
-                        'The wallet belongs to a different asset'
+                        'The asset is not properly configured'
                     ]
                 },
                 timestamp: new Date().toISOString()
@@ -40793,7 +40803,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // =============================================
         // SECTION 7: GET PRIVATE KEY FOR THIS EXACT WALLET
         // =============================================
-        console.log(`\n🔑 STEP 2: Deriving private key for the EXACT wallet...`);
+        console.log(`\n🔑 STEP 3: Deriving private key for the wallet...`);
         console.log(`   Using derivation path: ${walletRecord.derivationPath}`);
 
         let privateKey = null;
@@ -40803,17 +40813,17 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         try {
             // Derive the private key from the master seed using the wallet's derivation path
             const child = platformWallet.root.derivePath(walletRecord.derivationPath);
-            
+
             if (!child.privateKey) {
                 throw new Error('No private key available at this derivation path');
             }
-            
+
             privateKey = child.privateKey.toString('hex');
 
             // =============================================
             // SECTION 8: CRITICAL - VERIFY DERIVED ADDRESS MATCHES
             // =============================================
-            console.log(`\n🔍 STEP 3: Verifying derived address matches source...`);
+            console.log(`\n🔍 STEP 4: Verifying derived address matches wallet...`);
 
             // Derive the address from the private key to verify it matches
             try {
@@ -40821,13 +40831,13 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                 const wallet = new ethers.Wallet(privateKey, provider);
                 derivedAddress = wallet.address.toLowerCase();
 
-                console.log(`   Source address: ${normalizedFromAddress.toLowerCase()}`);
+                console.log(`   Wallet address: ${fromAddress.toLowerCase()}`);
                 console.log(`   Derived address: ${derivedAddress}`);
 
                 // CRITICAL: Compare the addresses
-                if (derivedAddress !== normalizedFromAddress.toLowerCase()) {
-                    console.error(`❌ CRITICAL MISMATCH: Derived address does not match source!`);
-                    console.error(`   Source: ${normalizedFromAddress}`);
+                if (derivedAddress !== fromAddress.toLowerCase()) {
+                    console.error(`❌ CRITICAL MISMATCH: Derived address does not match wallet!`);
+                    console.error(`   Wallet: ${fromAddress}`);
                     console.error(`   Derived: ${derivedAddress}`);
 
                     return res.status(500).json({
@@ -40835,7 +40845,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                         message: 'Address derivation mismatch. The private key did not produce the expected address. This is a critical security issue.',
                         errorCode: 'ADDRESS_DERIVATION_MISMATCH',
                         data: {
-                            sourceAddress: normalizedFromAddress,
+                            walletAddress: fromAddress,
                             derivedAddress: derivedAddress,
                             derivationPath: walletRecord.derivationPath
                         },
@@ -40843,8 +40853,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                     });
                 }
 
-                console.log(`✅ Address verification PASSED: ${derivedAddress} === ${normalizedFromAddress.toLowerCase()}`);
-                console.log(`   ✅ Source matches derived address`);
+                console.log(`✅ Address verification PASSED: ${derivedAddress} === ${fromAddress.toLowerCase()}`);
 
             } catch (verifyError) {
                 console.error(`❌ Address verification failed: ${verifyError.message}`);
@@ -40860,11 +40869,11 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
             console.log(`   Derivation Path: ${walletRecord.derivationPath}`);
             console.log(`   Key Length: ${privateKey.length} characters`);
             console.log(`   Derived Address: ${derivedAddress}`);
-            
+
         } catch (keyError) {
             console.error(`❌ Private key error: ${keyError.message}`);
             privateKeyError = keyError.message;
-            
+
             return res.status(500).json({
                 status: 'error',
                 message: 'Failed to retrieve wallet private key',
@@ -40890,8 +40899,8 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // =============================================
         // SECTION 9: FETCH BALANCE FOR THIS EXACT WALLET
         // =============================================
-        console.log(`\n💰 STEP 4: Checking balance for the EXACT wallet...`);
-        console.log(`   Address: ${normalizedFromAddress}`);
+        console.log(`\n💰 STEP 5: Checking balance for the wallet...`);
+        console.log(`   Address: ${fromAddress}`);
 
         let confirmedBalance = 0;
         let pendingBalance = 0;
@@ -40901,7 +40910,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
             // Get real-time balance from blockchain
             const balanceResult = await getBlockchainBalance(
                 assetUpper,
-                [normalizedFromAddress],
+                [fromAddress],
                 config
             );
 
@@ -40916,13 +40925,13 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         } catch (err) {
             console.error(`❌ Balance fetch error: ${err.message}`);
             balanceError = err.message;
-            
+
             return res.status(503).json({
                 status: 'error',
                 message: `Failed to fetch balance for wallet: ${err.message}`,
                 errorCode: 'BALANCE_FETCH_ERROR',
                 data: {
-                    address: normalizedFromAddress,
+                    address: fromAddress,
                     asset: assetUpper
                 },
                 retryAfter: 30,
@@ -40933,7 +40942,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // =============================================
         // SECTION 10: GET GAS FEE ESTIMATE
         // =============================================
-        console.log(`\n⛽ STEP 5: Estimating gas fee...`);
+        console.log(`\n⛽ STEP 6: Estimating gas fee...`);
 
         let gasEstimate = {
             fee: 0,
@@ -40943,7 +40952,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         };
 
         try {
-            const estimate = await estimateGasForAsset(assetUpper, normalizedToAddress, amount, config);
+            const estimate = await estimateGasForAsset(assetUpper, destinationAddress, amount, config);
             if (estimate) {
                 gasEstimate = {
                     fee: estimate.fee || 0,
@@ -40970,7 +40979,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // =============================================
         // SECTION 11: CRITICAL - VERIFY BALANCE IS SUFFICIENT
         // =============================================
-        console.log(`\n🔍 STEP 6: Verifying balance is sufficient...`);
+        console.log(`\n🔍 STEP 7: Verifying balance is sufficient...`);
 
         if (confirmedBalance < totalRequired) {
             console.error(`❌ Insufficient balance for transfer:`);
@@ -40980,10 +40989,10 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 
             return res.status(400).json({
                 status: 'fail',
-                message: `Insufficient balance in source wallet. Available: ${confirmedBalance.toFixed(8)} ${assetUpper}, Required: ${totalRequired.toFixed(8)} ${assetUpper} (amount + gas fee)`,
+                message: `Insufficient balance in platform wallet. Available: ${confirmedBalance.toFixed(8)} ${assetUpper}, Required: ${totalRequired.toFixed(8)} ${assetUpper} (amount + gas fee)`,
                 errorCode: 'INSUFFICIENT_BALANCE',
                 data: {
-                    walletAddress: normalizedFromAddress,
+                    walletAddress: fromAddress,
                     availableBalance: confirmedBalance,
                     requiredBalance: totalRequired,
                     amount: amount,
@@ -41003,12 +41012,12 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // =============================================
         // SECTION 12: DOUBLE-CHECK BALANCE FRESH
         // =============================================
-        console.log(`\n🔍 STEP 7: Double-checking balance with fresh query...`);
+        console.log(`\n🔍 STEP 8: Double-checking balance with fresh query...`);
 
         try {
             const freshBalance = await getBlockchainBalance(
                 assetUpper,
-                [normalizedFromAddress],
+                [fromAddress],
                 config
             );
 
@@ -41030,7 +41039,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                             currentBalance: freshConfirmed,
                             required: totalRequired,
                             asset: assetUpper,
-                            address: normalizedFromAddress
+                            address: fromAddress
                         },
                         timestamp: new Date().toISOString()
                     });
@@ -41054,21 +41063,21 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         let nonceError = null;
 
         if (config.type === 'evm') {
-            console.log(`\n🔢 STEP 8: Getting transaction nonce for ${normalizedFromAddress}...`);
+            console.log(`\n🔢 STEP 9: Getting transaction nonce for ${fromAddress}...`);
             try {
-                nonce = await getNonceForAddress(assetUpper, normalizedFromAddress, config);
+                nonce = await getNonceForAddress(assetUpper, fromAddress, config);
                 console.log(`   Nonce: ${nonce}`);
             } catch (err) {
                 console.error(`❌ Nonce error: ${err.message}`);
                 nonceError = err.message;
-                
+
                 return res.status(500).json({
                     status: 'error',
                     message: 'Failed to get transaction nonce. Please try again later.',
                     errorCode: 'NONCE_ERROR',
                     details: process.env.NODE_ENV === 'development' ? nonceError : undefined,
                     data: {
-                        address: normalizedFromAddress,
+                        address: fromAddress,
                         asset: assetUpper
                     },
                     timestamp: new Date().toISOString()
@@ -41079,9 +41088,9 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // =============================================
         // SECTION 14: BUILD TRANSACTION FROM THE EXACT WALLET
         // =============================================
-        console.log(`\n✍️ STEP 9: Building transaction FROM the EXACT wallet...`);
-        console.log(`   From: ${normalizedFromAddress}`);
-        console.log(`   To: ${normalizedToAddress}`);
+        console.log(`\n✍️ STEP 10: Building transaction FROM the wallet...`);
+        console.log(`   From: ${fromAddress}`);
+        console.log(`   To: ${destinationAddress}`);
         console.log(`   Amount: ${amount} ${assetUpper}`);
         console.log(`   Gas Fee: ${gasEstimate.fee.toFixed(8)} ${assetUpper}`);
         console.log(`   Nonce: ${nonce}`);
@@ -41095,10 +41104,10 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
             // Build and sign transaction using the EXACT wallet's private key
             const signedResult = await buildAndSignTransaction(
                 assetUpper,
-                normalizedFromAddress,  // FROM address
-                normalizedToAddress,     // TO address
+                fromAddress,
+                destinationAddress,
                 amount,
-                privateKey,              // Private key for the EXACT wallet
+                privateKey,
                 gasEstimate,
                 nonce,
                 config
@@ -41111,27 +41120,27 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
             // =============================================
             // SECTION 15: CRITICAL - VERIFY SIGNED TX FROM CORRECT ADDRESS
             // =============================================
-            console.log(`\n🔍 STEP 10: Verifying transaction is signed by the correct wallet...`);
+            console.log(`\n🔍 STEP 11: Verifying transaction is signed by the correct wallet...`);
 
             // Verify the transaction was signed by the correct address
-            if (signedResult.fromAddress && signedResult.fromAddress.toLowerCase() !== normalizedFromAddress.toLowerCase()) {
+            if (signedResult.fromAddress && signedResult.fromAddress.toLowerCase() !== fromAddress.toLowerCase()) {
                 console.error(`❌ CRITICAL: Transaction signed by wrong address!`);
-                console.error(`   Expected: ${normalizedFromAddress}`);
+                console.error(`   Expected: ${fromAddress}`);
                 console.error(`   Actual:   ${signedResult.fromAddress}`);
-                
+
                 return res.status(500).json({
                     status: 'error',
-                    message: 'Transaction signing address mismatch. The transaction was signed by a different wallet than selected.',
+                    message: 'Transaction signing address mismatch. The transaction was signed by a different wallet than expected.',
                     errorCode: 'SIGNING_ADDRESS_MISMATCH',
                     data: {
-                        selectedAddress: normalizedFromAddress,
+                        expectedAddress: fromAddress,
                         signingAddress: signedResult.fromAddress
                     },
                     timestamp: new Date().toISOString()
                 });
             }
 
-            console.log(`✅ Transaction signed by correct wallet: ${normalizedFromAddress}`);
+            console.log(`✅ Transaction signed by correct wallet: ${fromAddress}`);
 
             signedTx = signedResult.signedTx;
             txHash = signedResult.txHash || 'pending';
@@ -41140,20 +41149,20 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
             console.log(`✅ Transaction built and signed successfully`);
             console.log(`   TX Hash: ${txHash}`);
             console.log(`   Explorer: ${explorerUrl}`);
-            console.log(`   From: ${signedResult.fromAddress || normalizedFromAddress}`);
-            
+            console.log(`   From: ${signedResult.fromAddress || fromAddress}`);
+
         } catch (signError) {
             console.error(`❌ Signing error: ${signError.message}`);
             signingError = signError.message;
-            
+
             return res.status(500).json({
                 status: 'error',
                 message: `Failed to sign transaction: ${signError.message}`,
                 errorCode: 'SIGNING_ERROR',
                 details: process.env.NODE_ENV === 'development' ? signingError : undefined,
                 data: {
-                    fromAddress: normalizedFromAddress,
-                    toAddress: normalizedToAddress,
+                    fromAddress: fromAddress,
+                    toAddress: destinationAddress,
                     amount: amount,
                     asset: assetUpper
                 },
@@ -41164,7 +41173,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // =============================================
         // SECTION 16: BROADCAST TRANSACTION
         // =============================================
-        console.log(`\n📡 STEP 11: Broadcasting transaction FROM ${normalizedFromAddress}...`);
+        console.log(`\n📡 STEP 12: Broadcasting transaction FROM ${fromAddress}...`);
 
         let broadcastResult = null;
         let broadcastError = null;
@@ -41184,21 +41193,21 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
             txHash = broadcastResult.txHash;
             console.log(`✅ Transaction broadcasted successfully`);
             console.log(`   TX Hash: ${txHash}`);
-            console.log(`   From: ${normalizedFromAddress}`);
+            console.log(`   From: ${fromAddress}`);
             console.log(`   Block: ${broadcastResult.blockNumber || 'pending'}`);
             console.log(`   Status: ${broadcastResult.status || 'pending'}`);
-            
+
         } catch (broadcastError) {
             console.error(`❌ Broadcast error: ${broadcastError.message}`);
-            
+
             return res.status(500).json({
                 status: 'error',
                 message: `Failed to broadcast transaction: ${broadcastError.message}`,
                 errorCode: 'BROADCAST_ERROR',
                 txHash: txHash || null,
                 data: {
-                    fromAddress: normalizedFromAddress,
-                    toAddress: normalizedToAddress,
+                    fromAddress: fromAddress,
+                    toAddress: destinationAddress,
                     amount: amount,
                     asset: assetUpper
                 },
@@ -41211,7 +41220,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // =============================================
         // SECTION 17: CREATE ADMIN WITHDRAWAL RECORD
         // =============================================
-        console.log(`\n📝 STEP 12: Creating transfer records...`);
+        console.log(`\n📝 STEP 13: Creating transfer records...`);
 
         const adminWithdrawal = await AdminWithdrawal.create({
             adminId: adminId,
@@ -41219,7 +41228,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
             adminEmail: adminEmail,
             asset: assetUpper,
             amount: amount,
-            destinationAddress: normalizedToAddress,
+            destinationAddress: destinationAddress,
             txHash: txHash,
             fee: gasEstimate.fee || 0,
             gasPrice: gasEstimate.gasPrice || 0,
@@ -41231,11 +41240,11 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
             utxosUsed: 1,
             createdAt: new Date(),
             confirmedAt: null,
-            fromAddress: normalizedFromAddress,
+            fromAddress: fromAddress,
             fromAddressDerivationPath: walletRecord.derivationPath,
-            selectionType: 'manual',
-            selectionReason: `Admin transferred from wallet: ${normalizedFromAddress.substring(0, 15)}...`,
-            frontendRequestedAddress: normalizedFromAddress,
+            selectionType: 'automatic',
+            selectionReason: `Platform wallet for ${assetUpper} used for transfer`,
+            frontendRequestedAddress: fromAddress,
             addressVerified: true,
             addressMatchesDerivation: true,
             balanceAtTime: confirmedBalance,
@@ -41266,9 +41275,9 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
             reference: transactionReference,
             details: {
                 txHash: txHash,
-                fromAddress: normalizedFromAddress,
-                toAddress: normalizedToAddress,
-                frontendRequestedAddress: normalizedFromAddress,
+                fromAddress: fromAddress,
+                toAddress: destinationAddress,
+                frontendRequestedAddress: fromAddress,
                 addressVerified: true,
                 addressMatchesDerivation: true,
                 network: config.network || platformWallet.getNetworkName(assetUpper),
@@ -41283,8 +41292,8 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                 memo: memo || '',
                 notes: notes || '',
                 withdrawalId: adminWithdrawal._id,
-                selectionType: 'manual',
-                selectionReason: `Admin transferred from wallet: ${normalizedFromAddress.substring(0, 15)}...`,
+                selectionType: 'automatic',
+                selectionReason: `Platform wallet for ${assetUpper} used for transfer`,
                 timestamp: new Date().toISOString(),
                 derivationPath: walletRecord.derivationPath,
                 balanceBefore: confirmedBalance,
@@ -41293,14 +41302,14 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                 userAgent: adminUserAgent,
                 transferType: 'treasury_transfer',
                 verification: {
-                    htmlAddress: normalizedFromAddress,
+                    walletAddress: fromAddress,
                     derivedAddress: derivedAddress,
-                    match: derivedAddress === normalizedFromAddress.toLowerCase(),
+                    match: derivedAddress === fromAddress.toLowerCase(),
                     balanceVerified: confirmedBalance >= totalRequired,
                     privateKeyDerived: true
                 }
             },
-            btcAddress: normalizedToAddress,
+            btcAddress: destinationAddress,
             fee: gasEstimate.fee || 0,
             netAmount: amount - (gasEstimate.fee || 0),
             processedBy: adminId,
@@ -41329,8 +41338,8 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         try {
             await redis.set(`treasury:${assetUpper}:last_transfer`, new Date().toISOString());
             await redis.set(`treasury:${assetUpper}:last_transfer_amount`, amount.toString());
-            await redis.set(`treasury:${assetUpper}:last_transfer_from`, normalizedFromAddress);
-            await redis.set(`treasury:${assetUpper}:last_transfer_to`, normalizedToAddress);
+            await redis.set(`treasury:${assetUpper}:last_transfer_from`, fromAddress);
+            await redis.set(`treasury:${assetUpper}:last_transfer_to`, destinationAddress);
             await redis.set(`treasury:${assetUpper}:last_transfer_tx_hash`, txHash);
             await redis.set(`treasury:${assetUpper}:last_transfer_admin`, adminId.toString());
             console.log(`✅ Updated Redis cache`);
@@ -41356,8 +41365,8 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                 location: req.clientLocation?.location || 'Unknown',
                 metadata: {
                     asset: assetUpper,
-                    fromAddress: normalizedFromAddress,
-                    toAddress: normalizedToAddress,
+                    fromAddress: fromAddress,
+                    toAddress: destinationAddress,
                     amount: amount,
                     txHash: txHash,
                     gasFee: gasEstimate.fee || 0,
@@ -41375,9 +41384,9 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                     balanceAfter: confirmedBalance - (amount + gasEstimate.fee),
                     explorerUrl: explorerUrl,
                     verification: {
-                        sourceAddress: normalizedFromAddress,
+                        walletAddress: fromAddress,
                         derivedAddress: derivedAddress,
-                        match: derivedAddress === normalizedFromAddress.toLowerCase(),
+                        match: derivedAddress === fromAddress.toLowerCase(),
                         balanceVerified: confirmedBalance >= totalRequired
                     }
                 }
@@ -41390,8 +41399,8 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         // =============================================
         // SECTION 22: START BACKGROUND MONITORING
         // =============================================
-        console.log(`\n🔍 STEP 13: Starting blockchain confirmation monitoring...`);
-        
+        console.log(`\n🔍 STEP 14: Starting blockchain confirmation monitoring...`);
+
         try {
             startWithdrawalConfirmationMonitoring(
                 txHash,
@@ -41401,10 +41410,10 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                 transaction._id,
                 adminEmail,
                 adminName,
-                normalizedFromAddress
+                fromAddress
             );
             console.log(`✅ Monitoring started for ${txHash}`);
-            console.log(`   Monitoring wallet: ${normalizedFromAddress}`);
+            console.log(`   Monitoring wallet: ${fromAddress}`);
         } catch (monitorError) {
             console.warn(`⚠️ Failed to start monitoring: ${monitorError.message}`);
         }
@@ -41415,12 +41424,12 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         console.log('\n' + '='.repeat(80));
         console.log('✅ VERIFICATION SUMMARY');
         console.log('='.repeat(80));
-        console.log(`   Source Address:           ${normalizedFromAddress}`);
-        console.log(`   Destination Address:      ${normalizedToAddress}`);
+        console.log(`   Platform Wallet:          ${fromAddress}`);
+        console.log(`   Destination Address:      ${destinationAddress}`);
         console.log(`   Database Record Found:    ${walletRecord ? 'YES' : 'NO'}`);
         console.log(`   Derivation Path:          ${walletRecord.derivationPath}`);
         console.log(`   Derived Address:          ${derivedAddress}`);
-        console.log(`   Address Match:            ${derivedAddress === normalizedFromAddress.toLowerCase() ? '✅ YES' : '❌ NO'}`);
+        console.log(`   Address Match:            ${derivedAddress === fromAddress.toLowerCase() ? '✅ YES' : '❌ NO'}`);
         console.log(`   Balance Checked:          ${confirmedBalance.toFixed(8)} ${assetUpper}`);
         console.log(`   Balance Sufficient:       ${confirmedBalance >= totalRequired ? '✅ YES' : '❌ NO'}`);
         console.log(`   Private Key Derived:      ${privateKey ? '✅ YES' : '❌ NO'}`);
@@ -41436,12 +41445,12 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 
         const responseData = {
             status: 'success',
-            message: `Transfer of ${amount} ${assetUpper} executed successfully from ${normalizedFromAddress.substring(0, 10)}... to ${normalizedToAddress.substring(0, 10)}.... Awaiting network confirmation.`,
+            message: `Transfer of ${amount} ${assetUpper} executed successfully from platform wallet. Awaiting network confirmation.`,
             data: {
                 verification: {
-                    sourceAddress: normalizedFromAddress,
+                    platformWallet: fromAddress,
                     derivedAddress: derivedAddress,
-                    addressMatch: derivedAddress === normalizedFromAddress.toLowerCase(),
+                    addressMatch: derivedAddress === fromAddress.toLowerCase(),
                     balanceVerified: confirmedBalance >= totalRequired,
                     privateKeyDerived: !!privateKey,
                     transactionSigned: !!signedTx,
@@ -41459,8 +41468,8 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                     nonce: nonce,
                     status: 'pending',
                     createdAt: adminWithdrawal.createdAt,
-                    fromAddress: normalizedFromAddress,
-                    toAddress: normalizedToAddress
+                    fromAddress: fromAddress,
+                    toAddress: destinationAddress
                 },
                 transaction: {
                     id: transaction._id,
@@ -41469,7 +41478,7 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
                     createdAt: transaction.createdAt
                 },
                 wallet: {
-                    address: normalizedFromAddress,
+                    address: fromAddress,
                     derivationPath: walletRecord.derivationPath,
                     balanceBefore: confirmedBalance,
                     balanceAfter: remainingBalance,
@@ -41490,8 +41499,8 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         console.log('\n' + '='.repeat(80));
         console.log('✅ TRANSFER COMPLETED SUCCESSFULLY');
         console.log('='.repeat(80));
-        console.log(`   From: ${normalizedFromAddress}`);
-        console.log(`   To: ${normalizedToAddress}`);
+        console.log(`   From: ${fromAddress}`);
+        console.log(`   To: ${destinationAddress}`);
         console.log(`   Amount: ${amount} ${assetUpper}`);
         console.log(`   TX Hash: ${txHash}`);
         console.log(`   Explorer: ${explorerUrl}`);
@@ -41594,9 +41603,6 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
         console.log(`[TREASURY TRANSFER] Completed in ${duration}ms`);
     }
 });
-
-
-
 
 
 
