@@ -36679,21 +36679,46 @@ app.get('/api/admin/wallet-management/treasury/wallets', adminProtect, restrictT
     }
 });
 
+
+
+
+
+
+
+
 // =============================================
 // 15. POST /api/admin/wallet-management/treasury/withdraw - Execute Withdrawal
 // =============================================
 app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
     try {
-        const { network, asset, fromAddress, amount, destinationAddress, memo, notes } = req.body;
+        // =============================================
+        // ACCEPT BOTH FIELD NAMES FOR BACKWARD COMPATIBILITY
+        // =============================================
+        const { 
+            network, 
+            networkId,        // ← Accept both names
+            asset, 
+            fromAddress, 
+            amount, 
+            destinationAddress, 
+            memo, 
+            notes 
+        } = req.body;
+        
         const adminId = req.admin._id;
         const adminName = req.admin.name;
         const adminEmail = req.admin.email;
 
         // =============================================
-        // 1. VALIDATE REQUIRED FIELDS
+        // 1. NORMALIZE FIELD NAMES (use network if provided, fallback to networkId)
+        // =============================================
+        const finalNetwork = network || networkId;
+        
+        // =============================================
+        // 2. VALIDATE REQUIRED FIELDS
         // =============================================
         const missingFields = [];
-        if (!network) missingFields.push('network');
+        if (!finalNetwork) missingFields.push('network');
         if (!asset) missingFields.push('asset');
         if (!fromAddress) missingFields.push('fromAddress');
         if (!amount || amount <= 0) missingFields.push('amount (must be > 0)');
@@ -36701,18 +36726,20 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
 
         if (missingFields.length > 0) {
             console.warn(`⚠️ Withdrawal validation failed - Missing fields: ${missingFields.join(', ')}`);
-            console.warn(`   Request body:`, { network, asset, fromAddress, amount, destinationAddress, memo });
+            console.warn(`   Request body:`, { finalNetwork, asset, fromAddress, amount, destinationAddress });
             
             return res.status(400).json({
                 status: 'fail',
                 message: `Missing required fields: ${missingFields.join(', ')}`,
                 missingFields: missingFields,
-                requiredFields: ['network', 'asset', 'fromAddress', 'amount', 'destinationAddress']
+                requiredFields: ['network', 'asset', 'fromAddress', 'amount', 'destinationAddress'],
+                // Send back what we received for debugging
+                received: { network: finalNetwork, asset, fromAddress, amount, destinationAddress }
             });
         }
 
         // =============================================
-        // 2. VALIDATE ASSET SUPPORT
+        // 3. VALIDATE ASSET SUPPORT
         // =============================================
         const assetUpper = asset.toUpperCase();
         const config = ASSET_NETWORK_MAP[assetUpper];
@@ -36729,7 +36756,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 3. VALIDATE DESTINATION ADDRESS FORMAT
+        // 4. VALIDATE DESTINATION ADDRESS FORMAT
         // =============================================
         if (!isValidAddress(destinationAddress, assetUpper)) {
             console.warn(`⚠️ Invalid destination address format for ${assetUpper}: ${destinationAddress}`);
@@ -36741,7 +36768,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 4. CHECK BALANCE ON BLOCKCHAIN
+        // 5. CHECK BALANCE ON BLOCKCHAIN
         // =============================================
         console.log(`🔍 Checking balance for ${assetUpper} wallet: ${fromAddress}`);
         const balanceResult = await getBlockchainBalance(assetUpper, [fromAddress], config);
@@ -36770,7 +36797,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 5. ESTIMATE GAS FEE
+        // 6. ESTIMATE GAS FEE
         // =============================================
         console.log(`⛽ Estimating gas fee for ${assetUpper} withdrawal...`);
         const gasEstimate = await estimateGas(assetUpper, destinationAddress, amount, config);
@@ -36786,7 +36813,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 6. CHECK BALANCE INCLUDING GAS
+        // 7. CHECK BALANCE INCLUDING GAS
         // =============================================
         const totalCost = amount + (gasEstimate.fee || 0);
         
@@ -36811,14 +36838,14 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 7. GET NONCE
+        // 8. GET NONCE
         // =============================================
         console.log(`🔢 Getting nonce for ${fromAddress}...`);
         const nonce = await getNonce(assetUpper, fromAddress, config);
         console.log(`🔢 Nonce: ${nonce}`);
 
         // =============================================
-        // 8. SIGN TRANSACTION
+        // 9. SIGN TRANSACTION
         // =============================================
         console.log(`✍️ Signing transaction for ${amount} ${assetUpper} to ${destinationAddress}`);
         const signedTx = await signTransaction(assetUpper, destinationAddress, amount, gasEstimate, nonce, config);
@@ -36834,7 +36861,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 9. BROADCAST TRANSACTION
+        // 10. BROADCAST TRANSACTION
         // =============================================
         console.log(`📡 Broadcasting transaction...`);
         const broadcastResult = await broadcastTransaction(assetUpper, signedTx, config);
@@ -36852,14 +36879,14 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         console.log(`✅ Transaction broadcasted successfully. TX Hash: ${broadcastResult.txHash}`);
 
         // =============================================
-        // 10. VERIFY PROPAGATION
+        // 11. VERIFY PROPAGATION
         // =============================================
         console.log(`🔍 Verifying transaction propagation...`);
         const propagated = await verifyTransactionPropagation(assetUpper, broadcastResult.txHash, config);
         console.log(`📡 Propagation status: ${propagated ? 'CONFIRMED' : 'PENDING'}`);
 
         // =============================================
-        // 11. CREATE WITHDRAWAL RECORD
+        // 12. CREATE WITHDRAWAL RECORD
         // =============================================
         const withdrawal = await AdminWithdrawal.create({
             adminId: adminId,
@@ -36883,7 +36910,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         await redis.set(`treasury:${assetUpper}:last_withdrawal`, new Date().toISOString());
 
         // =============================================
-        // 12. CREATE TRANSACTION RECORD (for audit trail)
+        // 13. CREATE TRANSACTION RECORD (for audit trail)
         // =============================================
         try {
             const transaction = await Transaction.create({
@@ -36926,7 +36953,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         }
 
         // =============================================
-        // 13. LOG ACTIVITY
+        // 14. LOG ACTIVITY
         // =============================================
         await SystemLog.create({
             action: 'treasury_withdrawal',
@@ -36946,7 +36973,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 gasFee: gasEstimate.fee,
                 gasPrice: gasEstimate.gasPrice,
                 nonce: nonce,
-                network: network,
+                network: finalNetwork,
                 propagated: propagated,
                 memo: memo || notes || ''
             }
@@ -36955,7 +36982,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         console.log(`📋 Activity logged for treasury withdrawal`);
 
         // =============================================
-        // 14. BUILD RESPONSE
+        // 15. BUILD RESPONSE
         // =============================================
         const responseData = {
             status: 'success',
@@ -37053,58 +37080,14 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
     }
 });
 
-// =============================================
-// HELPER: Validate address format by asset type
-// =============================================
-function isValidAddress(address, asset) {
-    if (!address) return false;
-    
-    const assetUpper = asset.toUpperCase();
-    
-    switch (assetUpper) {
-        case 'BTC':
-        case 'DOGE':
-        case 'LTC':
-            // Bitcoin-like addresses: 26-35 chars, alphanumeric
-            return /^[13][a-km-zA-HJ-NP-Z0-9]{25,34}$/.test(address) || 
-                   /^bc1[a-zA-Z0-9]{39,59}$/.test(address); // Bech32
-        case 'ETH':
-        case 'USDT':
-        case 'USDC':
-        case 'SHIB':
-        case 'LINK':
-        case 'UNI':
-        case 'WBTC':
-        case 'DAI':
-            // Ethereum addresses: 0x + 40 hex chars
-            return /^0x[a-fA-F0-9]{40}$/.test(address);
-        case 'BNB':
-            // BSC addresses: same as ETH
-            return /^0x[a-fA-F0-9]{40}$/.test(address);
-        case 'SOL':
-            // Solana addresses: base58, 32-44 chars
-            return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
-        case 'XRP':
-            // XRP addresses: r + 25-34 chars
-            return /^r[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(address);
-        case 'TRX':
-            // TRON addresses: T + 34 chars
-            return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address);
-        case 'ADA':
-            // Cardano addresses: addr1 + 42-45 chars
-            return /^addr1[a-zA-Z0-9]{42,45}$/.test(address);
-        case 'DOT':
-            // Polkadot addresses: 1-9 characters, alphanumeric
-            return /^[1-9A-HJ-NP-Za-km-z]{1,9}$/.test(address);
-        case 'MATIC':
-        case 'AVAX':
-            // EVM compatible
-            return /^0x[a-fA-F0-9]{40}$/.test(address);
-        default:
-            // Default: check if it's not empty and has reasonable length
-            return address.length >= 10 && address.length <= 100;
-    }
-}
+
+
+
+
+
+
+
+
 
 // =============================================
 // 16. GET /api/admin/wallet-management/treasury/export - Export Treasury Data
