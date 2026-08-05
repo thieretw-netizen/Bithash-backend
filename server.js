@@ -38134,6 +38134,13 @@ app.get('/api/admin/wallet-management/treasury/wallets', adminProtect, restrictT
     }
 });
 
+
+
+
+
+
+
+
 // =============================================
 // TREASURY WITHDRAWAL - STRICT WALLET MATCHING
 // POST /api/admin/wallet-management/treasury/withdraw
@@ -38157,7 +38164,6 @@ app.get('/api/admin/wallet-management/treasury/wallets', adminProtect, restrictT
  * Build transaction FROM fromAddress → Sign with that wallet's private key →
  * Broadcast transaction
  */
-
 app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
     const startTime = Date.now();
     let responseSent = false;
@@ -38205,8 +38211,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         // =============================================
         // SECTION 3: CRITICAL VALIDATION - fromAddress IS REQUIRED
         // =============================================
-        // THE ADMIN MUST SELECT A WALLET IN THE HTML
-        // NO AUTO-SELECTION ALLOWED
         if (!specifiedAddress || typeof specifiedAddress !== 'string' || specifiedAddress.trim().length < 10) {
             console.error('❌ CRITICAL: No wallet selected in HTML');
             return res.status(400).json({
@@ -38218,7 +38222,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             });
         }
 
-        // Clean and normalize the address
         const normalizedAddress = specifiedAddress.trim();
 
         // =============================================
@@ -38226,17 +38229,14 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         // =============================================
         const validationErrors = [];
 
-        // Validate asset
         if (!asset || typeof asset !== 'string') {
             validationErrors.push('Asset is required');
         }
 
-        // Validate amount
         if (!amount || amount <= 0 || typeof amount !== 'number') {
             validationErrors.push('Valid amount is required (must be > 0)');
         }
 
-        // Validate destination address
         if (!destinationAddress || typeof destinationAddress !== 'string' || destinationAddress.trim().length < 10) {
             validationErrors.push('Valid destination address is required');
         }
@@ -38257,7 +38257,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         const assetUpper = asset.toUpperCase();
         const assetLower = asset.toLowerCase();
 
-        // Check if asset is supported by the platform wallet
         if (!platformWallet.isAssetSupported(assetUpper)) {
             const supportedAssets = platformWallet.getSupportedAssets().map(a => a.symbol);
             return res.status(400).json({
@@ -38269,7 +38268,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             });
         }
 
-        // Get network configuration
         const config = platformWallet.networkProviders[assetUpper];
         if (!config) {
             return res.status(400).json({
@@ -38300,7 +38298,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         console.log(`\n🔍 STEP 1: Finding exact wallet from HTML selection...`);
         console.log(`   HTML selected address: ${normalizedAddress}`);
 
-        // Find the EXACT wallet in the database
         const walletRecord = await DepositAddress.findOne({
             address: normalizedAddress,
             asset: assetLower,
@@ -38344,7 +38341,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         let privateKeyError = null;
 
         try {
-            // Derive the private key from the master seed using the wallet's derivation path
             const child = platformWallet.root.derivePath(walletRecord.derivationPath);
 
             if (!child.privateKey) {
@@ -38358,7 +38354,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             // =============================================
             console.log(`\n🔍 STEP 3: Verifying derived address matches HTML selection...`);
 
-            // Derive the address from the private key to verify it matches
             try {
                 const provider = new ethers.JsonRpcProvider(config.rpc);
                 const wallet = new ethers.Wallet(privateKey, provider);
@@ -38367,7 +38362,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 console.log(`   HTML selected address: ${normalizedAddress.toLowerCase()}`);
                 console.log(`   Derived address:      ${derivedAddress}`);
 
-                // CRITICAL: Compare the addresses
                 if (derivedAddress !== normalizedAddress.toLowerCase()) {
                     console.error(`❌ CRITICAL MISMATCH: Derived address does not match HTML selection!`);
                     console.error(`   HTML selected: ${normalizedAddress}`);
@@ -38441,7 +38435,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         let balanceError = null;
 
         try {
-            // Get real-time balance from blockchain
             const balanceResult = await getBlockchainBalance(
                 assetUpper,
                 [normalizedAddress],
@@ -38579,7 +38572,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                     });
                 }
 
-                // Update with fresh balance
                 confirmedBalance = freshConfirmed;
                 console.log(`   ✅ Updated to new balance: ${confirmedBalance.toFixed(8)} ${assetUpper}`);
             } else {
@@ -38635,13 +38627,12 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         let signingError = null;
 
         try {
-            // Build and sign transaction using the EXACT wallet's private key
             const signedResult = await buildAndSignTransaction(
                 assetUpper,
-                normalizedAddress,  // FROM address (HTML selected)
-                destinationAddress,  // TO address
+                normalizedAddress,
+                destinationAddress,
                 amount,
-                privateKey,          // Private key for the EXACT wallet
+                privateKey,
                 gasEstimate,
                 nonce,
                 config
@@ -38656,7 +38647,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             // =============================================
             console.log(`\n🔍 STEP 10: Verifying transaction is signed by the correct wallet...`);
 
-            // Verify the transaction was signed by the correct address
             if (signedResult.fromAddress && signedResult.fromAddress.toLowerCase() !== normalizedAddress.toLowerCase()) {
                 console.error(`❌ CRITICAL: Transaction signed by wrong address!`);
                 console.error(`   Expected: ${normalizedAddress}`);
@@ -38723,7 +38713,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 throw new Error(broadcastResult?.error || 'Broadcast failed with unknown error');
             }
 
-            // Update with actual tx hash from broadcast
             txHash = broadcastResult.txHash;
             console.log(`✅ Transaction broadcasted successfully`);
             console.log(`   TX Hash: ${txHash}`);
@@ -38774,15 +38763,15 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             utxosUsed: 1,
             createdAt: new Date(),
             confirmedAt: null,
-            fromAddress: normalizedAddress, // EXACT address from HTML
+            fromAddress: normalizedAddress,
             fromAddressDerivationPath: walletRecord.derivationPath,
-            selectionType: 'manual', // Always manual since admin selects
+            selectionType: 'manual',
             selectionReason: `Admin selected wallet: ${normalizedAddress.substring(0, 15)}...`,
             frontendRequestedAddress: normalizedAddress,
             addressVerified: true,
             addressMatchesDerivation: true,
             balanceAtTime: confirmedBalance,
-            totalWalletsConsidered: 1, // Only the selected wallet
+            totalWalletsConsidered: 1,
             ipAddress: adminIp,
             userAgent: adminUserAgent,
             network: config.network || platformWallet.getNetworkName(assetUpper),
@@ -38809,7 +38798,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             details: {
                 txHash: txHash,
                 destinationAddress: destinationAddress,
-                fromAddress: normalizedAddress, // EXACT address from HTML
+                fromAddress: normalizedAddress,
                 frontendRequestedAddress: normalizedAddress,
                 addressVerified: true,
                 addressMatchesDerivation: true,
@@ -38833,7 +38822,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 balanceAfter: confirmedBalance - (amount + gasEstimate.fee),
                 ipAddress: adminIp,
                 userAgent: adminUserAgent,
-                // Verification data
                 verification: {
                     htmlAddress: normalizedAddress,
                     derivedAddress: derivedAddress,
@@ -38951,7 +38939,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
                 transaction._id,
                 adminEmail,
                 adminName,
-                normalizedAddress // Pass the EXACT address
+                normalizedAddress
             );
             console.log(`✅ Monitoring started for ${txHash}`);
             console.log(`   Monitoring wallet: ${normalizedAddress}`);
@@ -38987,7 +38975,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             status: 'success',
             message: `Withdrawal of ${amount} ${assetUpper} executed successfully from the selected wallet. Awaiting network confirmation.`,
             data: {
-                // Verification summary
                 verification: {
                     htmlSelectedAddress: normalizedAddress,
                     derivedAddress: derivedAddress,
@@ -39050,9 +39037,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             }
         };
 
-        // =============================================
-        // SECTION 26: FINAL LOGGING & RESPONSE
-        // =============================================
         console.log('\n' + '='.repeat(80));
         console.log('✅ WITHDRAWAL COMPLETED SUCCESSFULLY');
         console.log('='.repeat(80));
@@ -39071,7 +39055,7 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
 
     } catch (err) {
         // =============================================
-        // SECTION 27: GLOBAL ERROR HANDLING
+        // SECTION 26: GLOBAL ERROR HANDLING
         // =============================================
         console.error('\n' + '='.repeat(80));
         console.error('❌ TREASURY WITHDRAWAL ERROR');
@@ -39081,9 +39065,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         console.error(`   Timestamp: ${new Date().toISOString()}`);
         console.error('='.repeat(80) + '\n');
 
-        // =============================================
-        // SECTION 28: ERROR LOGGING
-        // =============================================
         try {
             await SystemLog.create({
                 action: 'treasury_withdrawal_error',
@@ -39109,15 +39090,11 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
             console.error('Failed to log error:', logError);
         }
 
-        // =============================================
-        // SECTION 29: DETERMINE APPROPRIATE RESPONSE
-        // =============================================
         let statusCode = 500;
         let errorMessage = err.message || 'Failed to execute withdrawal';
         let errorCode = 'WITHDRAWAL_FAILED';
         let retryAfter = undefined;
 
-        // Map error types to appropriate responses
         const errorMap = {
             'gas': { code: 'GAS_ESTIMATE_ERROR', status: 400 },
             'fee': { code: 'GAS_ESTIMATE_ERROR', status: 400 },
@@ -39162,281 +39139,9 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
 });
 
 // =============================================
-// ALL HELPER FUNCTIONS (Complete)
+// BACKGROUND CONFIRMATION MONITORING
 // =============================================
 
-/**
- * Get explorer URL for a transaction
- */
-function getExplorerUrl(asset, txHash) {
-    const explorers = {
-        'BTC': `https://blockchair.com/bitcoin/transaction/${txHash}`,
-        'ETH': `https://etherscan.io/tx/${txHash}`,
-        'BNB': `https://bscscan.com/tx/${txHash}`,
-        'MATIC': `https://polygonscan.com/tx/${txHash}`,
-        'AVAX': `https://snowtrace.io/tx/${txHash}`,
-        'SOL': `https://solscan.io/tx/${txHash}`,
-        'XRP': `https://xrpscan.com/tx/${txHash}`,
-        'TRX': `https://tronscan.org/#/transaction/${txHash}`,
-        'DOGE': `https://blockchair.com/dogecoin/transaction/${txHash}`,
-        'LTC': `https://blockchair.com/litecoin/transaction/${txHash}`,
-        'ADA': `https://cardanoscan.io/transaction/${txHash}`,
-        'DOT': `https://polkadot.subscan.io/transaction/${txHash}`,
-        'USDT': `https://etherscan.io/tx/${txHash}`,
-        'USDC': `https://etherscan.io/tx/${txHash}`,
-        'SHIB': `https://etherscan.io/tx/${txHash}`,
-        'LINK': `https://etherscan.io/tx/${txHash}`,
-        'UNI': `https://etherscan.io/tx/${txHash}`,
-        'WBTC': `https://etherscan.io/tx/${txHash}`,
-        'DAI': `https://etherscan.io/tx/${txHash}`
-    };
-    return explorers[asset.toUpperCase()] || `https://blockchair.com/transaction/${txHash}`;
-}
-
-/**
- * Estimate gas for a transaction
- */
-async function estimateGasForAsset(asset, toAddress, amount, config) {
-    try {
-        const assetUpper = asset.toUpperCase();
-        let gasEstimate = {
-            fee: 0,
-            gasPrice: 0,
-            gasUsed: 21000
-        };
-
-        switch (config.type) {
-            case 'evm': {
-                const provider = new ethers.JsonRpcProvider(config.rpc);
-                const feeData = await provider.getFeeData();
-                const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
-                let gasLimit = 21000;
-
-                if (config.contract) {
-                    gasLimit = 65000;
-                }
-
-                const gasCost = Number(ethers.formatEther(gasPrice * gasLimit));
-                gasEstimate = {
-                    fee: gasCost,
-                    gasPrice: Number(ethers.formatUnits(gasPrice, 'gwei')),
-                    gasUsed: gasLimit
-                };
-                break;
-            }
-            case 'solana': {
-                gasEstimate = { fee: 0.000005, gasPrice: 0, gasUsed: 5000 };
-                break;
-            }
-            case 'utxo': {
-                const estimatedSize = 250;
-                const feeRate = 5;
-                const feeInAsset = (estimatedSize * feeRate) / 1e8;
-                gasEstimate = { fee: feeInAsset, gasPrice: feeRate, gasUsed: estimatedSize };
-                break;
-            }
-            case 'tron': {
-                gasEstimate = { fee: 1, gasPrice: 0, gasUsed: 1 };
-                break;
-            }
-            default: {
-                gasEstimate = { fee: 0.0001, gasPrice: 0, gasUsed: 21000 };
-            }
-        }
-
-        return gasEstimate;
-    } catch (err) {
-        console.error(`Failed to estimate gas for ${asset}:`, err.message);
-        return null;
-    }
-}
-
-/**
- * Get nonce for an address (EVM chains)
- */
-async function getNonceForAddress(asset, address, config) {
-    try {
-        const assetUpper = asset.toUpperCase();
-        let nonce = 0;
-
-        switch (config.type) {
-            case 'evm': {
-                const provider = new ethers.JsonRpcProvider(config.rpc);
-                nonce = await provider.getTransactionCount(address);
-                break;
-            }
-            case 'solana': {
-                const connection = new Connection(config.rpc);
-                const blockhash = await connection.getLatestBlockhash();
-                nonce = parseInt(blockhash.blockhash.slice(0, 8), 16);
-                break;
-            }
-            case 'utxo': {
-                nonce = 0;
-                break;
-            }
-            case 'tron': {
-                const tronWeb = new TronWeb({ fullHost: config.rpc });
-                const accountInfo = await tronWeb.trx.getAccount(address);
-                nonce = accountInfo?.sequence || 0;
-                break;
-            }
-            default: {
-                nonce = 0;
-            }
-        }
-
-        return nonce;
-    } catch (err) {
-        console.error(`Failed to get nonce for ${asset}:`, err.message);
-        return 0;
-    }
-}
-
-/**
- * Build and sign a transaction
- */
-async function buildAndSignTransaction(asset, fromAddress, toAddress, amount, privateKey, gasEstimate, nonce, config) {
-    try {
-        const assetUpper = asset.toUpperCase();
-        let signedTx = null;
-        let txHash = null;
-        let explorerUrl = null;
-        let signingAddress = fromAddress;
-
-        switch (config.type) {
-            case 'evm': {
-                const provider = new ethers.JsonRpcProvider(config.rpc);
-                const wallet = new ethers.Wallet(privateKey, provider);
-
-                // Verify the wallet address matches the from address
-                const walletAddress = wallet.address.toLowerCase();
-                if (walletAddress !== fromAddress.toLowerCase()) {
-                    console.warn(`⚠️ Wallet address mismatch: Wallet=${walletAddress}, From=${fromAddress}`);
-                    // Use the wallet's actual address
-                    signingAddress = walletAddress;
-                }
-
-                let txData = {
-                    to: toAddress,
-                    value: ethers.parseEther(amount.toString()),
-                    gasLimit: gasEstimate?.gasUsed || 21000,
-                    gasPrice: gasEstimate?.gasPrice ? ethers.parseUnits(gasEstimate.gasPrice.toString(), 'gwei') : undefined,
-                    nonce: nonce,
-                    chainId: config.chainId
-                };
-
-                if (config.contract) {
-                    const contract = new ethers.Contract(
-                        config.contract,
-                        ['function transfer(address to, uint256 amount) returns (bool)'],
-                        wallet
-                    );
-                    const decimals = await getTokenDecimals(config.contract, provider);
-                    const amountWei = ethers.parseUnits(amount.toString(), decimals);
-                    const tx = await contract.transfer.populateTransaction(toAddress, amountWei);
-                    txData = {
-                        ...tx,
-                        gasLimit: gasEstimate?.gasUsed || 65000,
-                        gasPrice: gasEstimate?.gasPrice ? ethers.parseUnits(gasEstimate.gasPrice.toString(), 'gwei') : undefined,
-                        nonce: nonce,
-                        chainId: config.chainId
-                    };
-                }
-
-                signedTx = await wallet.signTransaction(txData);
-                txHash = ethers.keccak256(signedTx);
-                explorerUrl = getExplorerUrl(assetUpper, txHash);
-                break;
-            }
-            case 'solana': {
-                signedTx = `solana_signed_tx_${Date.now()}`;
-                txHash = `solana_tx_${Date.now()}`;
-                explorerUrl = getExplorerUrl(assetUpper, txHash);
-                break;
-            }
-            case 'utxo': {
-                signedTx = `utxo_signed_tx_${Date.now()}`;
-                txHash = `utxo_tx_${Date.now()}`;
-                explorerUrl = getExplorerUrl(assetUpper, txHash);
-                break;
-            }
-            case 'tron': {
-                signedTx = `tron_signed_tx_${Date.now()}`;
-                txHash = `tron_tx_${Date.now()}`;
-                explorerUrl = getExplorerUrl(assetUpper, txHash);
-                break;
-            }
-            default: {
-                throw new Error(`Unsupported asset type: ${config.type}`);
-            }
-        }
-
-        return { signedTx, txHash, explorerUrl, fromAddress: signingAddress };
-    } catch (err) {
-        console.error(`Failed to build transaction for ${asset}:`, err.message);
-        return null;
-    }
-}
-
-/**
- * Broadcast a transaction to the blockchain
- */
-async function broadcastTransactionToChain(asset, signedTx, config) {
-    try {
-        const assetUpper = asset.toUpperCase();
-        let result = null;
-
-        switch (config.type) {
-            case 'evm': {
-                const provider = new ethers.JsonRpcProvider(config.rpc);
-                const txResponse = await provider.broadcastTransaction(signedTx);
-                result = {
-                    txHash: txResponse.hash,
-                    blockNumber: txResponse.blockNumber,
-                    status: 'pending'
-                };
-                break;
-            }
-            case 'solana': {
-                result = {
-                    txHash: `solana_tx_${Date.now()}`,
-                    blockNumber: 0,
-                    status: 'pending'
-                };
-                break;
-            }
-            case 'utxo': {
-                result = {
-                    txHash: `utxo_tx_${Date.now()}`,
-                    blockNumber: 0,
-                    status: 'pending'
-                };
-                break;
-            }
-            case 'tron': {
-                result = {
-                    txHash: `tron_tx_${Date.now()}`,
-                    blockNumber: 0,
-                    status: 'pending'
-                };
-                break;
-            }
-            default: {
-                result = null;
-            }
-        }
-
-        return result;
-    } catch (err) {
-        console.error(`Failed to broadcast transaction for ${asset}:`, err.message);
-        return { error: err.message };
-    }
-}
-
-/**
- * Start blockchain confirmation monitoring
- */
 function startWithdrawalConfirmationMonitoring(txHash, asset, config, withdrawalId, transactionId, adminEmail, adminName, walletAddress) {
     let attempts = 0;
     const maxAttempts = 120;
@@ -39543,9 +39248,10 @@ function startWithdrawalConfirmationMonitoring(txHash, asset, config, withdrawal
     }, 30000);
 }
 
-/**
- * Send confirmation email
- */
+// =============================================
+// CONFIRMATION EMAIL HELPER
+// =============================================
+
 async function sendConfirmationEmail(withdrawalId, transactionId, txHash, asset, adminEmail, adminName, walletAddress) {
     try {
         const withdrawal = await AdminWithdrawal.findById(withdrawalId);
@@ -39556,14 +39262,24 @@ async function sendConfirmationEmail(withdrawalId, transactionId, txHash, asset,
 
         const explorerUrl = getExplorerUrl(asset, txHash);
 
+        const brandHeader = `
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+        `;
+
+        const brandFooter = `
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+            </div>
+        `;
+
         const emailHtml = `
             <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                    <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                    <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                </div>
-
+                ${brandHeader}
                 <div style="padding: 30px; background: #FFFFFF;">
                     <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
                         <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">✅ WITHDRAWAL CONFIRMED!</h2>
@@ -39611,11 +39327,7 @@ async function sendConfirmationEmail(withdrawalId, transactionId, txHash, asset,
                         <a href="${explorerUrl}" target="_blank" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View on Explorer</a>
                     </div>
                 </div>
-
-                <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                </div>
+                ${brandFooter}
             </div>
         `;
 
@@ -39632,9 +39344,10 @@ async function sendConfirmationEmail(withdrawalId, transactionId, txHash, asset,
     }
 }
 
-/**
- * Send timeout alert email
- */
+// =============================================
+// TIMEOUT ALERT EMAIL HELPER
+// =============================================
+
 async function sendTimeoutAlert(withdrawalId, transactionId, txHash, asset, adminEmail, adminName, walletAddress) {
     try {
         const withdrawal = await AdminWithdrawal.findById(withdrawalId);
@@ -39645,14 +39358,24 @@ async function sendTimeoutAlert(withdrawalId, transactionId, txHash, asset, admi
 
         const explorerUrl = getExplorerUrl(asset, txHash);
 
+        const brandHeader = `
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+        `;
+
+        const brandFooter = `
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+            </div>
+        `;
+
         const emailHtml = `
             <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                    <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                    <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                </div>
-
+                ${brandHeader}
                 <div style="padding: 30px; background: #FFFFFF;">
                     <div style="background: #FEF2F2; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
                         <h2 style="color: #DC2626; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">⚠️ WITHDRAWAL MONITORING TIMEOUT</h2>
@@ -39706,11 +39429,7 @@ async function sendTimeoutAlert(withdrawalId, transactionId, txHash, asset, admi
                         <a href="https://www.bithashcapital.live/admin/transactions/${transactionId}" style="background-color: #3B82F6; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-left: 12px;">View Transaction</a>
                     </div>
                 </div>
-
-                <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                </div>
+                ${brandFooter}
             </div>
         `;
 
@@ -39727,61 +39446,18 @@ async function sendTimeoutAlert(withdrawalId, transactionId, txHash, asset, admi
     }
 }
 
-// =============================================
-// ADDRESS VALIDATION FUNCTION
-// =============================================
 
-/**
- * Validate cryptocurrency address format
- */
-function isValidCryptoAddress(address, asset) {
-    if (!address || typeof address !== 'string') return false;
 
-    const assetUpper = asset.toUpperCase();
-    const addr = address.trim();
 
-    switch (assetUpper) {
-        case 'BTC':
-        case 'LTC':
-        case 'DOGE':
-            return /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(addr) ||
-                   /^bc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(addr) ||
-                   /^ltc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(addr) ||
-                   /^[A-Za-z0-9]{34}$/.test(addr);
 
-        case 'ETH':
-        case 'USDT':
-        case 'USDC':
-        case 'LINK':
-        case 'UNI':
-        case 'WBTC':
-        case 'DAI':
-        case 'SHIB':
-        case 'MATIC':
-        case 'AVAX':
-        case 'BNB':
-            return /^0x[a-fA-F0-9]{40}$/.test(addr);
 
-        case 'SOL':
-            return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr);
 
-        case 'XRP':
-            return /^r[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(addr);
 
-        case 'TRX':
-            return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(addr);
 
-        case 'ADA':
-            return /^addr1[a-zA-Z0-9]{50,60}$/.test(addr);
 
-        case 'DOT':
-            return /^1[a-zA-Z0-9]{46,47}$/.test(addr);
 
-        default:
-            console.warn(`No specific validation rule for asset: ${assetUpper}`);
-            return /^[a-zA-Z0-9]{20,60}$/.test(addr);
-    }
-}
+
+
 
 // =============================================
 // 16. GET /api/admin/wallet-management/treasury/export - Export Treasury Data
