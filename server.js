@@ -36427,6 +36427,9 @@ app.get('/api/admin/wallet-management/treasury/wallet-info', adminProtect, restr
 
 
 
+
+
+
 // =============================================
 // 12. GET /api/admin/wallet-management/treasury/sweep-info - Sweep Info
 // =============================================
@@ -36448,6 +36451,7 @@ app.get('/api/admin/wallet-management/treasury/sweep-info', adminProtect, restri
         
         const walletData = [];
         const assetSymbols = [];
+        const assetOptions = [];
         
         for (const asset of assets) {
             const addresses = await DepositAddress.find({
@@ -36460,6 +36464,7 @@ app.get('/api/admin/wallet-management/treasury/sweep-info', adminProtect, restri
             const config = ASSET_NETWORK_MAP[asset];
             
             // Get balance for each wallet
+            let totalAssetBalance = 0;
             for (const address of addresses) {
                 const balanceResult = await getBlockchainBalance(asset, [address], config);
                 if (balanceResult.confirmed > 0) {
@@ -36471,20 +36476,30 @@ app.get('/api/admin/wallet-management/treasury/sweep-info', adminProtect, restri
                         asset: asset,
                         network: config.network || platformWallet.getNetworkName(asset)
                     });
+                    totalAssetBalance += balanceResult.confirmed || 0;
                 }
             }
             
             assetSymbols.push(asset);
+            // Build proper dropdown options with display name and balance
+            assetOptions.push({
+                symbol: asset,
+                name: asset,
+                displayName: `${asset} (${totalAssetBalance.toFixed(8)} ${asset})`,
+                balance: totalAssetBalance
+            });
         }
         
         // Sort by balance descending
         walletData.sort((a, b) => b.balance - a.balance);
+        assetOptions.sort((a, b) => b.balance - a.balance);
         
         res.status(200).json({
             status: 'success',
             data: {
                 wallets: walletData,
                 assets: assetSymbols,
+                assetOptions: assetOptions,
                 totalWallets: walletData.length,
                 totalBalance: walletData.reduce((sum, w) => sum + w.balance, 0)
             }
@@ -36708,6 +36723,13 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
         });
     }
 });
+
+
+
+
+
+
+
 
 
 
