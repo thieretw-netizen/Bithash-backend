@@ -35157,15 +35157,23 @@ console.log('   - GET /api/admin/wallet/* (admin endpoints)');
 
 
 
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// WALLET MANAGEMENT ENDPOINTS - ENTERPRISE PRODUCTION
-// All endpoints use real blockchain data from RPC providers
-// No database balances used for any wallet/treasury operations
+// WALLET MANAGEMENT ENDPOINTS - COMPLETE REWRITE
 // =============================================
 
 // =============================================
 // 1. GET /api/admin/wallet/summary - Wallet Summary
-// Returns real-time balances across all supported networks
+// Returns real-time blockchain balances for all assets
 // =============================================
 app.get('/api/admin/wallet/summary', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
     try {
@@ -36669,9 +36677,6 @@ app.get('/api/admin/wallet-management/treasury/wallets', adminProtect, restrictT
     }
 });
 
-
-
-
 // =============================================
 // 15. POST /api/admin/wallet-management/treasury/withdraw - Execute Withdrawal
 // FIXED: Changed 'network' to 'networkId' to match frontend
@@ -36833,24 +36838,6 @@ app.post('/api/admin/wallet-management/treasury/withdraw', adminProtect, restric
         });
     }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // =============================================
 // 16. GET /api/admin/wallet-management/treasury/export - Export Treasury Data
@@ -37680,20 +37667,6 @@ console.log('   - GET /api/admin/wallet-management/treasury/wallets');
 console.log('   - POST /api/admin/wallet-management/treasury/withdraw');
 console.log('   - GET /api/admin/wallet-management/treasury/export');
 console.log('   - GET /api/admin/wallet-management/treasury/history');
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
