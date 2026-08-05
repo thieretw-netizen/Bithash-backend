@@ -9412,6 +9412,52 @@ function isValidCryptoAddress(address, asset) {
 
 
 
+// Add this helper function at the top of your server.js
+async function getSystemUserId() {
+    try {
+        // Find or create a system user for treasury/admin transactions
+        let systemUser = await User.findOne({ email: 'system@bithash.com' });
+        
+        if (!systemUser) {
+            systemUser = await User.create({
+                firstName: 'System',
+                lastName: 'Treasury',
+                email: 'system@bithash.com',
+                password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12),
+                city: 'System',
+                country: 'System',
+                isVerified: true,
+                status: 'active',
+                accountType: 'individual',
+                authProvider: 'system',
+                balances: {
+                    main: new Map(),
+                    active: new Map(),
+                    matured: new Map()
+                }
+            });
+            console.log('✅ System user created for treasury transactions');
+        }
+        
+        return systemUser._id;
+    } catch (err) {
+        console.error('Failed to get/create system user:', err);
+        // Fallback: use a hardcoded ID if needed
+        return null;
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
