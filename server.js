@@ -36420,6 +36420,13 @@ app.get('/api/admin/wallet-management/treasury/wallet-info', adminProtect, restr
     }
 });
 
+
+
+
+
+
+
+
 // =============================================
 // 12. GET /api/admin/wallet-management/treasury/sweep-info - Sweep Info
 // =============================================
@@ -36497,10 +36504,11 @@ app.get('/api/admin/wallet-management/treasury/sweep-info', adminProtect, restri
 // =============================================
 app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
     try {
-        const { network, asset, destinationAddress, minBalance } = req.body;
+        const { networkId, asset, destinationAddress, minBalance } = req.body;
         const adminId = req.admin._id;
         
-        if (!network || !asset || !destinationAddress) {
+        // Validate required fields
+        if (!networkId || !asset || !destinationAddress) {
             return res.status(400).json({
                 status: 'fail',
                 message: 'Network, asset, and destination address are required'
@@ -36577,30 +36585,43 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
             const batch = walletsToSweep.slice(i, i + CONCURRENCY_LIMIT);
             const batchPromises = batch.map(async (wallet) => {
                 try {
+                    // Get private key for this address
+                    const privateKey = await getPrivateKeyForAddress(assetUpper, wallet.address);
+                    if (!privateKey) {
+                        return { success: false, error: 'Failed to get private key' };
+                    }
+                    
                     // Get nonce
                     const nonce = await getNonce(assetUpper, wallet.address, config);
                     
                     // Sign transaction
-                    const signedTx = await signTransaction(
+                    const signedResult = await buildAndSignTransaction(
                         assetUpper,
+                        wallet.address,
                         destinationAddress,
                         wallet.transferableAmount,
+                        privateKey,
                         { fee: wallet.fee },
                         nonce,
                         config
                     );
                     
-                    if (!signedTx) {
+                    if (!signedResult || !signedResult.signedTx) {
                         return { success: false, error: 'Failed to sign transaction' };
                     }
                     
                     // Broadcast transaction
-                    const broadcastResult = await broadcastTransaction(assetUpper, signedTx, config);
+                    const broadcastResult = await broadcastTransactionToChain(assetUpper, signedResult.signedTx, config);
                     if (!broadcastResult || !broadcastResult.txHash) {
                         return { success: false, error: broadcastResult?.error || 'Broadcast failed' };
                     }
                     
-                    return { success: true, txHash: broadcastResult.txHash, wallet: wallet };
+                    return { 
+                        success: true, 
+                        txHash: broadcastResult.txHash, 
+                        wallet: wallet,
+                        fromAddress: wallet.address
+                    };
                 } catch (err) {
                     return { success: false, error: err.message };
                 }
@@ -36626,7 +36647,7 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
             adminId: adminId,
             adminName: req.admin.name,
             asset: assetUpper,
-            network: network,
+            network: networkId,
             destinationAddress: destinationAddress,
             walletsSwept: walletsToSweep.length,
             successful: successfulCount,
@@ -36651,7 +36672,7 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
             status: 'success',
             metadata: {
                 asset: assetUpper,
-                network: network,
+                network: networkId,
                 walletsSwept: walletsToSweep.length,
                 successful: successfulCount,
                 failed: failedCount,
@@ -36672,7 +36693,10 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
                 totalAmount: totalAmount,
                 totalFees: totalFees,
                 transactionHashes: txHashes,
-                executionTime: new Date().toISOString()
+                executionTime: new Date().toISOString(),
+                asset: assetUpper,
+                network: networkId,
+                destinationAddress: destinationAddress
             }
         });
         
@@ -36684,6 +36708,19 @@ app.post('/api/admin/wallet-management/treasury/sweep', adminProtect, restrictTo
         });
     }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // 14. GET /api/admin/wallet-management/treasury/wallets - Get Treasury Wallets
