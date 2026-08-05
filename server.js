@@ -9577,6 +9577,435 @@ console.log('   - checkTransactionOnBlockchain');
 console.log('   - getPlatformWalletAddress');
 
 
+// =============================================
+// HELPER FUNCTIONS FOR DASHBOARD ENDPOINT
+// Add this BEFORE the dashboard endpoint
+// =============================================
+
+/**
+ * Get real-time asset balances from blockchain using RPC
+ */
+async function getRealTimeAssetBalances() {
+    try {
+        const balances = [];
+        const assets = Object.keys(ASSET_NETWORK_MAP);
+        
+        console.log(`📊 Fetching real-time balances for ${assets.length} assets...`);
+        
+        for (const asset of assets) {
+            // Get all active deposit addresses for this asset
+            const addresses = await DepositAddress.find({
+                asset: asset.toLowerCase(),
+                isActive: true
+            }).distinct('address');
+            
+            if (addresses.length === 0) {
+                console.log(`   ⏭️ No active addresses for ${asset}`);
+                continue;
+            }
+            
+            const config = ASSET_NETWORK_MAP[asset];
+            let totalBalance = 0;
+            
+            // Get real balance from blockchain using RPC
+            try {
+                const balanceResult = await getRealBlockchainBalance(asset, addresses, config);
+                totalBalance = balanceResult.confirmed || 0;
+                console.log(`   ✅ ${asset}: ${totalBalance.toFixed(8)} (${addresses.length} addresses)`);
+            } catch (err) {
+                console.warn(`   ⚠️ Failed to fetch ${asset} balance:`, err.message);
+                continue;
+            }
+            
+            // Get current USD price
+            let price = 0;
+            try {
+                price = await getCryptoPrice(asset);
+            } catch (err) {
+                console.warn(`   ⚠️ Failed to fetch ${asset} price:`, err.message);
+            }
+            
+            const usdValue = totalBalance * (price || 0);
+            
+            balances.push({
+                asset: asset,
+                balance: totalBalance,
+                usdValue: usdValue,
+                price: price || 0,
+                addresses: addresses.length,
+                network: config.network || platformWallet.getNetworkName(asset)
+            });
+        }
+        
+        // Sort by USD value descending
+        balances.sort((a, b) => b.usdValue - a.usdValue);
+        
+        console.log(`📊 Real-time balances fetched: ${balances.length} assets with balance`);
+        return balances;
+    } catch (err) {
+        console.error('Failed to get real-time asset balances:', err.message);
+        return [];
+    }
+}
+
+/**
+ * Get network distribution for charts
+ */
+async function getNetworkDistribution() {
+    try {
+        const distribution = {};
+        const assets = Object.keys(ASSET_NETWORK_MAP);
+        
+        for (const asset of assets) {
+            const config = ASSET_NETWORK_MAP[asset];
+            const network = config.network || 'Unknown';
+            
+            if (!distribution[network]) {
+                distribution[network] = 0;
+            }
+            
+            const addresses = await DepositAddress.find({
+                asset: asset.toLowerCase(),
+                isActive: true
+            }).distinct('address');
+            
+            if (addresses.length > 0) {
+                try {
+                    const balanceResult = await getRealBlockchainBalance(asset, addresses, config);
+                    const price = await getCryptoPrice(asset);
+                    distribution[network] += (balanceResult.confirmed || 0) * (price || 0);
+                } catch (err) {
+                    console.warn(`Failed to fetch ${asset} for network distribution:`, err.message);
+                }
+            }
+        }
+        
+        // Format for chart - only include networks with value > 0
+        const labels = Object.keys(distribution).filter(k => distribution[k] > 0);
+        const values = labels.map(k => distribution[k]);
+        
+        return { labels, values };
+    } catch (err) {
+        console.error('Failed to get network distribution:', err.message);
+        return { labels: [], values: [] };
+    }
+}
+
+/**
+ * Get asset distribution for charts
+ */
+async function getAssetDistribution() {
+    try {
+        const distribution = {};
+        const assets = Object.keys(ASSET_NETWORK_MAP);
+        
+        for (const asset of assets) {
+            const addresses = await DepositAddress.find({
+                asset: asset.toLowerCase(),
+                isActive: true
+            }).distinct('address');
+            
+            if (addresses.length > 0) {
+                const config = ASSET_NETWORK_MAP[asset];
+                try {
+                    const balanceResult = await getRealBlockchainBalance(asset, addresses, config);
+                    const price = await getCryptoPrice(asset);
+                    distribution[asset] = (balanceResult.confirmed || 0) * (price || 0);
+                } catch (err) {
+                    console.warn(`Failed to fetch ${asset} for asset distribution:`, err.message);
+                }
+            }
+        }
+        
+        // Format for chart - only include assets with value > 0
+        const labels = Object.keys(distribution).filter(k => distribution[k] > 0);
+        const values = labels.map(k => distribution[k]);
+        
+        return { labels, values };
+    } catch (err) {
+        console.error('Failed to get asset distribution:', err.message);
+        return { labels: [], values: [] };
+    }
+}
+
+/**
+ * Get platform wallet address for an asset
+ */
+async function getPlatformWalletAddress(asset) {
+    try {
+        const depositAddress = await DepositAddress.findOne({
+            asset: asset.toLowerCase(),
+            isActive: true
+        });
+        return depositAddress?.address || null;
+    } catch (err) {
+        console.error(`Failed to get platform wallet address for ${asset}:`, err.message);
+        return null;
+    }
+}
+
+/**
+ * Get private key for a specific address
+ */
+async function getPrivateKeyForAddress(asset, address) {
+    try {
+        const depositAddress = await DepositAddress.findOne({
+            address: address,
+            asset: asset.toLowerCase()
+        });
+        
+        if (!depositAddress) {
+            console.error(`No deposit address record found for ${address}`);
+            return null;
+        }
+        
+        const path = depositAddress.derivationPath;
+        const child = platformWallet.root.derivePath(path);
+        
+        if (!child.privateKey) {
+            console.error(`No private key found for derivation path ${path}`);
+            return null;
+        }
+        
+        return child.privateKey.toString('hex');
+    } catch (err) {
+        console.error(`Failed to get private key for ${address}:`, err.message);
+        return null;
+    }
+}
+
+/**
+ * Get REAL blockchain balance using RPC calls
+ * NO FALLBACKS - Only returns real on-chain data
+ */
+async function getRealBlockchainBalance(asset, addresses, config) {
+    const assetUpper = asset.toUpperCase();
+    let totalConfirmed = 0;
+    let totalPending = 0;
+    
+    if (!addresses || addresses.length === 0) {
+        return { confirmed: 0, pending: 0, total: 0 };
+    }
+    
+    try {
+        switch (config.type) {
+            case 'evm': {
+                const provider = new ethers.JsonRpcProvider(config.rpc);
+                
+                for (const address of addresses) {
+                    try {
+                        let balance = 0;
+                        
+                        // Check if it's an ERC-20 token
+                        if (config.contract) {
+                            const contract = new ethers.Contract(
+                                config.contract,
+                                ['function balanceOf(address) view returns (uint256)'],
+                                provider
+                            );
+                            const balanceWei = await contract.balanceOf(address);
+                            const decimals = await getTokenDecimalsOnChain(config.contract, provider);
+                            balance = Number(ethers.formatUnits(balanceWei, decimals));
+                        } else {
+                            const balanceWei = await provider.getBalance(address);
+                            balance = Number(ethers.formatEther(balanceWei));
+                        }
+                        
+                        totalConfirmed += balance;
+                    } catch (err) {
+                        console.warn(`Failed to get EVM balance for ${address}:`, err.message);
+                    }
+                }
+                break;
+            }
+            
+            case 'solana': {
+                const connection = new Connection(config.rpc);
+                for (const address of addresses) {
+                    try {
+                        const pubKey = new PublicKey(address);
+                        const balance = await connection.getBalance(pubKey);
+                        totalConfirmed += balance / 1e9;
+                    } catch (err) {
+                        console.warn(`Failed to get Solana balance for ${address}:`, err.message);
+                    }
+                }
+                break;
+            }
+            
+            case 'tron': {
+                const tronWeb = new TronWeb({ fullHost: config.rpc });
+                for (const address of addresses) {
+                    try {
+                        const balance = await tronWeb.trx.getBalance(address);
+                        totalConfirmed += balance / 1e6;
+                    } catch (err) {
+                        console.warn(`Failed to get TRON balance for ${address}:`, err.message);
+                    }
+                }
+                break;
+            }
+            
+            case 'utxo': {
+                const assetLower = assetUpper.toLowerCase();
+                const explorerMap = {
+                    'btc': 'https://api.blockchair.com/bitcoin',
+                    'doge': 'https://api.blockchair.com/dogecoin',
+                    'ltc': 'https://api.blockchair.com/litecoin'
+                };
+                
+                const baseUrl = explorerMap[assetLower];
+                if (baseUrl) {
+                    const addressParam = addresses.join(',');
+                    const response = await axios.get(
+                        `${baseUrl}/dashboards/address/${addressParam}`,
+                        { timeout: 10000 }
+                    );
+                    
+                    if (response.data && response.data.data) {
+                        for (const addr of addresses) {
+                            const data = response.data.data[addr];
+                            if (data) {
+                                totalConfirmed += data.address?.balance || 0;
+                                totalPending += data.address?.balance || 0;
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            
+            case 'xrp': {
+                const client = new xrpl.Client(config.rpc);
+                await client.connect();
+                for (const address of addresses) {
+                    try {
+                        const accountInfo = await client.request({
+                            command: 'account_info',
+                            account: address
+                        });
+                        if (accountInfo.result && accountInfo.result.account_data) {
+                            const balance = accountInfo.result.account_data.Balance;
+                            totalConfirmed += Number(balance) / 1e6;
+                        }
+                    } catch (err) {
+                        console.warn(`Failed to get XRP balance for ${address}:`, err.message);
+                    }
+                }
+                await client.disconnect();
+                break;
+            }
+            
+            default:
+                console.warn(`Unsupported asset type for balance check: ${config.type}`);
+        }
+        
+        return {
+            confirmed: totalConfirmed,
+            pending: totalPending,
+            total: totalConfirmed + totalPending
+        };
+    } catch (err) {
+        console.error(`Failed to get blockchain balance for ${asset}:`, err.message);
+        return { confirmed: 0, pending: 0, total: 0 };
+    }
+}
+
+/**
+ * Get token decimals on-chain
+ */
+async function getTokenDecimalsOnChain(contractAddress, provider) {
+    try {
+        const contract = new ethers.Contract(
+            contractAddress,
+            ['function decimals() view returns (uint8)'],
+            provider
+        );
+        return await contract.decimals();
+    } catch (err) {
+        console.warn(`Failed to get token decimals for ${contractAddress}:`, err.message);
+        return 18;
+    }
+}
+
+/**
+ * Get real deposits per hour - ONLY REAL on-chain transactions
+ */
+async function getRealDepositsPerHour(hours) {
+    try {
+        const startTime = new Date(Date.now() - hours * 60 * 60 * 1000);
+        
+        const result = await Transaction.aggregate([
+            {
+                $match: {
+                    type: 'deposit',
+                    status: 'completed',
+                    createdAt: { $gte: startTime },
+                    'details.txHash': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: { $hour: '$createdAt' },
+                    total: { $sum: '$amount' }
+                }
+            },
+            { $sort: { '_id': 1 } }
+        ]);
+        
+        const labels = result.map(r => `${r._id}:00`);
+        const values = result.map(r => r.total);
+        
+        return { labels, values };
+    } catch (err) {
+        console.error('Failed to get deposits per hour:', err.message);
+        return { labels: [], values: [] };
+    }
+}
+
+/**
+ * Get real deposits per day - ONLY REAL on-chain transactions
+ */
+async function getRealDepositsPerDay(days) {
+    try {
+        const startTime = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        
+        const result = await Transaction.aggregate([
+            {
+                $match: {
+                    type: 'deposit',
+                    status: 'completed',
+                    createdAt: { $gte: startTime },
+                    'details.txHash': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                    total: { $sum: '$amount' }
+                }
+            },
+            { $sort: { '_id': 1 } }
+        ]);
+        
+        const labels = result.map(r => r._id);
+        const values = result.map(r => r.total);
+        
+        return { labels, values };
+    } catch (err) {
+        console.error('Failed to get deposits per day:', err.message);
+        return { labels: [], values: [] };
+    }
+}
+
+
+
+
+
+
+
+
+
 
 
 
