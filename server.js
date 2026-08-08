@@ -10072,14 +10072,15 @@ app.post('/api/auth/google', async (req, res) => {
 
 // =============================================
 // WEB3 AUTHENTICATION SYSTEM - MULTICHAIN SUPPORT
+// BACKEND OWNS THE COMPLETE CHALLENGE
 // =============================================
 
 // =============================================
-// 1. GET NONCE
+// 1. GET NONCE - GENERATES COMPLETE CHALLENGE
 // =============================================
 app.get('/api/web3/nonce', async (req, res) => {
     try {
-        const { walletAddress, type, isSignup, accountType, referralCode } = req.query;
+        const { walletAddress, chainId, type, isSignup, accountType, referralCode } = req.query;
 
         if (!walletAddress) {
             return res.status(400).json({
@@ -10088,8 +10089,40 @@ app.get('/api/web3/nonce', async (req, res) => {
             });
         }
 
-        const normalizedAddress = walletAddress.toLowerCase();
+        if (!chainId) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Chain ID is required'
+            });
+        }
 
+        const normalizedAddress = walletAddress.toLowerCase();
+        const chainIdNum = parseInt(chainId, 10);
+
+        if (isNaN(chainIdNum) || chainIdNum <= 0) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid chain ID'
+            });
+        }
+
+        // Check if chain is supported
+        const SUPPORTED_CHAINS = {
+            1: 'Ethereum Mainnet',
+            56: 'BNB Smart Chain',
+            137: 'Polygon',
+            42161: 'Arbitrum One',
+            10: 'Optimism'
+        };
+
+        if (!SUPPORTED_CHAINS[chainIdNum]) {
+            return res.status(400).json({
+                status: 'fail',
+                message: `Unsupported chain ID: ${chainIdNum}`
+            });
+        }
+
+        // Check if wallet is already registered
         const existingWeb3User = await Web3User.findOne({
             'wallets.address': normalizedAddress
         });
@@ -10118,28 +10151,51 @@ app.get('/api/web3/nonce', async (req, res) => {
             });
         }
 
+        // Generate cryptographically secure nonce
         const nonce = generateNonce();
-        const message = `Sign this message to authenticate with BitHash Capital.\n\nNonce: ${nonce}\n\nWallet: ${normalizedAddress}\n\nTimestamp: ${new Date().toISOString()}`;
+        
+        // Generate the COMPLETE authentication message on the backend
+        const domain = process.env.FRONTEND_URL || 'https://www.bithashcapital.live';
+        const issuedAt = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+        const purpose = isSignupRequest ? 'signup' : 'login';
+        const chainName = SUPPORTED_CHAINS[chainIdNum] || `Chain ${chainIdNum}`;
 
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        // BACKEND GENERATES THE COMPLETE MESSAGE - THIS IS AUTHORITATIVE
+        const message = [
+            `${domain} wants you to authenticate with your wallet:`,
+            ``,
+            `Wallet Address: ${normalizedAddress}`,
+            `Chain: ${chainName} (Chain ID: ${chainIdNum})`,
+            `Purpose: ${purpose}`,
+            `Nonce: ${nonce}`,
+            `Issued At: ${issuedAt}`,
+            `Expiration: ${expiresAt.toISOString()}`,
+            `Application: BitHash Capital`
+        ].join('\n');
 
-        await Web3Nonce.create({
+        // Store the complete challenge in the database
+        const nonceRecord = await Web3Nonce.create({
             walletAddress: normalizedAddress,
+            chainId: chainIdNum,
             nonce: nonce,
-            message: message,
-            type: type === 'signup' ? 'signup' : 'login',
+            message: message, // STORE THE EXACT MESSAGE
+            type: purpose,
+            isSignup: isSignupRequest,
             used: false,
+            expiresAt: expiresAt,
             ipAddress: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown',
-            expiresAt: expiresAt,
             metadata: {
                 accountType: accountType || 'individual',
                 referralCode: referralCode || null,
-                isSignup: isSignupRequest,
-                pageSource: req.headers.referer?.includes('signup') ? 'signup' : 'login'
+                chainName: chainName,
+                domain: domain,
+                issuedAt: issuedAt
             }
         });
 
+        // Update existing Web3User if it exists (for login flow)
         if (existingWeb3User) {
             existingWeb3User.web3Auth.nonce = nonce;
             existingWeb3User.web3Auth.nonceExpires = expiresAt;
@@ -10148,7 +10204,7 @@ app.get('/api/web3/nonce', async (req, res) => {
             await existingWeb3User.save();
         }
 
-        // LOG ONLY TO WEB3LOG
+        // Log the nonce generation
         await Web3Log.create({
             walletAddress: normalizedAddress,
             walletType: 'metamask',
@@ -10158,23 +10214,29 @@ app.get('/api/web3/nonce', async (req, res) => {
             userAgent: req.headers['user-agent'] || 'Unknown',
             metadata: {
                 isSignup: isSignupRequest,
-                accountType: accountType || 'individual'
-            },
-            relatedEntity: null,
-            relatedEntityModel: null
+                chainId: chainIdNum,
+                accountType: accountType || 'individual',
+                nonceId: nonceRecord._id
+            }
         });
 
-        console.log(`🔑 Generated nonce for ${normalizedAddress}`);
+        console.log(`🔑 Generated challenge for ${normalizedAddress} on chain ${chainIdNum}`);
 
+        // Return the COMPLETE challenge to the frontend
         res.status(200).json({
             status: 'success',
             data: {
                 nonce: nonce,
-                message: message,
+                message: message, // EXACT MESSAGE TO BE SIGNED
                 expiresAt: expiresAt,
                 walletAddress: normalizedAddress,
+                chainId: chainIdNum,
+                chainName: chainName,
                 isSignup: isSignupRequest,
-                exists: !!existingWeb3User
+                exists: !!existingWeb3User,
+                issuedAt: issuedAt,
+                purpose: purpose,
+                domain: domain
             }
         });
 
@@ -10182,13 +10244,13 @@ app.get('/api/web3/nonce', async (req, res) => {
         console.error('Error generating nonce:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to generate nonce'
+            message: 'Failed to generate authentication challenge'
         });
     }
 });
 
 // =============================================
-// 2. VERIFY SIGNATURE - UPDATED FOR MULTICHAIN
+// 2. VERIFY SIGNATURE - USES STORED MESSAGE
 // =============================================
 app.post('/api/web3/verify', async (req, res) => {
     try {
@@ -10203,38 +10265,66 @@ app.post('/api/web3/verify', async (req, res) => {
             walletConnect 
         } = req.body;
 
-        if (!walletAddress || !signature || !nonce) {
+        if (!walletAddress || !signature || !nonce || !chainId) {
             return res.status(400).json({
                 status: 'fail',
-                message: 'Wallet address, signature, and nonce are required'
+                message: 'Wallet address, signature, nonce, and chain ID are required'
             });
         }
 
         const normalizedAddress = walletAddress.toLowerCase();
+        const chainIdNum = parseInt(chainId, 10);
 
+        if (isNaN(chainIdNum) || chainIdNum <= 0) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid chain ID'
+            });
+        }
+
+        // Find the challenge - using ALL binding information
         const nonceRecord = await Web3Nonce.findOne({
             walletAddress: normalizedAddress,
+            chainId: chainIdNum,
             nonce: nonce,
             used: false,
             expiresAt: { $gt: new Date() }
         });
 
         if (!nonceRecord) {
+            // Check if the nonce exists but is expired or used
+            const expiredOrUsed = await Web3Nonce.findOne({
+                walletAddress: normalizedAddress,
+                chainId: chainIdNum,
+                nonce: nonce
+            });
+
+            if (expiredOrUsed) {
+                if (expiredOrUsed.used) {
+                    return res.status(400).json({
+                        status: 'fail',
+                        message: 'This authentication challenge has already been used.'
+                    });
+                }
+                if (expiredOrUsed.expiresAt <= new Date()) {
+                    return res.status(400).json({
+                        status: 'fail',
+                        message: 'This authentication challenge has expired. Please request a new one.'
+                    });
+                }
+            }
+
             return res.status(400).json({
                 status: 'fail',
-                message: 'Invalid or expired nonce. Please try again.'
+                message: 'Invalid authentication challenge. Please request a new one.'
             });
         }
 
+        // Verify the signature against the STORED message
+        let recoveredAddress;
         try {
-            const recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
-            
-            if (recoveredAddress.toLowerCase() !== normalizedAddress) {
-                return res.status(400).json({
-                    status: 'fail',
-                    message: 'Signature verification failed. Address mismatch.'
-                });
-            }
+            // CRITICAL: Verify against the exact stored message
+            recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
         } catch (signErr) {
             console.error('Signature verification error:', signErr);
             return res.status(400).json({
@@ -10243,12 +10333,56 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
-        nonceRecord.used = true;
-        nonceRecord.usedAt = new Date();
-        await nonceRecord.save();
+        // Compare recovered address with the challenge address
+        if (recoveredAddress.toLowerCase() !== normalizedAddress) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Signature verification failed. Address mismatch.'
+            });
+        }
 
+        // Verify the authentication purpose matches
         const isSignupRequest = isSignup === true || isSignup === 'true';
+        const challengePurpose = nonceRecord.type || (isSignupRequest ? 'signup' : 'login');
+        
+        if (isSignupRequest && challengePurpose !== 'signup') {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'This challenge was created for login, not signup.'
+            });
+        }
+        
+        if (!isSignupRequest && challengePurpose !== 'login') {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'This challenge was created for signup, not login.'
+            });
+        }
 
+        // ATOMICALLY consume the nonce - only one request can succeed
+        const updateResult = await Web3Nonce.updateOne(
+            {
+                _id: nonceRecord._id,
+                used: false,
+                expiresAt: { $gt: new Date() }
+            },
+            {
+                $set: {
+                    used: true,
+                    usedAt: new Date()
+                }
+            }
+        );
+
+        if (updateResult.modifiedCount !== 1) {
+            // Another request already consumed this nonce
+            return res.status(400).json({
+                status: 'fail',
+                message: 'This authentication challenge has already been used. Please request a new one.'
+            });
+        }
+
+        // Now check if the wallet is already registered
         let web3User = await Web3User.findOne({
             'wallets.address': normalizedAddress
         });
@@ -10273,6 +10407,7 @@ app.post('/api/web3/verify', async (req, res) => {
             });
         }
 
+        // Get user info if it exists
         let userEmail = null;
         let userId = null;
         let fullUser = null;
@@ -10293,20 +10428,22 @@ app.post('/api/web3/verify', async (req, res) => {
             };
         }
 
+        // Generate temporary token for OTP flow
         const tempToken = jwt.sign(
             { 
                 walletAddress: normalizedAddress, 
                 isSignup: isSignupRequest,
                 email: userEmail || null,
                 userId: userId || null,
-                chainId: chainId || 1,
-                walletConnectData: walletConnectData
+                chainId: chainIdNum,
+                walletConnectData: walletConnectData,
+                nonceId: nonceRecord._id
             },
             JWT_SECRET,
             { expiresIn: '10m' }
         );
 
-        // LOG ONLY TO WEB3LOG
+        // Log successful verification
         await Web3Log.create({
             walletAddress: normalizedAddress,
             walletType: walletType || 'metamask',
@@ -10318,9 +10455,10 @@ app.post('/api/web3/verify', async (req, res) => {
                 isSignup: isSignupRequest,
                 accountType: accountType || 'individual',
                 nonceUsed: nonce,
-                chainId: chainId || 1,
+                chainId: chainIdNum,
                 hasWalletConnectData: !!walletConnectData,
-                approvedChainsCount: walletConnectData?.approvedChains?.length || 0
+                approvedChainsCount: walletConnectData?.approvedChains?.length || 0,
+                nonceId: nonceRecord._id
             },
             user: userId || null,
             relatedEntity: nonceRecord._id,
@@ -10342,7 +10480,9 @@ app.post('/api/web3/verify', async (req, res) => {
                     email: fullUser.email
                 } : null,
                 needsOtp: true,
-                walletConnectData: walletConnectData
+                walletConnectData: walletConnectData,
+                chainId: chainIdNum,
+                nonceId: nonceRecord._id
             }
         });
 
