@@ -704,8 +704,8 @@ UserSchema.methods.linkWeb3Wallet = function(address, type, network, metadata = 
     location: metadata.location || ''
   });
 
-  // Update auth provider
-  this.authProvider = 'web3';
+  // DO NOT change authProvider here - authProvider is only set during signup!
+  // The user's authProvider remains whatever it was set to during signup.
 
   return this;
 };
@@ -727,10 +727,8 @@ UserSchema.methods.unlinkWeb3Wallet = function() {
     });
   }
 
-  // Reset auth provider if no other providers
-  if (!this.googleId && this.authProvider === 'web3') {
-    this.authProvider = 'email';
-  }
+  // DO NOT change authProvider here - authProvider is only set during signup!
+  // Even if we unlink a web3 wallet, the authProvider remains as originally set.
 
   return this;
 };
@@ -6534,6 +6532,10 @@ const getUserDeviceInfo = async (req) => {
   }
 };
 
+// =============================================
+// ACTIVITY LOGGING - ALL ACTIVITIES GO TO SYSTEMLOG ONLY
+// =============================================
+
 const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
   try {
     const deviceInfo = await getUserDeviceInfo(req);
@@ -6548,6 +6550,7 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       detectedAt: new Date()
     };
     
+    // ALL ACTIVITIES GO TO SYSTEMLOG ONLY - NOT TO USERLOG OR ANY OTHER LOG
     await SystemLog.create({
       action,
       entity,
@@ -6935,6 +6938,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
 
+    // LOG ONLY TO SYSTEMLOG
     await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
       amount: commissionAmount,
       downline: investorId,
@@ -8354,6 +8358,2898 @@ const getBrowserFromUserAgent = (userAgent) => {
   return 'Unknown';
 };
 
+// =============================================
+// HELPER: Timezone-based greeting
+// =============================================
+function getGreetingByTimezone(offsetMinutes = 0) {
+    const now = new Date();
+    const utcHours = now.getUTCHours();
+    let localHour = (utcHours + offsetMinutes / 60) % 24;
+    if (localHour < 0) localHour += 24;
+    const hour = Math.floor(localHour);
+    if (hour >= 5 && hour < 12) return 'Good morning';
+    if (hour >= 12 && hour < 17) return 'Good afternoon';
+    if (hour >= 17 && hour < 22) return 'Good evening';
+    return 'Hello';
+}
+
+// =============================================
+// SIGNUP ENDPOINT - authProvider is set ONLY during signup
+// =============================================
+app.post('/api/auth/signup', [
+    body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
+    body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
+    body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(value)) {
+            throw new Error('Please provide a valid email address (e.g., name@domain.com)');
+        }
+        return true;
+    }),
+    body('city').trim().notEmpty().withMessage('City is required').escape(),
+    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+        .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+        .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
+        .matches(/[0-9]/).withMessage('Password must contain at least one number')
+        .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character'),
+    body('referralCode').optional().trim().escape(),
+    body('accountType').optional().isIn(['individual', 'business']).withMessage('Account type must be individual or business'),
+    body('timezoneOffset').optional().isInt().withMessage('Timezone offset must be an integer'),
+    body('organizationName').optional().trim().escape(),
+    body('role').optional().trim().escape(),
+    body('country').optional().trim().escape(),
+    body('workEmail').optional().isEmail().withMessage('Please provide a valid work email'),
+    body('orgEmail').optional().isEmail().withMessage('Please provide a valid email address'),
+    body('orgCity').optional().trim().escape(),
+    body('orgFirstName').optional().trim().escape(),
+    body('orgLastName').optional().trim().escape(),
+    body('orgPassword').optional().trim(),
+    body('confirmOrgPassword').optional().trim()
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        console.error('Signup validation errors:', errors.array());
+
+        // LOG ONLY TO SYSTEMLOG
+        await SystemLog.create({
+            action: 'signup_validation_failed',
+            entity: 'User',
+            performedBy: null,
+            performedByModel: 'System',
+            status: 'failed',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                errors: errors.array(),
+                body: { ...req.body, password: '[REDACTED]' }
+            }
+        });
+
+        return res.status(400).json({
+            status: 'fail',
+            errors: errors.array(),
+            message: errors.array()[0]?.msg || 'Validation failed'
+        });
+    }
+
+    try {
+        const {
+            firstName, lastName, email, city, password, referralCode, accountType,
+            organizationName, role, country, workEmail, orgEmail, orgCity,
+            orgFirstName, orgLastName, orgPassword, timezoneOffset = 0
+        } = req.body;
+
+        const userEmail = email || orgEmail;
+        const userFirstName = firstName || orgFirstName;
+        const userLastName = lastName || orgLastName;
+        const userPassword = password || orgPassword;
+        const userCity = city || orgCity;
+        const userAccountType = accountType || 'individual';
+        const userOrganizationName = (userAccountType === 'business' && organizationName) ? organizationName : null;
+        const userWorkEmail = (userAccountType === 'business' && workEmail) ? workEmail : null;
+        const userRole = (userAccountType === 'business' && role) ? role : null;
+        const userBusinessCountry = (userAccountType === 'business' && country) ? country : null;
+
+        if (!userEmail) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email address is required'
+            });
+        }
+
+        if (!userPassword) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Password is required'
+            });
+        }
+
+        if (!userFirstName || !userLastName) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'First name and last name are required'
+            });
+        }
+
+        if (!userCity) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'City is required'
+            });
+        }
+
+        const originalEmail = userEmail;
+        const existingUser = await User.findOne({ email: originalEmail });
+
+        if (existingUser) {
+            const greeting = getGreetingByTimezone(timezoneOffset);
+            const truncatedEmail = originalEmail.split('@')[0].length > 6
+                ? `${originalEmail.split('@')[0].substring(0, 3)}...${originalEmail.split('@')[0].substring(originalEmail.split('@')[0].length - 3)}@${originalEmail.split('@')[1]}`
+                : originalEmail;
+
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'signup_attempt_duplicate',
+                entity: 'User',
+                entityId: existingUser._id,
+                performedBy: existingUser._id,
+                performedByModel: 'User',
+                performedByEmail: existingUser.email,
+                performedByName: `${existingUser.firstName} ${existingUser.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                location: req.clientLocation?.location || 'Unknown',
+                metadata: {
+                    attemptedEmail: originalEmail,
+                    existingAuthProvider: existingUser.authProvider,
+                    accountType: userAccountType,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
+            return res.status(400).json({
+                status: 'fail',
+                message: `${greeting} ${existingUser.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
+                data: {
+                    greeting,
+                    userName: existingUser.firstName,
+                    truncatedEmail,
+                    action: 'login_suggested'
+                }
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(userPassword, 12);
+        const newReferralCode = generateReferralCode();
+
+        let referredByUser = null;
+        let referralSource = 'organic';
+
+        if (referralCode) {
+            console.log('Processing referral code:', referralCode);
+            let actualReferralCode = referralCode;
+            if (referralCode.includes('-')) {
+                const parts = referralCode.split('-');
+                if (parts.length >= 4) {
+                    actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
+                } else {
+                    actualReferralCode = parts[parts.length - 1];
+                }
+            }
+
+            referredByUser = await User.findOne({ referralCode: actualReferralCode });
+
+            if (referredByUser) {
+                referralSource = 'referral_link';
+                console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
+            }
+        }
+
+        const userData = {
+            firstName: userFirstName,
+            lastName: userLastName,
+            email: originalEmail,
+            password: hashedPassword,
+            city: userCity,
+            referralCode: newReferralCode,
+            referredBy: referredByUser ? referredByUser._id : undefined,
+            isVerified: false,
+            accountType: userAccountType,
+            authProvider: 'email',  // ✅ authProvider set ONLY during signup
+            signupSource: referralCode ? 'referral' : 'organic',
+            organizationName: userOrganizationName,
+            role: userRole,
+            country: userBusinessCountry,
+            workEmail: userWorkEmail,
+            metadata: {
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                signupDate: new Date(),
+                accountTypeSelected: userAccountType,
+                signupMethod: 'email_password',
+                timezoneOffset: timezoneOffset
+            }
+        };
+
+        const newUser = await User.create(userData);
+        console.log(`✅ New user created: ${newUser.email} (Account Type: ${newUser.accountType}, Auth Provider: email)`);
+
+        // LOG ONLY TO SYSTEMLOG
+        await SystemLog.create({
+            action: 'user_signup_success',
+            entity: 'User',
+            entityId: newUser._id,
+            performedBy: newUser._id,
+            performedByModel: 'User',
+            performedByEmail: newUser.email,
+            performedByName: `${newUser.firstName} ${newUser.lastName}`,
+            status: 'success',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            location: req.clientLocation?.location || 'Unknown',
+            metadata: {
+                email: originalEmail,
+                accountType: userAccountType,
+                referralCodeUsed: referralCode || null,
+                referredBy: referredByUser ? referredByUser.email : null,
+                organizationName: organizationName || null,
+                city: userCity,
+                timezoneOffset: timezoneOffset,
+                authProvider: 'email'
+            }
+        });
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        await OTP.create({
+            email: originalEmail,
+            otp,
+            type: 'signup',
+            expiresAt,
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent']
+        });
+
+        await sendProfessionalEmail({
+            email: originalEmail,
+            template: 'otp',
+            data: {
+                name: userFirstName,
+                otp: otp,
+                action: 'account verification'
+            }
+        });
+
+        const rawDeviceInfo = await getUserDeviceInfo(req);
+        const formattedDeviceInfo = {
+            type: getDeviceType(req),
+            os: {
+                name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+                version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
+            },
+            browser: {
+                name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+                version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
+            },
+            platform: rawDeviceInfo.device || 'Unknown',
+            language: req.headers['accept-language'] || 'Unknown',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        };
+
+        const formattedLocation = {
+            ip: rawDeviceInfo.ip,
+            country: {
+                name: rawDeviceInfo.locationDetails?.country || 'Unknown',
+                code: (rawDeviceInfo.locationDetails?.country_code || rawDeviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+            },
+            region: {
+                name: rawDeviceInfo.locationDetails?.region || 'Unknown',
+                code: rawDeviceInfo.locationDetails?.region_code || rawDeviceInfo.locationDetails?.region || 'Unknown'
+            },
+            city: rawDeviceInfo.locationDetails?.city || userCity || 'Unknown',
+            postalCode: rawDeviceInfo.locationDetails?.postalCode || 'Unknown',
+            latitude: rawDeviceInfo.locationDetails?.latitude || null,
+            longitude: rawDeviceInfo.locationDetails?.longitude || null,
+            timezone: rawDeviceInfo.locationDetails?.timezone || 'Unknown',
+            isp: rawDeviceInfo.locationDetails?.isp || 'Unknown',
+            exactLocation: rawDeviceInfo.exactLocation || false,
+            formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || userCity}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
+        };
+
+        // LOG ONLY TO SYSTEMLOG (no UserLog)
+        await SystemLog.create({
+            action: 'user_registered',
+            entity: 'User',
+            entityId: newUser._id,
+            performedBy: newUser._id,
+            performedByModel: 'User',
+            performedByEmail: newUser.email,
+            performedByName: `${newUser.firstName} ${newUser.lastName}`,
+            status: 'success',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: rawDeviceInfo.ip,
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            location: formattedLocation.formatted,
+            deviceType: formattedDeviceInfo.type,
+            os: formattedDeviceInfo.os.name,
+            browser: formattedDeviceInfo.browser.name,
+            countryCode: formattedLocation.country.code,
+            city: formattedLocation.city,
+            region: formattedLocation.region.name,
+            latitude: formattedLocation.latitude,
+            longitude: formattedLocation.longitude,
+            metadata: {
+                email: originalEmail,
+                accountType: userAccountType,
+                referralCodeUsed: referralCode || null,
+                referredBy: referredByUser ? referredByUser.email : null,
+                organizationName: organizationName || null,
+                city: userCity,
+                timezoneOffset: timezoneOffset,
+                authProvider: 'email'
+            }
+        });
+
+        // Admin notification
+        const formattedTimestamp = new Date().toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            timeZoneName: 'short'
+        });
+
+        const brandHeader = `
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+        `;
+
+        const brandFooter = `
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
+                    <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+                </p>
+            </div>
+        `;
+
+        const adminEmailHtml = `
+            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                ${brandHeader}
+                <div style="padding: 30px; background: #FFFFFF;">
+                    <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                                <path d="M12 8V12M12 16H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW USER REGISTERED!</h2>
+                        <p style="color: #065F46; font-size: 13px; margin: 0;">${newUser.firstName} ${newUser.lastName} just joined ₿itHash Capital</p>
+                    </div>
+
+                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${newUser.firstName} ${newUser.lastName}</td>
+                             </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Email Address:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${newUser.email}</td>
+                             </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;"><span style="background: ${userAccountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${userAccountType.toUpperCase()}</span></td>
+                             </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Email/Password</span></td>
+                             </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>City:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${userCity}</td>
+                             </tr>
+                            ${organizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Organization:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${organizationName}</td>
+                             </tr>` : ''}
+                            ${referralCode ? `<tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Referral Code Used:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${referralCode}</td>
+                             </tr>` : ''}
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Location:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</td>
+                             </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Device:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</td>
+                             </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</td>
+                             </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Registered At:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
+                             </tr>
+                        </table>
+                    </div>
+
+                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Next Steps</p>
+                        <p style="color: #78350F; margin: 0; font-size: 14px;">The user has been sent an OTP for email verification. Once verified, they will have full access to the platform.</p>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://www.bithashcapital.live/admin/users/${newUser._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
+                    </div>
+
+                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
+                </div>
+                ${brandFooter}
+            </div>
+        `;
+
+        try {
+            await supportTransporter.sendMail({
+                from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+                to: 'thieretw@gmail.com',
+                subject: `🆕 NEW USER ALERT: ${newUser.firstName} ${newUser.lastName} joined ₿itHash Capital (${userAccountType})`,
+                html: adminEmailHtml
+            });
+            console.log(`✅ Admin signup notification sent successfully to thieretw@gmail.com for user: ${newUser.email}`);
+        } catch (adminEmailError) {
+            console.error(`❌ Failed to send admin signup notification to thieretw@gmail.com:`, adminEmailError.message);
+        }
+
+        const tempToken = generateJWT(newUser._id);
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
+            tempToken,
+            data: {
+                user: {
+                    id: newUser._id,
+                    firstName: newUser.firstName,
+                    lastName: newUser.lastName,
+                    email: newUser.email,
+                    accountType: newUser.accountType,
+                    city: newUser.city,
+                    organizationName: newUser.organizationName,
+                    needsVerification: true
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Signup error:', err);
+
+        // LOG ONLY TO SYSTEMLOG
+        await SystemLog.create({
+            action: 'signup_error',
+            entity: 'User',
+            performedBy: null,
+            performedByModel: 'System',
+            status: 'failed',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            errorMessage: err.message,
+            errorStack: err.stack,
+            metadata: {
+                email: req.body.email || req.body.orgEmail || 'unknown',
+                accountType: req.body.accountType || 'individual'
+            }
+        });
+
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'An error occurred during signup'
+        });
+    }
+});
+
+// =============================================
+// LOGIN ENDPOINT - Does NOT change authProvider
+// =============================================
+app.post('/api/auth/login', [
+    body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(value)) {
+            throw new Error('Please provide a valid email address (e.g., name@domain.com)');
+        }
+        return true;
+    }),
+    body('password').notEmpty().withMessage('Password is required'),
+    body('rememberMe').optional().isBoolean().withMessage('Remember me must be a boolean'),
+    body('accountType').optional().isIn(['individual', 'business']).withMessage('Account type must be individual or business'),
+    body('timezoneOffset').optional().isInt().withMessage('Timezone offset must be an integer')
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        // LOG ONLY TO SYSTEMLOG
+        await SystemLog.create({
+            action: 'login_validation_failed',
+            entity: 'User',
+            performedBy: null,
+            performedByModel: 'System',
+            status: 'failed',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                errors: errors.array(),
+                email: req.body.email
+            }
+        });
+
+        return res.status(400).json({
+            status: 'fail',
+            errors: errors.array()
+        });
+    }
+
+    try {
+        const { email, password, rememberMe, accountType, timezoneOffset = 0 } = req.body;
+        const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
+
+        const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
+        const recentFailedAttempts = await SystemLog.countDocuments({
+            'metadata.email': email,
+            action: 'login_failed',
+            status: 'failed',
+            createdAt: { $gte: sixMinutesAgo }
+        });
+
+        const isPasswordValid = user && (await bcrypt.compare(password, user.password));
+
+        if (!user || !isPasswordValid) {
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'login_failed',
+                entity: 'User',
+                entityId: user ? user._id : null,
+                performedBy: user ? user._id : null,
+                performedByModel: user ? 'User' : 'System',
+                performedByEmail: email,
+                performedByName: user ? `${user.firstName} ${user.lastName}` : 'Unknown User',
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    email: email,
+                    loginMethod: 'password',
+                    accountType: accountType || 'unknown',
+                    failedAttemptCount: recentFailedAttempts + 1,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
+            if (recentFailedAttempts === 0 && user && user.email && user.authProvider !== 'google') {
+                const rawDeviceInfo = await getUserDeviceInfo(req);
+                try {
+                    await sendAutomatedEmail(user, 'suspicious_login', {
+                        name: user.firstName,
+                        device: rawDeviceInfo.device || 'Unknown device',
+                        location: rawDeviceInfo.location || 'Unknown location',
+                        ip: rawDeviceInfo.ip || 'Unknown IP',
+                        timestamp: new Date().toISOString(),
+                        attemptType: 'Failed Password Attempt'
+                    });
+                    console.log(`📧 Failed login attempt email sent to ${user.email}`);
+                } catch (emailError) {
+                    console.error('Failed to send failed login email:', emailError);
+                }
+            }
+
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Incorrect email or password'
+            });
+        }
+
+        // ✅ AUTH PROVIDER CHECK - User must log in with the method they signed up with
+        // authProvider is NEVER changed during login - it is set ONLY during signup
+        if (user.authProvider !== 'email') {
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'login_wrong_provider',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    attemptedProvider: 'email',
+                    actualProvider: user.authProvider,
+                    email: email,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
+            return res.status(403).json({
+                status: 'fail',
+                message: `This account was created using ${user.authProvider}. Please log in using that method.`,
+                data: { provider: user.authProvider }
+            });
+        }
+
+        if (accountType && user.accountType !== accountType) {
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'login_account_type_mismatch',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    attemptedAccountType: accountType,
+                    actualAccountType: user.accountType,
+                    email: email
+                }
+            });
+
+            return res.status(401).json({
+                status: 'fail',
+                message: `Account type mismatch. This email is registered as a ${user.accountType} account.`
+            });
+        }
+
+        if (user.status !== 'active') {
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'login_account_inactive',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    email: email,
+                    status: user.status
+                }
+            });
+
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Your account has been suspended. Please contact support.'
+            });
+        }
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        await OTP.create({
+            email: email,
+            otp,
+            type: 'login',
+            expiresAt,
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent']
+        });
+
+        await sendProfessionalEmail({
+            email: email,
+            template: 'otp',
+            data: {
+                name: user.firstName,
+                otp: otp,
+                action: 'login verification'
+            }
+        });
+
+        const rawDeviceInfo = await getUserDeviceInfo(req);
+
+        const formattedDeviceInfo = {
+            type: getDeviceType(req),
+            os: {
+                name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+                version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
+            },
+            browser: {
+                name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+                version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
+            },
+            platform: rawDeviceInfo.device || 'Unknown',
+            language: req.headers['accept-language'] || 'Unknown',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        };
+
+        const formattedLocation = {
+            ip: rawDeviceInfo.ip,
+            country: {
+                name: rawDeviceInfo.locationDetails?.country || 'Unknown',
+                code: (rawDeviceInfo.locationDetails?.country_code || rawDeviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+            },
+            region: {
+                name: rawDeviceInfo.locationDetails?.region || 'Unknown',
+                code: rawDeviceInfo.locationDetails?.region_code || rawDeviceInfo.locationDetails?.region || 'Unknown'
+            },
+            city: rawDeviceInfo.locationDetails?.city || user.city || 'Unknown',
+            postalCode: rawDeviceInfo.locationDetails?.postalCode || 'Unknown',
+            latitude: rawDeviceInfo.locationDetails?.latitude || null,
+            longitude: rawDeviceInfo.locationDetails?.longitude || null,
+            timezone: rawDeviceInfo.locationDetails?.timezone || 'Unknown',
+            isp: rawDeviceInfo.locationDetails?.isp || 'Unknown',
+            exactLocation: rawDeviceInfo.exactLocation || false,
+            formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || user.city}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
+        };
+
+        // LOG ONLY TO SYSTEMLOG (no UserLog)
+        await SystemLog.create({
+            action: 'login_initiated',
+            entity: 'User',
+            entityId: user._id,
+            performedBy: user._id,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'pending',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: rawDeviceInfo.ip,
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            location: formattedLocation.formatted,
+            deviceType: formattedDeviceInfo.type,
+            os: formattedDeviceInfo.os.name,
+            browser: formattedDeviceInfo.browser.name,
+            countryCode: formattedLocation.country.code,
+            city: formattedLocation.city,
+            region: formattedLocation.region.name,
+            latitude: formattedLocation.latitude,
+            longitude: formattedLocation.longitude,
+            metadata: {
+                email: email,
+                loginMethod: 'password',
+                rememberMe: rememberMe || false,
+                accountType: accountType || user.accountType,
+                authProvider: user.authProvider || 'email',
+                timezoneOffset: timezoneOffset
+            }
+        });
+
+        // Admin notification
+        const formattedTimestamp = new Date().toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            timeZoneName: 'short'
+        });
+
+        const brandHeader = `
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+        `;
+
+        const brandFooter = `
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
+                    <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+                </p>
+            </div>
+        `;
+
+        const adminEmailHtml = `
+            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                ${brandHeader}
+                <div style="padding: 30px; background: #FFFFFF;">
+                    <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                                <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                            </svg>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
+                                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">USER LOGIN INITIATED!</h2>
+                        <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated login to their account (awaiting OTP)</p>
+                    </div>
+
+                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>User:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</strong></td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;"><span style="background: ${user.accountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${user.accountType?.toUpperCase() || 'INDIVIDUAL'}</span></strong></td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${user.authProvider === 'google' ? 'Google OAuth' : 'Email/Password'}</strong></td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Location:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Device:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Password + OTP</span></strong></td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Time:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
+                        <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Remember Me: ${rememberMe ? '✅ Yes' : '❌ No'}</p>
+                        <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">Login success email will be sent after OTP verification.</p>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Activity</a>
+                    </div>
+
+                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
+                </div>
+                ${brandFooter}
+            </div>
+        `;
+
+        try {
+            await supportTransporter.sendMail({
+                from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+                to: 'thieretw@gmail.com',
+                subject: `🔐 LOGIN INITIATED: ${user.firstName} ${user.lastName} logged into ₿itHash Capital`,
+                html: adminEmailHtml
+            });
+            console.log(`✅ Admin login notification sent successfully to thieretw@gmail.com for user: ${user.email}`);
+        } catch (adminEmailError) {
+            console.error(`❌ Failed to send admin login notification to thieretw@gmail.com:`, adminEmailError.message);
+        }
+
+        const tempToken = generateJWT(user._id);
+
+        res.status(200).json({
+            status: 'success',
+            message: 'OTP sent to your email. Please verify to complete login.',
+            tempToken,
+            needsOtp: true,
+            data: {
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    accountType: user.accountType,
+                    organizationName: user.organizationName || null
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Login error:', err);
+
+        // LOG ONLY TO SYSTEMLOG
+        await SystemLog.create({
+            action: 'login_error',
+            entity: 'User',
+            performedBy: null,
+            performedByModel: 'System',
+            status: 'failed',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            errorMessage: err.message,
+            errorStack: err.stack,
+            metadata: {
+                email: req.body.email,
+                timezoneOffset: req.body.timezoneOffset || 0
+            }
+        });
+
+        res.status(500).json({
+            status: 'error',
+            message: 'An error occurred during login'
+        });
+    }
+});
+
+// =============================================
+// GOOGLE AUTH ENDPOINT - Does NOT change authProvider on login
+// =============================================
+app.post('/api/auth/google', async (req, res) => {
+    try {
+        console.log('Google auth request received');
+
+        const { credential, isSignup = false, timezoneOffset = 0 } = req.body;
+
+        if (!credential) {
+            console.error('No credential provided');
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Google credential is required'
+            });
+        }
+
+        console.log('Verifying Google token...');
+
+        let payload;
+        try {
+            const ticket = await googleClient.verifyIdToken({
+                idToken: credential,
+                audience: process.env.GOOGLE_CLIENT_ID
+            });
+            payload = ticket.getPayload();
+            console.log('Google token verified successfully');
+        } catch (verifyError) {
+            console.error('Google token verification failed:', verifyError);
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid Google token. Please try again.'
+            });
+        }
+
+        if (!payload) {
+            console.error('No payload from Google token');
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid token payload'
+            });
+        }
+
+        const { email, given_name, family_name, sub } = payload;
+
+        if (!email) {
+            console.error('No email in Google payload');
+            return res.status(400).json({
+                status: 'fail',
+                message: 'No email found in Google account'
+            });
+        }
+
+        console.log('Google auth successful for:', email);
+        console.log('isSignup flag:', isSignup);
+
+        const originalEmail = email;
+
+        let user;
+        let isNewUser = false;
+
+        try {
+            user = await User.findOne({ email: originalEmail });
+            console.log('User lookup result:', user ? 'Found' : 'Not found');
+        } catch (dbError) {
+            console.error('Database lookup error:', dbError);
+            return res.status(500).json({
+                status: 'error',
+                message: 'Database error during user lookup'
+            });
+        }
+
+        const rawDeviceInfo = await getUserDeviceInfo(req);
+
+        const formattedDeviceInfo = {
+            type: getDeviceType(req),
+            os: {
+                name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+                version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
+            },
+            browser: {
+                name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+                version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
+            },
+            platform: rawDeviceInfo.device || 'Unknown',
+            language: req.headers['accept-language'] || 'Unknown',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        };
+
+        const formattedLocation = {
+            ip: rawDeviceInfo.ip,
+            country: {
+                name: rawDeviceInfo.locationDetails?.country || 'Unknown',
+                code: (rawDeviceInfo.locationDetails?.country_code || rawDeviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+            },
+            region: {
+                name: rawDeviceInfo.locationDetails?.region || 'Unknown',
+                code: rawDeviceInfo.locationDetails?.region_code || rawDeviceInfo.locationDetails?.region || 'Unknown'
+            },
+            city: rawDeviceInfo.locationDetails?.city || 'Unknown',
+            postalCode: rawDeviceInfo.locationDetails?.postalCode || 'Unknown',
+            latitude: rawDeviceInfo.locationDetails?.latitude || null,
+            longitude: rawDeviceInfo.locationDetails?.longitude || null,
+            timezone: rawDeviceInfo.locationDetails?.timezone || 'Unknown',
+            isp: rawDeviceInfo.locationDetails?.isp || 'Unknown',
+            exactLocation: rawDeviceInfo.exactLocation || false,
+            formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || 'Unknown'}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
+        };
+
+        const greeting = getGreetingByTimezone(timezoneOffset);
+
+        let truncatedEmail = email;
+        const [localPart, domain] = email.split('@');
+        if (domain && localPart.length > 6) {
+            const firstChars = localPart.substring(0, 3);
+            const lastChars = localPart.substring(localPart.length - 3);
+            truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
+        }
+
+        // Case 1: Login attempt but user doesn't exist
+        if (isSignup === false && !user) {
+            console.log('Login attempt with Google: User does not exist');
+
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'google_login_user_not_found',
+                entity: 'User',
+                performedBy: null,
+                performedByModel: 'System',
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: rawDeviceInfo.ip,
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                location: formattedLocation.formatted,
+                metadata: {
+                    email: originalEmail,
+                    signupAttempt: false,
+                    timezoneOffset: timezoneOffset,
+                    isSignup: false
+                }
+            });
+
+            return res.status(404).json({
+                status: 'fail',
+                message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
+                data: {
+                    greeting: greeting,
+                    truncatedEmail: truncatedEmail,
+                    action: 'signup_suggested'
+                }
+            });
+        }
+
+        // Case 2: Signup attempt but user already exists
+        if (isSignup === true && user) {
+            console.log('Signup attempt with Google: User already exists');
+
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'google_signup_user_exists',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: rawDeviceInfo.ip,
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                location: formattedLocation.formatted,
+                metadata: {
+                    email: originalEmail,
+                    existingAuthProvider: user.authProvider,
+                    signupAttempt: true,
+                    timezoneOffset: timezoneOffset,
+                    isSignup: true
+                }
+            });
+
+            const locationString = rawDeviceInfo.location || 'Unknown location';
+            const deviceString = rawDeviceInfo.device || 'Unknown device';
+            const ipAddress = rawDeviceInfo.ip || 'Unknown IP';
+            const attemptTime = new Date().toLocaleString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                timeZoneName: 'short'
+            });
+
+            try {
+                let cleanDevice = deviceString;
+                if (deviceString.includes('Chrome/')) cleanDevice = 'Google Chrome';
+                else if (deviceString.includes('Firefox/')) cleanDevice = 'Mozilla Firefox';
+                else if (deviceString.includes('Safari/') && !deviceString.includes('Chrome/')) cleanDevice = 'Safari';
+                else if (deviceString.includes('Edg/')) cleanDevice = 'Microsoft Edge';
+                else if (deviceString.includes('Opera/') || deviceString.includes('OPR/')) cleanDevice = 'Opera';
+
+                let cleanOS = 'Unknown';
+                if (deviceString.includes('Windows NT 10.0')) cleanOS = 'Windows 10/11';
+                else if (deviceString.includes('Windows NT 6.1')) cleanOS = 'Windows 7';
+                else if (deviceString.includes('Mac OS X')) cleanOS = 'macOS';
+                else if (deviceString.includes('Android')) cleanOS = 'Android';
+                else if (deviceString.includes('iPhone') || deviceString.includes('iPad')) cleanOS = 'iOS';
+                else if (deviceString.includes('Linux')) cleanOS = 'Linux';
+
+                await sendProfessionalEmail({
+                    email: email,
+                    template: 'default',
+                    data: {
+                        name: user.firstName,
+                        message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}).`,
+                        details: `
+                            <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                                <p style="margin: 0 0 10px 0;"><strong>Location:</strong> ${locationString}</p>
+                                <p style="margin: 0 0 10px 0;"><strong>Device:</strong> ${cleanDevice} on ${cleanOS}</p>
+                                <p style="margin: 0 0 10px 0;"><strong>IP Address:</strong> ${ipAddress}</p>
+                                <p style="margin: 0 0 0 0;"><strong>Time:</strong> ${attemptTime}</p>
+                            </div>
+                        `,
+                        actionRequired: 'If this was you, please log in to your existing account. If this was not you, please contact our support team immediately to secure your account.',
+                        buttonText: 'Login to Your Account',
+                        actionLink: 'https://www.bithashcapital.live/login',
+                        referenceId: `SEC-DUPLICATE-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+                    }
+                });
+                console.log(`Security email sent to ${email} about duplicate signup attempt from ${locationString}`);
+            } catch (emailError) {
+                console.error('Failed to send duplicate signup alert email:', emailError);
+            }
+
+            return res.status(409).json({
+                status: 'fail',
+                message: `${greeting} ${user.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
+                data: {
+                    greeting: greeting,
+                    userName: user.firstName,
+                    truncatedEmail: truncatedEmail,
+                    action: 'login_suggested'
+                }
+            });
+        }
+
+        // =============================================
+        // NORMAL FLOW - Create or update user
+        // =============================================
+
+        if (!user) {
+            try {
+                const referralCode = generateReferralCode();
+                user = await User.create({
+                    firstName: given_name || 'Google',
+                    lastName: family_name || 'User',
+                    email: originalEmail,
+                    googleId: sub,
+                    isVerified: true,
+                    referralCode,
+                    status: 'active',
+                    accountType: 'individual',
+                    authProvider: 'google',  // ✅ authProvider set ONLY during signup
+                    metadata: {
+                        signupMethod: 'google_oauth',
+                        signupDate: new Date(),
+                        ipAddress: rawDeviceInfo.ip,
+                        userAgent: rawDeviceInfo.device,
+                        timezoneOffset: timezoneOffset
+                    }
+                });
+                isNewUser = true;
+                console.log('New user created via Google SIGNUP:', originalEmail);
+
+                // LOG ONLY TO SYSTEMLOG
+                await SystemLog.create({
+                    action: 'google_signup_success',
+                    entity: 'User',
+                    entityId: user._id,
+                    performedBy: user._id,
+                    performedByModel: 'User',
+                    performedByEmail: user.email,
+                    performedByName: `${user.firstName} ${user.lastName}`,
+                    status: 'success',
+                    requestMethod: req.method,
+                    requestPath: req.path,
+                    ip: rawDeviceInfo.ip,
+                    userAgent: req.headers['user-agent'] || 'Unknown',
+                    location: formattedLocation.formatted,
+                    deviceType: formattedDeviceInfo.type,
+                    os: formattedDeviceInfo.os.name,
+                    browser: formattedDeviceInfo.browser.name,
+                    countryCode: formattedLocation.country.code,
+                    city: formattedLocation.city,
+                    region: formattedLocation.region.name,
+                    latitude: formattedLocation.latitude,
+                    longitude: formattedLocation.longitude,
+                    metadata: {
+                        email: originalEmail,
+                        authProvider: 'google',
+                        timezoneOffset: timezoneOffset,
+                        googleId: sub
+                    }
+                });
+
+                // Admin notification for Google signup
+                const brandHeader = `
+                    <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+                    </div>
+                `;
+
+                const brandFooter = `
+                    <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
+                            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+                        </p>
+                    </div>
+                `;
+
+                const formattedTimestamp = new Date().toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    timeZoneName: 'short'
+                });
+
+                const signupAdminEmailHtml = `
+                    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                        ${brandHeader}
+                        <div style="padding: 30px; background: #FFFFFF;">
+                            <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                                        <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                                        <path d="M12 8V12M12 16H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+                                    </svg>
+                                </div>
+                                <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW GOOGLE SIGNUP!</h2>
+                                <p style="color: #065F46; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} just signed up using Google</p>
+                            </div>
+
+                            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr style="border-bottom: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName}</strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Email:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${user.email}</strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">SIGNUP (New Account)</span></strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Location:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Device:</strong><td>
+                                        <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Signed Up At:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Google Signup Details</p>
+                                <p style="color: #78350F; margin: 0; font-size: 14px;">User signed up using Google OAuth. No password required for login. OTP sent for verification.</p>
+                            </div>
+
+                            <div style="text-align: center; margin: 30px 0;">
+                                <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
+                            </div>
+
+                            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
+                        </div>
+                        ${brandFooter}
+                    </div>
+                `;
+
+                await supportTransporter.sendMail({
+                    from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+                    to: 'thieretw@gmail.com',
+                    subject: `🆕 NEW GOOGLE SIGNUP: ${user.firstName} ${user.lastName} joined BitHash`,
+                    html: signupAdminEmailHtml
+                });
+                console.log(`✅ Admin Google SIGNUP notification sent to thieretw@gmail.com for user: ${user.email}`);
+
+            } catch (createError) {
+                console.error('User creation error:', createError);
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Failed to create user account'
+                });
+            }
+        } else if (!user.googleId) {
+            try {
+                user.googleId = sub;
+                user.isVerified = true;
+                // ✅ DO NOT change authProvider during login - keep whatever was set during signup
+                // user.authProvider should NOT be changed here
+                await user.save();
+                console.log('Existing user linked with Google:', originalEmail);
+
+                // LOG ONLY TO SYSTEMLOG
+                await SystemLog.create({
+                    action: 'google_account_linked',
+                    entity: 'User',
+                    entityId: user._id,
+                    performedBy: user._id,
+                    performedByModel: 'User',
+                    performedByEmail: user.email,
+                    performedByName: `${user.firstName} ${user.lastName}`,
+                    status: 'success',
+                    requestMethod: req.method,
+                    requestPath: req.path,
+                    ip: rawDeviceInfo.ip,
+                    userAgent: req.headers['user-agent'] || 'Unknown',
+                    metadata: {
+                        email: originalEmail,
+                        googleId: sub,
+                        authProvider: user.authProvider  // Keep existing authProvider
+                    }
+                });
+
+            } catch (updateError) {
+                console.error('User update error:', updateError);
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Failed to link Google account'
+                });
+            }
+        }
+
+        // ✅ AUTH PROVIDER CHECK - User must log in with the method they signed up with
+        // authProvider is NEVER changed during login - it is set ONLY during signup
+        if (user.authProvider !== 'google') {
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'google_login_wrong_provider',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: rawDeviceInfo.ip,
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    attemptedProvider: 'google',
+                    actualProvider: user.authProvider,
+                    email: originalEmail,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
+            return res.status(403).json({
+                status: 'fail',
+                message: `This account was created using ${user.authProvider}. Please log in using that method.`,
+                data: { provider: user.authProvider }
+            });
+        }
+
+        if (user.status !== 'active') {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Your account has been suspended. Please contact support.'
+            });
+        }
+
+        // Generate OTP for Google sign-in
+        try {
+            const otp = Math.floor(100000 + Math.random() * 900000).toString();
+            const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+            await OTP.create({
+                email: originalEmail,
+                otp,
+                type: isNewUser ? 'signup' : 'login',
+                expiresAt,
+                ipAddress: rawDeviceInfo.ip,
+                userAgent: rawDeviceInfo.device
+            });
+
+            await sendProfessionalEmail({
+                email: originalEmail,
+                template: 'otp',
+                data: {
+                    name: user.firstName,
+                    otp: otp,
+                    action: isNewUser ? 'account verification' : 'Google sign-in verification'
+                }
+            });
+
+            // LOG ONLY TO SYSTEMLOG (no UserLog)
+            await SystemLog.create({
+                action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'pending',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: rawDeviceInfo.ip,
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    email: originalEmail,
+                    isNewUser: isNewUser,
+                    timezoneOffset: timezoneOffset,
+                    otpType: isNewUser ? 'signup' : 'login',
+                    authProvider: user.authProvider
+                }
+            });
+
+            // Admin notification for Google login (existing user)
+            if (!isNewUser) {
+                const brandHeader = `
+                    <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+                    </div>
+                `;
+
+                const brandFooter = `
+                    <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
+                            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+                        </p>
+                    </div>
+                `;
+
+                const formattedTimestamp = new Date().toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    timeZoneName: 'short'
+                });
+
+                const loginAdminEmailHtml = `
+                    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                        ${brandHeader}
+                        <div style="padding: 30px; background: #FFFFFF;">
+                            <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                                        <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                                    </svg>
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                                        <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                                    </svg>
+                                </div>
+                                <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">GOOGLE LOGIN INITIATED!</h2>
+                                <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated Google login (awaiting OTP)</p>
+                            </div>
+
+                            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr style="border-bottom: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>User:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">LOGIN (Existing User)</span></strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Location:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Device:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google + OTP</span></strong></td>
+                                    </tr>
+                                    <tr style="border-top: 1px solid #E2E8F0;">
+                                        <td style="padding: 8px 0;"><strong>Time:</strong></td>
+                                        <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
+                                <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Using Google OAuth for authentication</p>
+                                <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">Login success email will be sent after OTP verification.</p>
+                            </div>
+
+                            <div style="text-align: center; margin: 30px 0;">
+                                <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Activity</a>
+                            </div>
+
+                            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
+                        </div>
+                        ${brandFooter}
+                    </div>
+                `;
+
+                await supportTransporter.sendMail({
+                    from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+                    to: 'thieretw@gmail.com',
+                    subject: `🔐 GOOGLE LOGIN INITIATED: ${user.firstName} ${user.lastName} logged into BitHash`,
+                    html: loginAdminEmailHtml
+                });
+                console.log(`✅ Admin Google LOGIN notification sent to thieretw@gmail.com for user: ${user.email}`);
+            }
+
+        } catch (otpError) {
+            console.error('OTP creation error:', otpError);
+        }
+
+        const tempToken = generateJWT(user._id);
+
+        try {
+            user.lastLogin = new Date();
+            user.loginHistory.push(rawDeviceInfo);
+            await user.save();
+        } catch (updateError) {
+            console.error('User update error:', updateError);
+        }
+
+        res.status(200).json({
+            status: 'success',
+            message: isNewUser
+                ? 'Account created! OTP sent to your email. Please verify to complete signup.'
+                : 'OTP sent to your email. Please verify to complete Google sign-in.',
+            tempToken,
+            needsOtp: true,
+            isNewUser: isNewUser,
+            data: {
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    accountType: user.accountType,
+                    authProvider: user.authProvider  // ✅ Return authProvider as set during signup
+                }
+            }
+        });
+
+        // LOG ONLY TO SYSTEMLOG
+        await SystemLog.create({
+            action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
+            entity: 'User',
+            entityId: user._id,
+            performedBy: user._id,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'pending',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: rawDeviceInfo.ip,
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            location: formattedLocation.formatted,
+            deviceType: formattedDeviceInfo.type,
+            os: formattedDeviceInfo.os.name,
+            browser: formattedDeviceInfo.browser.name,
+            metadata: {
+                isNewUser,
+                provider: 'google',
+                email: originalEmail,
+                operation: isNewUser ? 'signup' : 'login',
+                timezoneOffset: timezoneOffset,
+                authProvider: user.authProvider
+            }
+        });
+
+    } catch (err) {
+        console.error('Google auth UNEXPECTED error:', err);
+        console.error('Error stack:', err.stack);
+
+        // LOG ONLY TO SYSTEMLOG
+        await SystemLog.create({
+            action: 'google_auth_error',
+            entity: 'User',
+            performedBy: null,
+            performedByModel: 'System',
+            status: 'failed',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            errorMessage: err.message,
+            errorStack: err.stack,
+            metadata: {
+                isSignup: req.body.isSignup || false,
+                timezoneOffset: req.body.timezoneOffset || 0
+            }
+        });
+
+        res.status(500).json({
+            status: 'error',
+            message: 'An unexpected error occurred during Google authentication'
+        });
+    }
+});
+
+
+
+// =============================================
+// WEB3 AUTHENTICATION SYSTEM - MULTICHAIN SUPPORT
+// =============================================
+
+// =============================================
+// 1. GET NONCE
+// =============================================
+app.get('/api/web3/nonce', async (req, res) => {
+    try {
+        const { walletAddress, type, isSignup, accountType, referralCode } = req.query;
+
+        if (!walletAddress) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Wallet address is required'
+            });
+        }
+
+        const normalizedAddress = walletAddress.toLowerCase();
+
+        const existingWeb3User = await Web3User.findOne({
+            'wallets.address': normalizedAddress
+        });
+
+        const isSignupRequest = isSignup === 'true' || isSignup === true;
+
+        if (isSignupRequest && existingWeb3User) {
+            return res.status(409).json({
+                status: 'fail',
+                message: 'This wallet is already registered. Please login instead.',
+                data: {
+                    action: 'login_suggested',
+                    exists: true
+                }
+            });
+        }
+
+        if (!isSignupRequest && !existingWeb3User) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Wallet not registered. Please sign up first.',
+                data: {
+                    action: 'signup_suggested',
+                    exists: false
+                }
+            });
+        }
+
+        const nonce = generateNonce();
+        const message = `Sign this message to authenticate with BitHash Capital.\n\nNonce: ${nonce}\n\nWallet: ${normalizedAddress}\n\nTimestamp: ${new Date().toISOString()}`;
+
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        await Web3Nonce.create({
+            walletAddress: normalizedAddress,
+            nonce: nonce,
+            message: message,
+            type: type === 'signup' ? 'signup' : 'login',
+            used: false,
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            expiresAt: expiresAt,
+            metadata: {
+                accountType: accountType || 'individual',
+                referralCode: referralCode || null,
+                isSignup: isSignupRequest,
+                pageSource: req.headers.referer?.includes('signup') ? 'signup' : 'login'
+            }
+        });
+
+        if (existingWeb3User) {
+            existingWeb3User.web3Auth.nonce = nonce;
+            existingWeb3User.web3Auth.nonceExpires = expiresAt;
+            existingWeb3User.web3Auth.message = message;
+            existingWeb3User.web3Auth.signature = null;
+            await existingWeb3User.save();
+        }
+
+        // LOG ONLY TO WEB3LOG
+        await Web3Log.create({
+            walletAddress: normalizedAddress,
+            walletType: 'metamask',
+            action: 'nonce_generated',
+            status: 'success',
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                isSignup: isSignupRequest,
+                accountType: accountType || 'individual'
+            },
+            relatedEntity: null,
+            relatedEntityModel: null
+        });
+
+        console.log(`🔑 Generated nonce for ${normalizedAddress}`);
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                nonce: nonce,
+                message: message,
+                expiresAt: expiresAt,
+                walletAddress: normalizedAddress,
+                isSignup: isSignupRequest,
+                exists: !!existingWeb3User
+            }
+        });
+
+    } catch (err) {
+        console.error('Error generating nonce:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to generate nonce'
+        });
+    }
+});
+
+// =============================================
+// 2. VERIFY SIGNATURE - UPDATED FOR MULTICHAIN
+// =============================================
+app.post('/api/web3/verify', async (req, res) => {
+    try {
+        const { 
+            walletAddress, 
+            signature, 
+            nonce, 
+            isSignup, 
+            accountType, 
+            walletType, 
+            chainId,
+            walletConnect 
+        } = req.body;
+
+        if (!walletAddress || !signature || !nonce) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Wallet address, signature, and nonce are required'
+            });
+        }
+
+        const normalizedAddress = walletAddress.toLowerCase();
+
+        const nonceRecord = await Web3Nonce.findOne({
+            walletAddress: normalizedAddress,
+            nonce: nonce,
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!nonceRecord) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid or expired nonce. Please try again.'
+            });
+        }
+
+        try {
+            const recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
+            
+            if (recoveredAddress.toLowerCase() !== normalizedAddress) {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'Signature verification failed. Address mismatch.'
+                });
+            }
+        } catch (signErr) {
+            console.error('Signature verification error:', signErr);
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid signature. Please try again.'
+            });
+        }
+
+        nonceRecord.used = true;
+        nonceRecord.usedAt = new Date();
+        await nonceRecord.save();
+
+        const isSignupRequest = isSignup === true || isSignup === 'true';
+
+        let web3User = await Web3User.findOne({
+            'wallets.address': normalizedAddress
+        });
+
+        if (isSignupRequest && web3User) {
+            return res.status(409).json({
+                status: 'fail',
+                message: 'This wallet is already registered. Please login instead.',
+                data: {
+                    action: 'login_suggested'
+                }
+            });
+        }
+
+        if (!isSignupRequest && !web3User) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Wallet not registered. Please sign up first.',
+                data: {
+                    action: 'signup_suggested'
+                }
+            });
+        }
+
+        let userEmail = null;
+        let userId = null;
+        let fullUser = null;
+
+        if (web3User) {
+            userEmail = web3User.email;
+            userId = web3User.user;
+            fullUser = await User.findById(userId).select('email firstName lastName');
+        }
+
+        // Store WalletConnect multichain data if provided
+        let walletConnectData = null;
+        if (walletConnect) {
+            walletConnectData = {
+                sessionTopic: walletConnect.sessionTopic,
+                approvedChains: walletConnect.approvedChains || [],
+                accountsByChain: walletConnect.accountsByChain || {}
+            };
+        }
+
+        const tempToken = jwt.sign(
+            { 
+                walletAddress: normalizedAddress, 
+                isSignup: isSignupRequest,
+                email: userEmail || null,
+                userId: userId || null,
+                chainId: chainId || 1,
+                walletConnectData: walletConnectData
+            },
+            JWT_SECRET,
+            { expiresIn: '10m' }
+        );
+
+        // LOG ONLY TO WEB3LOG
+        await Web3Log.create({
+            walletAddress: normalizedAddress,
+            walletType: walletType || 'metamask',
+            action: 'signature_verified',
+            status: 'success',
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                isSignup: isSignupRequest,
+                accountType: accountType || 'individual',
+                nonceUsed: nonce,
+                chainId: chainId || 1,
+                hasWalletConnectData: !!walletConnectData,
+                approvedChainsCount: walletConnectData?.approvedChains?.length || 0
+            },
+            user: userId || null,
+            relatedEntity: nonceRecord._id,
+            relatedEntityModel: 'Web3Nonce'
+        });
+
+        res.status(200).json({
+            status: 'success',
+            message: isSignupRequest ? 'Signature verified. Please complete signup.' : 'Signature verified.',
+            data: {
+                tempToken: tempToken,
+                isNewUser: !web3User,
+                isSignup: isSignupRequest,
+                email: userEmail,
+                userId: userId,
+                user: fullUser ? {
+                    firstName: fullUser.firstName,
+                    lastName: fullUser.lastName,
+                    email: fullUser.email
+                } : null,
+                needsOtp: true,
+                walletConnectData: walletConnectData
+            }
+        });
+
+    } catch (err) {
+        console.error('Signature verification error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to verify signature'
+        });
+    }
+});
+
+// =============================================
+// 3. WEB3 SIGNUP - UPDATED FOR MULTICHAIN
+// =============================================
+app.post('/api/web3/signup', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Authorization required'
+            });
+        }
+
+        const tempToken = authHeader.split(' ')[1];
+        let decoded;
+        try {
+            decoded = jwt.verify(tempToken, JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Invalid or expired token'
+            });
+        }
+
+        const {
+            firstName,
+            lastName,
+            email,
+            city,
+            accountType,
+            walletAddress,
+            walletType,
+            organizationName,
+            role,
+            country,
+            workEmail,
+            referralCode,
+            chainId,
+            walletConnect
+        } = req.body;
+
+        if (!walletAddress) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Wallet address is required'
+            });
+        }
+
+        if (!email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email is required'
+            });
+        }
+
+        const normalizedAddress = walletAddress.toLowerCase();
+
+        const existingWeb3User = await Web3User.findOne({
+            'wallets.address': normalizedAddress
+        });
+
+        if (existingWeb3User) {
+            return res.status(409).json({
+                status: 'fail',
+                message: 'This wallet is already registered. Please login instead.'
+            });
+        }
+
+        const existingUser = await User.findOne({ email: email });
+        if (existingUser) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email already in use. Please use a different email.'
+            });
+        }
+
+        // Get WalletConnect multichain data from decoded token or request body
+        const walletConnectData = decoded.walletConnectData || walletConnect || null;
+
+        // Create main User account with authProvider set to 'web3' ONLY during signup
+        const newUser = await User.create({
+            firstName: firstName,
+            lastName: lastName,
+            email: email,
+            city: city || '',
+            country: country || '',
+            isVerified: false,
+            status: 'active',
+            accountType: accountType || 'individual',
+            authProvider: 'web3',  // ✅ authProvider set ONLY during signup
+            organizationName: organizationName || null,
+            role: role || null,
+            workEmail: workEmail || null,
+            referralCode: generateReferralCode(),
+            referredBy: null,
+            metadata: {
+                signupMethod: 'web3',
+                signupDate: new Date(),
+                ipAddress: getRealClientIP(req),
+                userAgent: req.headers['user-agent'],
+                walletConnectSessionTopic: walletConnectData?.sessionTopic || null
+            },
+            balances: {
+                main: new Map(),
+                active: new Map(),
+                matured: new Map()
+            }
+        });
+
+        // Build wallet entries - primary wallet + multichain wallets if available
+        const walletEntries = [{
+            address: normalizedAddress,
+            type: walletType || 'metamask',
+            isPrimary: true,
+            isVerified: true,
+            connectedAt: new Date(),
+            lastUsed: new Date(),
+            chainId: chainId || 1,
+            metadata: {
+                chainName: 'Ethereum Mainnet',
+                userAgent: req.headers['user-agent'],
+                ipAddress: getRealClientIP(req)
+            }
+        }];
+
+        // Add multichain wallet entries if WalletConnect data is available
+        if (walletConnectData && walletConnectData.accountsByChain) {
+            const accountsByChain = walletConnectData.accountsByChain;
+            const approvedChains = walletConnectData.approvedChains || [];
+            
+            for (const caipChainId of approvedChains) {
+                const address = accountsByChain[caipChainId];
+                if (!address) continue;
+                
+                // Skip if it's the same as the primary address
+                if (address.toLowerCase() === normalizedAddress.toLowerCase()) continue;
+                
+                // Extract chain ID from CAIP-2 format (e.g., "eip155:1" -> 1)
+                const chainIdMatch = caipChainId.match(/eip155:(\d+)/);
+                const chainIdNum = chainIdMatch ? parseInt(chainIdMatch[1], 10) : null;
+                
+                if (!chainIdNum) continue;
+                
+                // Get chain name from SUPPORTED_CHAINS or use a default
+                const chainName = SUPPORTED_CHAINS?.[chainIdNum]?.name || `Chain ${chainIdNum}`;
+                
+                walletEntries.push({
+                    address: address.toLowerCase(),
+                    type: 'walletconnect',
+                    isPrimary: false,
+                    isVerified: true,
+                    connectedAt: new Date(),
+                    lastUsed: new Date(),
+                    chainId: chainIdNum,
+                    caipChainId: caipChainId,
+                    metadata: {
+                        chainName: chainName,
+                        walletConnectSessionTopic: walletConnectData.sessionTopic || null,
+                        userAgent: req.headers['user-agent'],
+                        ipAddress: getRealClientIP(req)
+                    }
+                });
+            }
+        }
+
+        // Create Web3User record with all wallets
+        const web3User = await Web3User.create({
+            user: newUser._id,
+            wallets: walletEntries,
+            email: email,
+            firstName: firstName,
+            lastName: lastName,
+            city: city || '',
+            country: country || '',
+            accountType: accountType || 'individual',
+            organizationName: organizationName || null,
+            role: role || null,
+            workEmail: workEmail || null,
+            isEmailVerified: false,
+            status: 'active',
+            signupSource: `web3_${walletType || 'metamask'}`,
+            referralCode: newUser.referralCode,
+            signupCompletedAt: new Date(),
+            walletConnectSessionTopic: walletConnectData?.sessionTopic || null,
+            approvedChains: walletConnectData?.approvedChains || [],
+            metadata: {
+                signupIP: getRealClientIP(req),
+                signupUserAgent: req.headers['user-agent'],
+                signupLocation: req.clientLocation?.location || 'Unknown',
+                walletConnectData: walletConnectData ? {
+                    sessionTopic: walletConnectData.sessionTopic,
+                    approvedChains: walletConnectData.approvedChains,
+                    accountsByChain: walletConnectData.accountsByChain
+                } : null
+            }
+        });
+
+        if (referralCode) {
+            const referrer = await User.findOne({ referralCode: referralCode });
+            if (referrer) {
+                newUser.referredBy = referrer._id;
+                await newUser.save();
+                
+                web3User.referredBy = referrer._id;
+                await web3User.save();
+
+                await User.findByIdAndUpdate(referrer._id, {
+                    $inc: { 'referralStats.totalReferrals': 1 }
+                });
+            }
+        }
+
+        await User.findByIdAndUpdate(newUser._id, {
+            $set: { web3UserId: web3User._id }
+        });
+
+        // Log each wallet address - LOG ONLY TO WEB3LOG
+        for (const wallet of web3User.wallets) {
+            await Web3Log.create({
+                user: newUser._id,
+                walletAddress: wallet.address,
+                walletType: wallet.type,
+                action: 'wallet_added',
+                status: 'success',
+                ipAddress: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    isPrimary: wallet.isPrimary,
+                    chainId: wallet.chainId || 1,
+                    caipChainId: wallet.caipChainId || null,
+                    walletConnectSessionTopic: wallet.metadata?.walletConnectSessionTopic || null
+                },
+                relatedEntity: web3User._id,
+                relatedEntityModel: 'Web3User'
+            });
+        }
+
+        const otpToken = jwt.sign(
+            { 
+                userId: newUser._id, 
+                email: email,
+                walletAddress: normalizedAddress,
+                web3UserId: web3User._id
+            },
+            JWT_SECRET,
+            { expiresIn: '10m' }
+        );
+
+        // Generate and send OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        await OTP.deleteMany({ 
+            email: email, 
+            type: 'signup',
+            used: false 
+        });
+
+        await OTP.create({
+            email: email,
+            otp: otp,
+            type: 'signup',
+            expiresAt: expiresAt,
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown'
+        });
+
+        await sendProfessionalEmail({
+            email: email,
+            template: 'otp',
+            data: {
+                name: newUser.firstName || 'Web3 User',
+                otp: otp,
+                action: 'Web3 wallet verification'
+            }
+        });
+
+        // LOG ONLY TO WEB3LOG
+        await Web3Log.create({
+            user: newUser._id,
+            walletAddress: normalizedAddress,
+            walletType: walletType || 'metamask',
+            action: 'signup_success',
+            status: 'success',
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                accountType: accountType || 'individual',
+                referralCode: referralCode || null,
+                organizationName: organizationName || null,
+                totalWallets: web3User.wallets.length,
+                multichainEnabled: walletConnectData ? true : false,
+                approvedChains: walletConnectData?.approvedChains || []
+            },
+            relatedEntity: web3User._id,
+            relatedEntityModel: 'Web3User'
+        });
+
+        await sendAdminWeb3SignupNotification(newUser, web3User, req);
+
+        console.log(`✅ Web3 signup completed for ${email} with ${web3User.wallets.length} wallets`);
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Account created successfully. Please verify your email with the OTP sent.',
+            tempToken: otpToken,
+            data: {
+                user: {
+                    id: newUser._id,
+                    firstName: newUser.firstName,
+                    lastName: newUser.lastName,
+                    email: newUser.email,
+                    accountType: newUser.accountType,
+                    authProvider: newUser.authProvider,  // ✅ Return authProvider as set during signup
+                    walletAddress: normalizedAddress,
+                    totalWallets: web3User.wallets.length
+                },
+                needsOtp: true,
+                walletConnectData: walletConnectData ? {
+                    sessionTopic: walletConnectData.sessionTopic,
+                    approvedChains: walletConnectData.approvedChains,
+                    accountsByChain: walletConnectData.accountsByChain
+                } : null
+            }
+        });
+
+    } catch (err) {
+        console.error('Web3 signup error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to create account'
+        });
+    }
+});
+
+// =============================================
+// 4. WEB3 SEND OTP
+// =============================================
+app.post('/api/web3/send-otp', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Authorization required'
+            });
+        }
+
+        const tempToken = authHeader.split(' ')[1];
+        let decoded;
+        try {
+            decoded = jwt.verify(tempToken, JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Invalid or expired token'
+            });
+        }
+
+        const { email } = req.body;
+        if (!email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email is required'
+            });
+        }
+
+        let user;
+        let web3User;
+
+        if (decoded.userId) {
+            user = await User.findById(decoded.userId);
+            if (user) {
+                web3User = await Web3User.findOne({ user: user._id });
+            }
+        } else if (decoded.walletAddress) {
+            web3User = await Web3User.findOne({
+                'wallets.address': decoded.walletAddress.toLowerCase()
+            });
+            if (web3User) {
+                user = await User.findById(web3User.user);
+            }
+        }
+
+        if (!user) {
+            user = await User.findOne({ email: email });
+            if (user) {
+                web3User = await Web3User.findOne({ user: user._id });
+            }
+        }
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        const recentOtp = await OTP.findOne({
+            email: email,
+            type: 'signup',
+            used: false,
+            createdAt: { $gte: new Date(Date.now() - 60 * 1000) }
+        });
+
+        if (recentOtp) {
+            return res.status(429).json({
+                status: 'fail',
+                message: 'Please wait 60 seconds before requesting a new OTP'
+            });
+        }
+
+        await OTP.deleteMany({ 
+            email: email, 
+            type: 'signup',
+            used: false 
+        });
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        await OTP.create({
+            email: email,
+            otp: otp,
+            type: 'signup',
+            expiresAt: expiresAt,
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown'
+        });
+
+        await sendProfessionalEmail({
+            email: email,
+            template: 'otp',
+            data: {
+                name: user.firstName || 'Web3 User',
+                otp: otp,
+                action: 'Web3 wallet verification'
+            }
+        });
+
+        console.log(`📧 Web3 OTP sent to ${email}`);
+
+        res.status(200).json({
+            status: 'success',
+            message: 'OTP sent successfully'
+        });
+
+    } catch (err) {
+        console.error('Send Web3 OTP error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to send OTP'
+        });
+    }
+});
+
+// =============================================
+// 5. WEB3 VERIFY OTP - UPDATED TO RETURN WALLETS
+// =============================================
+app.post('/api/web3/verify-otp', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Authorization required'
+            });
+        }
+
+        const tempToken = authHeader.split(' ')[1];
+        let decoded;
+        try {
+            decoded = jwt.verify(tempToken, JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Invalid or expired token'
+            });
+        }
+
+        const { email, otp } = req.body;
+        if (!email || !otp) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email and OTP are required'
+            });
+        }
+
+        let user;
+        let web3User;
+
+        if (decoded.userId) {
+            user = await User.findById(decoded.userId);
+            if (user) {
+                web3User = await Web3User.findOne({ user: user._id });
+            }
+        } else if (decoded.walletAddress) {
+            web3User = await Web3User.findOne({
+                'wallets.address': decoded.walletAddress.toLowerCase()
+            });
+            if (web3User) {
+                user = await User.findById(web3User.user);
+            }
+        }
+
+        if (!user) {
+            user = await User.findOne({ email: email });
+            if (user) {
+                web3User = await Web3User.findOne({ user: user._id });
+            }
+        }
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        const otpRecord = await OTP.findOne({
+            email: email,
+            otp: otp,
+            type: 'signup',
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!otpRecord) {
+            const expiredOtp = await OTP.findOne({
+                email: email,
+                otp: otp,
+                type: 'signup',
+                used: false,
+                expiresAt: { $lte: new Date() }
+            });
+
+            if (expiredOtp) {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'OTP has expired. Please request a new one.'
+                });
+            }
+
+            await OTP.updateMany(
+                { email: email, otp: otp, type: 'signup', used: false },
+                { $inc: { attempts: 1 } }
+            );
+
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid OTP. Please try again.'
+            });
+        }
+
+        if (otpRecord.attempts >= otpRecord.maxAttempts) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Too many failed attempts. Please request a new OTP.'
+            });
+        }
+
+        otpRecord.used = true;
+        await otpRecord.save();
+
+        user.isVerified = true;
+        await user.save();
+
+        if (web3User) {
+            web3User.isEmailVerified = true;
+            await web3User.save();
+        }
+
+        const finalToken = generateJWT(user._id);
+
+        // LOG ONLY TO WEB3LOG
+        await Web3Log.create({
+            user: user._id,
+            walletAddress: web3User?.wallets[0]?.address || 'unknown',
+            walletType: web3User?.wallets[0]?.type || 'metamask',
+            action: 'login_success',
+            status: 'success',
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                email: email,
+                verificationType: 'web3'
+            },
+            relatedEntity: otpRecord._id,
+            relatedEntityModel: null
+        });
+
+        await sendAutomatedEmail(user, 'welcome', {
+            name: user.firstName,
+            email: user.email
+        });
+
+        console.log(`✅ Web3 OTP verified for ${email}`);
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Email verified successfully! Welcome to BitHash Capital.',
+            token: finalToken,
+            data: {
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    isVerified: user.isVerified,
+                    accountType: user.accountType,
+                    authProvider: user.authProvider,  // ✅ Return authProvider as set during signup
+                    web3User: web3User ? {
+                        id: web3User._id,
+                        wallets: web3User.wallets.map(w => ({
+                            address: w.address,
+                            type: w.type,
+                            isPrimary: w.isPrimary,
+                            chainId: w.chainId || 1,
+                            caipChainId: w.caipChainId || null
+                        })),
+                        approvedChains: web3User.approvedChains || []
+                    } : null
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Web3 OTP verification error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to verify OTP'
+        });
+    }
+});
+
+// =============================================
+// 6. WEB3 CHECK USER - UPDATED TO RETURN MULTICHAIN DATA
+// =============================================
+app.get('/api/web3/check-user', async (req, res) => {
+    try {
+        const { walletAddress } = req.query;
+
+        if (!walletAddress) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Wallet address is required'
+            });
+        }
+
+        const normalizedAddress = walletAddress.toLowerCase();
+
+        const web3User = await Web3User.findOne({
+            'wallets.address': normalizedAddress
+        }).populate('user', 'firstName lastName email status isVerified accountType authProvider');
+
+        if (web3User) {
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    exists: true,
+                    user: web3User.user ? {
+                        id: web3User.user._id,
+                        firstName: web3User.user.firstName,
+                        lastName: web3User.user.lastName,
+                        email: web3User.user.email,
+                        status: web3User.user.status,
+                        isVerified: web3User.user.isVerified,
+                        accountType: web3User.user.accountType,
+                        authProvider: web3User.user.authProvider  // ✅ Return authProvider as set during signup
+                    } : null,
+                    web3User: {
+                        id: web3User._id,
+                        isEmailVerified: web3User.isEmailVerified,
+                        accountType: web3User.accountType,
+                        wallets: web3User.wallets.map(w => ({
+                            address: w.address,
+                            type: w.type,
+                            isPrimary: w.isPrimary,
+                            chainId: w.chainId || 1,
+                            caipChainId: w.caipChainId || null
+                        })),
+                        approvedChains: web3User.approvedChains || [],
+                        walletConnectSessionTopic: web3User.walletConnectSessionTopic || null
+                    }
+                }
+            });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                exists: false,
+                user: null,
+                web3User: null
+            }
+        });
+
+    } catch (err) {
+        console.error('Check user error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to check user'
+        });
+    }
+});
+
+// =============================================
+// HELPER: Admin Web3 Signup Notification - UPDATED WITH MULTICHAIN
+// =============================================
+async function sendAdminWeb3SignupNotification(user, web3User, req) {
+    try {
+        const formattedTimestamp = new Date().toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            timeZoneName: 'short'
+        });
+
+        const primaryWallet = web3User.wallets.find(w => w.isPrimary) || web3User.wallets[0];
+        const walletAddress = primaryWallet?.address || 'Unknown';
+        const walletType = primaryWallet?.type || 'metamask';
+        const totalWallets = web3User.wallets.length;
+        const approvedChains = web3User.approvedChains || [];
+        const isMultichain = approvedChains.length > 0;
+
+        // Build wallet list HTML
+        let walletListHtml = '';
+        for (const wallet of web3User.wallets) {
+            const chainName = wallet.metadata?.chainName || (wallet.chainId ? `Chain ${wallet.chainId}` : 'Unknown');
+            const isPrimary = wallet.isPrimary ? '⭐ ' : '';
+            walletListHtml += `
+                <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0; font-family: monospace; font-size: 11px;">${wallet.address}</td>
+                    <td style="padding: 8px 0; text-align: center;">${isPrimary}${wallet.type.toUpperCase()}</td>
+                    <td style="padding: 8px 0; text-align: center;">${chainName}</td>
+                    <td style="padding: 8px 0; text-align: center;">${wallet.chainId || 'N/A'}</td>
+                </tr>
+            `;
+        }
+
+        const brandHeader = `
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+        `;
+
+        const brandFooter = `
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+                    <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+                </p>
+            </div>
+        `;
+
+        const adminEmailHtml = `
+            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                ${brandHeader}
+                <div style="padding: 30px; background: #FFFFFF;">
+                    <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                                <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                            </svg>
+                        </div>
+                        <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW WEB3 USER REGISTERED!</h2>
+                        <p style="color: #065F46; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} joined using Web3 Wallet</p>
+                        ${isMultichain ? `<p style="color: #065F46; font-size: 12px; margin: 4px 0 0 0;">🌐 Multichain: ${approvedChains.length} chains approved</p>` : ''}
+                    </div>
+
+                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Email:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${user.email}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;"><span style="background: ${user.accountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${(user.accountType || 'individual').toUpperCase()}</span></td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;"><span style="background: #6C3DFF; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Web3 Wallet</span></td>
+                            </tr>
+                            ${isMultichain ? `<tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Multichain:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">✅ Yes (${approvedChains.length} chains)</span></td>
+                            </tr>` : ''}
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Total Wallets:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${totalWallets}</td>
+                            </tr>
+                            ${user.organizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Organization:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${user.organizationName}</td>
+                            </tr>` : ''}
+                            ${user.role ? `<tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Role:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${user.role}</td>
+                            </tr>` : ''}
+                            ${user.country ? `<tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Country:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${user.country}</td>
+                            </tr>` : ''}
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>City:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${user.city || 'Not provided'}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${getRealClientIP(req)}</td>
+                            </tr>
+                            <tr style="border-top: 1px solid #E2E8F0;">
+                                <td style="padding: 8px 0;"><strong>Registered At:</strong></td>
+                                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    ${totalWallets > 1 ? `
+                    <div style="background: #EEF2FF; padding: 16px 20px; border-radius: 12px; margin: 20px 0;">
+                        <p style="color: #1E40AF; margin: 0 0 12px 0; font-weight: 600;">🔗 All Linked Wallets</p>
+                        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                            <thead>
+                                <tr style="background: #E0E7FF;">
+                                    <th style="padding: 8px; text-align: left;">Address</th>
+                                    <th style="padding: 8px; text-align: center;">Type</th>
+                                    <th style="padding: 8px; text-align: center;">Chain</th>
+                                    <th style="padding: 8px; text-align: center;">Chain ID</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${walletListHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                    ` : ''}
+
+                    ${isMultichain ? `
+                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">🌐 Multichain Approval Details</p>
+                        <p style="color: #78350F; margin: 0; font-size: 13px;">Approved Chains: ${approvedChains.join(', ')}</p>
+                        <p style="color: #78350F; margin: 5px 0 0 0; font-size: 13px;">Session Topic: ${web3User.walletConnectSessionTopic || 'N/A'}</p>
+                    </div>
+                    ` : ''}
+
+                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Web3 Signup Details</p>
+                        <p style="color: #78350F; margin: 0; font-size: 14px;">User signed up using Web3 wallet authentication. OTP has been sent for email verification.</p>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
+                    </div>
+
+                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
+                </div>
+                ${brandFooter}
+            </div>
+        `;
+
+        await supportTransporter.sendMail({
+            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+            to: 'thieretw@gmail.com',
+            subject: `🆕 NEW WEB3 USER: ${user.firstName} ${user.lastName} joined BitHash${isMultichain ? ' (Multichain)' : ''}`,
+            html: adminEmailHtml
+        });
+
+        console.log(`✅ Admin Web3 signup notification sent to thieretw@gmail.com for user: ${user.email}`);
+    } catch (err) {
+        console.error('Failed to send admin Web3 signup notification:', err);
+    }
+}
+
+// =============================================
+// All other endpoints remain unchanged
+// =============================================
+// The rest of the file continues with all other routes and functionality
+// (withdrawals, deposits, investments, etc.) - they remain exactly as they were
 
 
 
@@ -9468,1760 +12364,6 @@ async function getSystemUserId() {
 
 
 
-// =============================================
-// HELPER: Timezone-based greeting
-// =============================================
-function getGreetingByTimezone(offsetMinutes = 0) {
-    const now = new Date();
-    const utcHours = now.getUTCHours();
-    let localHour = (utcHours + offsetMinutes / 60) % 24;
-    if (localHour < 0) localHour += 24;
-    const hour = Math.floor(localHour);
-    if (hour >= 5 && hour < 12) return 'Good morning';
-    if (hour >= 12 && hour < 17) return 'Good afternoon';
-    if (hour >= 17 && hour < 22) return 'Good evening';
-    return 'Hello';
-}
-
-// Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms
-app.post('/api/auth/signup', [
-    body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
-    body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
-    body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(value)) {
-            throw new Error('Please provide a valid email address (e.g., name@domain.com)');
-        }
-        return true;
-    }),
-    body('city').trim().notEmpty().withMessage('City is required').escape(),
-    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
-        .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
-        .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
-        .matches(/[0-9]/).withMessage('Password must contain at least one number')
-        .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character'),
-    body('referralCode').optional().trim().escape(),
-    body('accountType').optional().isIn(['individual', 'business']).withMessage('Account type must be individual or business'),
-    body('timezoneOffset').optional().isInt().withMessage('Timezone offset must be an integer'),
-    body('organizationName').optional().trim().escape(),
-    body('role').optional().trim().escape(),
-    body('country').optional().trim().escape(),
-    body('workEmail').optional().isEmail().withMessage('Please provide a valid work email'),
-    body('orgEmail').optional().isEmail().withMessage('Please provide a valid email address'),
-    body('orgCity').optional().trim().escape(),
-    body('orgFirstName').optional().trim().escape(),
-    body('orgLastName').optional().trim().escape(),
-    body('orgPassword').optional().trim(),
-    body('confirmOrgPassword').optional().trim()
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        console.error('Signup validation errors:', errors.array());
-
-        await SystemLog.create({
-            action: 'signup_validation_failed',
-            entity: 'User',
-            performedBy: null,
-            performedByModel: 'System',
-            status: 'failed',
-            requestMethod: req.method,
-            requestPath: req.path,
-            ip: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            metadata: {
-                errors: errors.array(),
-                body: { ...req.body, password: '[REDACTED]' }
-            }
-        });
-
-        return res.status(400).json({
-            status: 'fail',
-            errors: errors.array(),
-            message: errors.array()[0]?.msg || 'Validation failed'
-        });
-    }
-
-    try {
-        const {
-            firstName, lastName, email, city, password, referralCode, accountType,
-            organizationName, role, country, workEmail, orgEmail, orgCity,
-            orgFirstName, orgLastName, orgPassword, timezoneOffset = 0
-        } = req.body;
-
-        const userEmail = email || orgEmail;
-        const userFirstName = firstName || orgFirstName;
-        const userLastName = lastName || orgLastName;
-        const userPassword = password || orgPassword;
-        const userCity = city || orgCity;
-        const userAccountType = accountType || 'individual';
-        const userOrganizationName = (userAccountType === 'business' && organizationName) ? organizationName : null;
-        const userWorkEmail = (userAccountType === 'business' && workEmail) ? workEmail : null;
-        const userRole = (userAccountType === 'business' && role) ? role : null;
-        const userBusinessCountry = (userAccountType === 'business' && country) ? country : null;
-
-        if (!userEmail) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Email address is required'
-            });
-        }
-
-        if (!userPassword) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Password is required'
-            });
-        }
-
-        if (!userFirstName || !userLastName) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'First name and last name are required'
-            });
-        }
-
-        if (!userCity) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'City is required'
-            });
-        }
-
-        const originalEmail = userEmail;
-        const existingUser = await User.findOne({ email: originalEmail });
-
-        if (existingUser) {
-            const greeting = getGreetingByTimezone(timezoneOffset);
-            const truncatedEmail = originalEmail.split('@')[0].length > 6
-                ? `${originalEmail.split('@')[0].substring(0, 3)}...${originalEmail.split('@')[0].substring(originalEmail.split('@')[0].length - 3)}@${originalEmail.split('@')[1]}`
-                : originalEmail;
-
-            await SystemLog.create({
-                action: 'signup_attempt_duplicate',
-                entity: 'User',
-                entityId: existingUser._id,
-                performedBy: existingUser._id,
-                performedByModel: 'User',
-                performedByEmail: existingUser.email,
-                performedByName: `${existingUser.firstName} ${existingUser.lastName}`,
-                status: 'failed',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: getRealClientIP(req),
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                location: req.clientLocation?.location || 'Unknown',
-                metadata: {
-                    attemptedEmail: originalEmail,
-                    existingAuthProvider: existingUser.authProvider,
-                    accountType: userAccountType,
-                    timezoneOffset: timezoneOffset
-                }
-            });
-
-            return res.status(400).json({
-                status: 'fail',
-                message: `${greeting} ${existingUser.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
-                data: {
-                    greeting,
-                    userName: existingUser.firstName,
-                    truncatedEmail,
-                    action: 'login_suggested'
-                }
-            });
-        }
-
-        const hashedPassword = await bcrypt.hash(userPassword, 12);
-        const newReferralCode = generateReferralCode();
-
-        let referredByUser = null;
-        let referralSource = 'organic';
-
-        if (referralCode) {
-            console.log('Processing referral code:', referralCode);
-            let actualReferralCode = referralCode;
-            if (referralCode.includes('-')) {
-                const parts = referralCode.split('-');
-                if (parts.length >= 4) {
-                    actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
-                } else {
-                    actualReferralCode = parts[parts.length - 1];
-                }
-            }
-
-            referredByUser = await User.findOne({ referralCode: actualReferralCode });
-
-            if (referredByUser) {
-                referralSource = 'referral_link';
-                console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
-            }
-        }
-
-        const userData = {
-            firstName: userFirstName,
-            lastName: userLastName,
-            email: originalEmail,
-            password: hashedPassword,
-            city: userCity,
-            referralCode: newReferralCode,
-            referredBy: referredByUser ? referredByUser._id : undefined,
-            isVerified: false,
-            accountType: userAccountType,
-            authProvider: 'email',
-            signupSource: referralCode ? 'referral' : 'organic',
-            organizationName: userOrganizationName,
-            role: userRole,
-            country: userBusinessCountry,
-            workEmail: userWorkEmail,
-            metadata: {
-                ipAddress: req.ip,
-                userAgent: req.headers['user-agent'],
-                signupDate: new Date(),
-                accountTypeSelected: userAccountType,
-                signupMethod: 'email_password',
-                timezoneOffset: timezoneOffset
-            }
-        };
-
-        const newUser = await User.create(userData);
-        console.log(`✅ New user created: ${newUser.email} (Account Type: ${newUser.accountType}, Auth Provider: email)`);
-
-        await SystemLog.create({
-            action: 'user_signup_success',
-            entity: 'User',
-            entityId: newUser._id,
-            performedBy: newUser._id,
-            performedByModel: 'User',
-            performedByEmail: newUser.email,
-            performedByName: `${newUser.firstName} ${newUser.lastName}`,
-            status: 'success',
-            requestMethod: req.method,
-            requestPath: req.path,
-            ip: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            location: req.clientLocation?.location || 'Unknown',
-            metadata: {
-                email: originalEmail,
-                accountType: userAccountType,
-                referralCodeUsed: referralCode || null,
-                referredBy: referredByUser ? referredByUser.email : null,
-                organizationName: organizationName || null,
-                city: userCity,
-                timezoneOffset: timezoneOffset
-            }
-        });
-
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-        await OTP.create({
-            email: originalEmail,
-            otp,
-            type: 'signup',
-            expiresAt,
-            ipAddress: req.ip,
-            userAgent: req.headers['user-agent']
-        });
-
-        await sendProfessionalEmail({
-            email: originalEmail,
-            template: 'otp',
-            data: {
-                name: userFirstName,
-                otp: otp,
-                action: 'account verification'
-            }
-        });
-
-        const rawDeviceInfo = await getUserDeviceInfo(req);
-        const formattedDeviceInfo = {
-            type: getDeviceType(req),
-            os: {
-                name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(rawDeviceInfo.device) || 'Unknown',
-                version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
-            },
-            browser: {
-                name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(rawDeviceInfo.device) || 'Unknown',
-                version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
-            },
-            platform: rawDeviceInfo.device || 'Unknown',
-            language: req.headers['accept-language'] || 'Unknown',
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-        };
-
-        const formattedLocation = {
-            ip: rawDeviceInfo.ip,
-            country: {
-                name: rawDeviceInfo.locationDetails?.country || 'Unknown',
-                code: (rawDeviceInfo.locationDetails?.country_code || rawDeviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
-            },
-            region: {
-                name: rawDeviceInfo.locationDetails?.region || 'Unknown',
-                code: rawDeviceInfo.locationDetails?.region_code || rawDeviceInfo.locationDetails?.region || 'Unknown'
-            },
-            city: rawDeviceInfo.locationDetails?.city || userCity || 'Unknown',
-            postalCode: rawDeviceInfo.locationDetails?.postalCode || 'Unknown',
-            latitude: rawDeviceInfo.locationDetails?.latitude || null,
-            longitude: rawDeviceInfo.locationDetails?.longitude || null,
-            timezone: rawDeviceInfo.locationDetails?.timezone || 'Unknown',
-            isp: rawDeviceInfo.locationDetails?.isp || 'Unknown',
-            exactLocation: rawDeviceInfo.exactLocation || false,
-            formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || userCity}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
-        };
-
-        // UserLog for user history
-        await UserLog.create({
-            user: newUser._id,
-            username: newUser.email,
-            email: newUser.email,
-            userFullName: `${newUser.firstName} ${newUser.lastName}`,
-            action: 'signup',
-            actionCategory: 'authentication',
-            ipAddress: rawDeviceInfo.ip,
-            userAgent: rawDeviceInfo.device,
-            deviceInfo: formattedDeviceInfo,
-            location: formattedLocation,
-            status: 'success',
-            metadata: {
-                email: originalEmail,
-                signupMethod: 'email_password',
-                referralCodeUsed: referralCode || null,
-                referredBy: referredByUser ? referredByUser.email : null,
-                accountType: userAccountType,
-                organizationName: organizationName || null,
-                city: userCity,
-                ipAddress: rawDeviceInfo.ip
-            }
-        });
-
-        // SystemLog for detailed audit
-        await SystemLog.create({
-            action: 'user_registered',
-            entity: 'User',
-            entityId: newUser._id,
-            performedBy: newUser._id,
-            performedByModel: 'User',
-            performedByEmail: newUser.email,
-            performedByName: `${newUser.firstName} ${newUser.lastName}`,
-            status: 'success',
-            requestMethod: req.method,
-            requestPath: req.path,
-            ip: rawDeviceInfo.ip,
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            location: formattedLocation.formatted,
-            deviceType: formattedDeviceInfo.type,
-            os: formattedDeviceInfo.os.name,
-            browser: formattedDeviceInfo.browser.name,
-            countryCode: formattedLocation.country.code,
-            city: formattedLocation.city,
-            region: formattedLocation.region.name,
-            latitude: formattedLocation.latitude,
-            longitude: formattedLocation.longitude,
-            metadata: {
-                email: originalEmail,
-                accountType: userAccountType,
-                referralCodeUsed: referralCode || null,
-                referredBy: referredByUser ? referredByUser.email : null,
-                organizationName: organizationName || null,
-                city: userCity,
-                timezoneOffset: timezoneOffset,
-                authProvider: 'email'
-            }
-        });
-
-        // Admin notification
-        const formattedTimestamp = new Date().toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            timeZoneName: 'short'
-        });
-
-        const brandHeader = `
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-        `;
-
-        const brandFooter = `
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
-                    <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                </p>
-            </div>
-        `;
-
-        const adminEmailHtml = `
-            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                ${brandHeader}
-                <div style="padding: 30px; background: #FFFFFF;">
-                    <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                                <path d="M12 8V12M12 16H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
-                            </svg>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </div>
-                        <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW USER REGISTERED!</h2>
-                        <p style="color: #065F46; font-size: 13px; margin: 0;">${newUser.firstName} ${newUser.lastName} just joined ₿itHash Capital</p>
-                    </div>
-
-                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="border-bottom: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${newUser.firstName} ${newUser.lastName}</td>
-                             </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Email Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${newUser.email}</td>
-                             </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: ${userAccountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${userAccountType.toUpperCase()}</span></td>
-                             </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Email/Password</span></td>
-                             </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>City:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${userCity}</td>
-                             </tr>
-                            ${organizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Organization:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${organizationName}</td>
-                             </tr>` : ''}
-                            ${referralCode ? `<tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Referral Code Used:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${referralCode}</td>
-                             </tr>` : ''}
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</td>
-                             </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</td>
-                             </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</td>
-                             </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Registered At:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
-                             </tr>
-                        </table>
-                    </div>
-
-                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Next Steps</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">The user has been sent an OTP for email verification. Once verified, they will have full access to the platform.</p>
-                    </div>
-
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://www.bithashcapital.live/admin/users/${newUser._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
-                    </div>
-
-                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-                </div>
-                ${brandFooter}
-            </div>
-        `;
-
-        try {
-            await supportTransporter.sendMail({
-                from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-                to: 'thieretw@gmail.com',
-                subject: `🆕 NEW USER ALERT: ${newUser.firstName} ${newUser.lastName} joined ₿itHash Capital (${userAccountType})`,
-                html: adminEmailHtml
-            });
-            console.log(`✅ Admin signup notification sent successfully to thieretw@gmail.com for user: ${newUser.email}`);
-        } catch (adminEmailError) {
-            console.error(`❌ Failed to send admin signup notification to thieretw@gmail.com:`, adminEmailError.message);
-        }
-
-        const tempToken = generateJWT(newUser._id);
-
-        res.status(201).json({
-            status: 'success',
-            message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
-            tempToken,
-            data: {
-                user: {
-                    id: newUser._id,
-                    firstName: newUser.firstName,
-                    lastName: newUser.lastName,
-                    email: newUser.email,
-                    accountType: newUser.accountType,
-                    city: newUser.city,
-                    organizationName: newUser.organizationName,
-                    needsVerification: true
-                }
-            }
-        });
-
-    } catch (err) {
-        console.error('Signup error:', err);
-
-        await SystemLog.create({
-            action: 'signup_error',
-            entity: 'User',
-            performedBy: null,
-            performedByModel: 'System',
-            status: 'failed',
-            requestMethod: req.method,
-            requestPath: req.path,
-            ip: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            errorMessage: err.message,
-            errorStack: err.stack,
-            metadata: {
-                email: req.body.email || req.body.orgEmail || 'unknown',
-                accountType: req.body.accountType || 'individual'
-            }
-        });
-
-        res.status(500).json({
-            status: 'error',
-            message: err.message || 'An error occurred during signup'
-        });
-    }
-});
-
-// Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
-app.post('/api/auth/login', [
-    body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(value)) {
-            throw new Error('Please provide a valid email address (e.g., name@domain.com)');
-        }
-        return true;
-    }),
-    body('password').notEmpty().withMessage('Password is required'),
-    body('rememberMe').optional().isBoolean().withMessage('Remember me must be a boolean'),
-    body('accountType').optional().isIn(['individual', 'business']).withMessage('Account type must be individual or business'),
-    body('timezoneOffset').optional().isInt().withMessage('Timezone offset must be an integer')
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        await SystemLog.create({
-            action: 'login_validation_failed',
-            entity: 'User',
-            performedBy: null,
-            performedByModel: 'System',
-            status: 'failed',
-            requestMethod: req.method,
-            requestPath: req.path,
-            ip: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            metadata: {
-                errors: errors.array(),
-                email: req.body.email
-            }
-        });
-
-        return res.status(400).json({
-            status: 'fail',
-            errors: errors.array()
-        });
-    }
-
-    try {
-        const { email, password, rememberMe, accountType, timezoneOffset = 0 } = req.body;
-        const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
-
-        const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
-        const recentFailedAttempts = await SystemLog.countDocuments({
-            'metadata.email': email,
-            action: 'login_failed',
-            status: 'failed',
-            createdAt: { $gte: sixMinutesAgo }
-        });
-
-        const isPasswordValid = user && (await bcrypt.compare(password, user.password));
-
-        if (!user || !isPasswordValid) {
-            await SystemLog.create({
-                action: 'login_failed',
-                entity: 'User',
-                entityId: user ? user._id : null,
-                performedBy: user ? user._id : null,
-                performedByModel: user ? 'User' : 'System',
-                performedByEmail: email,
-                performedByName: user ? `${user.firstName} ${user.lastName}` : 'Unknown User',
-                status: 'failed',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: getRealClientIP(req),
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                metadata: {
-                    email: email,
-                    loginMethod: 'password',
-                    accountType: accountType || 'unknown',
-                    failedAttemptCount: recentFailedAttempts + 1,
-                    timezoneOffset: timezoneOffset
-                }
-            });
-
-            if (recentFailedAttempts === 0 && user && user.email && user.authProvider !== 'google') {
-                const rawDeviceInfo = await getUserDeviceInfo(req);
-                try {
-                    await sendAutomatedEmail(user, 'suspicious_login', {
-                        name: user.firstName,
-                        device: rawDeviceInfo.device || 'Unknown device',
-                        location: rawDeviceInfo.location || 'Unknown location',
-                        ip: rawDeviceInfo.ip || 'Unknown IP',
-                        timestamp: new Date().toISOString(),
-                        attemptType: 'Failed Password Attempt'
-                    });
-                    console.log(`📧 Failed login attempt email sent to ${user.email}`);
-                } catch (emailError) {
-                    console.error('Failed to send failed login email:', emailError);
-                }
-            }
-
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Incorrect email or password'
-            });
-        }
-
-        // ✅ AUTH PROVIDER CHECK - User must log in with the method they signed up with
-        if (user.authProvider !== 'email') {
-            await SystemLog.create({
-                action: 'login_wrong_provider',
-                entity: 'User',
-                entityId: user._id,
-                performedBy: user._id,
-                performedByModel: 'User',
-                performedByEmail: user.email,
-                performedByName: `${user.firstName} ${user.lastName}`,
-                status: 'failed',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: getRealClientIP(req),
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                metadata: {
-                    attemptedProvider: 'email',
-                    actualProvider: user.authProvider,
-                    email: email,
-                    timezoneOffset: timezoneOffset
-                }
-            });
-
-            return res.status(403).json({
-                status: 'fail',
-                message: `This account was created using ${user.authProvider}. Please log in using that method.`,
-                data: { provider: user.authProvider }
-            });
-        }
-
-        if (accountType && user.accountType !== accountType) {
-            await SystemLog.create({
-                action: 'login_account_type_mismatch',
-                entity: 'User',
-                entityId: user._id,
-                performedBy: user._id,
-                performedByModel: 'User',
-                performedByEmail: user.email,
-                performedByName: `${user.firstName} ${user.lastName}`,
-                status: 'failed',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: getRealClientIP(req),
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                metadata: {
-                    attemptedAccountType: accountType,
-                    actualAccountType: user.accountType,
-                    email: email
-                }
-            });
-
-            return res.status(401).json({
-                status: 'fail',
-                message: `Account type mismatch. This email is registered as a ${user.accountType} account.`
-            });
-        }
-
-        if (user.status !== 'active') {
-            await SystemLog.create({
-                action: 'login_account_inactive',
-                entity: 'User',
-                entityId: user._id,
-                performedBy: user._id,
-                performedByModel: 'User',
-                performedByEmail: user.email,
-                performedByName: `${user.firstName} ${user.lastName}`,
-                status: 'failed',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: getRealClientIP(req),
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                metadata: {
-                    email: email,
-                    status: user.status
-                }
-            });
-
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Your account has been suspended. Please contact support.'
-            });
-        }
-
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-        await OTP.create({
-            email: email,
-            otp,
-            type: 'login',
-            expiresAt,
-            ipAddress: req.ip,
-            userAgent: req.headers['user-agent']
-        });
-
-        await sendProfessionalEmail({
-            email: email,
-            template: 'otp',
-            data: {
-                name: user.firstName,
-                otp: otp,
-                action: 'login verification'
-            }
-        });
-
-        const rawDeviceInfo = await getUserDeviceInfo(req);
-
-        const formattedDeviceInfo = {
-            type: getDeviceType(req),
-            os: {
-                name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(rawDeviceInfo.device) || 'Unknown',
-                version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
-            },
-            browser: {
-                name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(rawDeviceInfo.device) || 'Unknown',
-                version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
-            },
-            platform: rawDeviceInfo.device || 'Unknown',
-            language: req.headers['accept-language'] || 'Unknown',
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-        };
-
-        const formattedLocation = {
-            ip: rawDeviceInfo.ip,
-            country: {
-                name: rawDeviceInfo.locationDetails?.country || 'Unknown',
-                code: (rawDeviceInfo.locationDetails?.country_code || rawDeviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
-            },
-            region: {
-                name: rawDeviceInfo.locationDetails?.region || 'Unknown',
-                code: rawDeviceInfo.locationDetails?.region_code || rawDeviceInfo.locationDetails?.region || 'Unknown'
-            },
-            city: rawDeviceInfo.locationDetails?.city || user.city || 'Unknown',
-            postalCode: rawDeviceInfo.locationDetails?.postalCode || 'Unknown',
-            latitude: rawDeviceInfo.locationDetails?.latitude || null,
-            longitude: rawDeviceInfo.locationDetails?.longitude || null,
-            timezone: rawDeviceInfo.locationDetails?.timezone || 'Unknown',
-            isp: rawDeviceInfo.locationDetails?.isp || 'Unknown',
-            exactLocation: rawDeviceInfo.exactLocation || false,
-            formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || user.city}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
-        };
-
-        await UserLog.create({
-            user: user._id,
-            username: user.email,
-            email: user.email,
-            userFullName: `${user.firstName} ${user.lastName}`,
-            action: 'login_attempt',
-            actionCategory: 'authentication',
-            ipAddress: rawDeviceInfo.ip,
-            userAgent: rawDeviceInfo.device,
-            deviceInfo: formattedDeviceInfo,
-            location: formattedLocation,
-            status: 'pending',
-            metadata: {
-                email: email,
-                loginMethod: 'password',
-                otpSent: true,
-                rememberMe: rememberMe || false,
-                accountType: accountType || user.accountType,
-                authProvider: user.authProvider || 'email',
-                otpCreatedAt: new Date().toISOString(),
-                timezoneOffset: timezoneOffset
-            }
-        });
-
-        await SystemLog.create({
-            action: 'login_initiated',
-            entity: 'User',
-            entityId: user._id,
-            performedBy: user._id,
-            performedByModel: 'User',
-            performedByEmail: user.email,
-            performedByName: `${user.firstName} ${user.lastName}`,
-            status: 'pending',
-            requestMethod: req.method,
-            requestPath: req.path,
-            ip: rawDeviceInfo.ip,
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            location: formattedLocation.formatted,
-            deviceType: formattedDeviceInfo.type,
-            os: formattedDeviceInfo.os.name,
-            browser: formattedDeviceInfo.browser.name,
-            countryCode: formattedLocation.country.code,
-            city: formattedLocation.city,
-            region: formattedLocation.region.name,
-            latitude: formattedLocation.latitude,
-            longitude: formattedLocation.longitude,
-            metadata: {
-                email: email,
-                loginMethod: 'password',
-                rememberMe: rememberMe || false,
-                accountType: accountType || user.accountType,
-                authProvider: user.authProvider || 'email',
-                timezoneOffset: timezoneOffset
-            }
-        });
-
-        // Admin notification
-        const formattedTimestamp = new Date().toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            timeZoneName: 'short'
-        });
-
-        const brandHeader = `
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-        `;
-
-        const brandFooter = `
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
-                    <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                </p>
-            </div>
-        `;
-
-        const adminEmailHtml = `
-            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                ${brandHeader}
-                <div style="padding: 30px; background: #FFFFFF;">
-                    <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                            </svg>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
-                                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-                            </svg>
-                        </div>
-                        <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">USER LOGIN INITIATED!</h2>
-                        <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated login to their account (awaiting OTP)</p>
-                    </div>
-
-                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="border-bottom: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>User:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</strong></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: ${user.accountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${user.accountType?.toUpperCase() || 'INDIVIDUAL'}</span></strong></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.authProvider === 'google' ? 'Google OAuth' : 'Email/Password'}</strong></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Password + OTP</span></strong></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Time:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
-                            </tr>
-                        </table>
-                    </div>
-
-                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Remember Me: ${rememberMe ? '✅ Yes' : '❌ No'}</p>
-                        <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">Login success email will be sent after OTP verification.</p>
-                    </div>
-
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Activity</a>
-                    </div>
-
-                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-                </div>
-                ${brandFooter}
-            </div>
-        `;
-
-        try {
-            await supportTransporter.sendMail({
-                from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-                to: 'thieretw@gmail.com',
-                subject: `🔐 LOGIN INITIATED: ${user.firstName} ${user.lastName} logged into ₿itHash Capital`,
-                html: adminEmailHtml
-            });
-            console.log(`✅ Admin login notification sent successfully to thieretw@gmail.com for user: ${user.email}`);
-        } catch (adminEmailError) {
-            console.error(`❌ Failed to send admin login notification to thieretw@gmail.com:`, adminEmailError.message);
-        }
-
-        const tempToken = generateJWT(user._id);
-
-        res.status(200).json({
-            status: 'success',
-            message: 'OTP sent to your email. Please verify to complete login.',
-            tempToken,
-            needsOtp: true,
-            data: {
-                user: {
-                    id: user._id,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    email: user.email,
-                    accountType: user.accountType,
-                    organizationName: user.organizationName || null
-                }
-            }
-        });
-
-    } catch (err) {
-        console.error('Login error:', err);
-
-        await SystemLog.create({
-            action: 'login_error',
-            entity: 'User',
-            performedBy: null,
-            performedByModel: 'System',
-            status: 'failed',
-            requestMethod: req.method,
-            requestPath: req.path,
-            ip: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            errorMessage: err.message,
-            errorStack: err.stack,
-            metadata: {
-                email: req.body.email,
-                timezoneOffset: req.body.timezoneOffset || 0
-            }
-        });
-
-        res.status(500).json({
-            status: 'error',
-            message: 'An error occurred during login'
-        });
-    }
-});
-
-// Google Authentication Endpoint
-app.post('/api/auth/google', async (req, res) => {
-    try {
-        console.log('Google auth request received');
-
-        const { credential, isSignup = false, timezoneOffset = 0 } = req.body;
-
-        if (!credential) {
-            console.error('No credential provided');
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Google credential is required'
-            });
-        }
-
-        console.log('Verifying Google token...');
-
-        let payload;
-        try {
-            const ticket = await googleClient.verifyIdToken({
-                idToken: credential,
-                audience: process.env.GOOGLE_CLIENT_ID
-            });
-            payload = ticket.getPayload();
-            console.log('Google token verified successfully');
-        } catch (verifyError) {
-            console.error('Google token verification failed:', verifyError);
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid Google token. Please try again.'
-            });
-        }
-
-        if (!payload) {
-            console.error('No payload from Google token');
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid token payload'
-            });
-        }
-
-        const { email, given_name, family_name, sub } = payload;
-
-        if (!email) {
-            console.error('No email in Google payload');
-            return res.status(400).json({
-                status: 'fail',
-                message: 'No email found in Google account'
-            });
-        }
-
-        console.log('Google auth successful for:', email);
-        console.log('isSignup flag:', isSignup);
-
-        const originalEmail = email;
-
-        let user;
-        let isNewUser = false;
-
-        try {
-            user = await User.findOne({ email: originalEmail });
-            console.log('User lookup result:', user ? 'Found' : 'Not found');
-        } catch (dbError) {
-            console.error('Database lookup error:', dbError);
-            return res.status(500).json({
-                status: 'error',
-                message: 'Database error during user lookup'
-            });
-        }
-
-        const rawDeviceInfo = await getUserDeviceInfo(req);
-
-        const formattedDeviceInfo = {
-            type: getDeviceType(req),
-            os: {
-                name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(rawDeviceInfo.device) || 'Unknown',
-                version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
-            },
-            browser: {
-                name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(rawDeviceInfo.device) || 'Unknown',
-                version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
-            },
-            platform: rawDeviceInfo.device || 'Unknown',
-            language: req.headers['accept-language'] || 'Unknown',
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-        };
-
-        const formattedLocation = {
-            ip: rawDeviceInfo.ip,
-            country: {
-                name: rawDeviceInfo.locationDetails?.country || 'Unknown',
-                code: (rawDeviceInfo.locationDetails?.country_code || rawDeviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
-            },
-            region: {
-                name: rawDeviceInfo.locationDetails?.region || 'Unknown',
-                code: rawDeviceInfo.locationDetails?.region_code || rawDeviceInfo.locationDetails?.region || 'Unknown'
-            },
-            city: rawDeviceInfo.locationDetails?.city || 'Unknown',
-            postalCode: rawDeviceInfo.locationDetails?.postalCode || 'Unknown',
-            latitude: rawDeviceInfo.locationDetails?.latitude || null,
-            longitude: rawDeviceInfo.locationDetails?.longitude || null,
-            timezone: rawDeviceInfo.locationDetails?.timezone || 'Unknown',
-            isp: rawDeviceInfo.locationDetails?.isp || 'Unknown',
-            exactLocation: rawDeviceInfo.exactLocation || false,
-            formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || 'Unknown'}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
-        };
-
-        const greeting = getGreetingByTimezone(timezoneOffset);
-
-        let truncatedEmail = email;
-        const [localPart, domain] = email.split('@');
-        if (domain && localPart.length > 6) {
-            const firstChars = localPart.substring(0, 3);
-            const lastChars = localPart.substring(localPart.length - 3);
-            truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
-        }
-
-        // Case 1: Login attempt but user doesn't exist
-        if (isSignup === false && !user) {
-            console.log('Login attempt with Google: User does not exist');
-
-            await SystemLog.create({
-                action: 'google_login_user_not_found',
-                entity: 'User',
-                performedBy: null,
-                performedByModel: 'System',
-                status: 'failed',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: rawDeviceInfo.ip,
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                location: formattedLocation.formatted,
-                metadata: {
-                    email: originalEmail,
-                    signupAttempt: false,
-                    timezoneOffset: timezoneOffset,
-                    isSignup: false
-                }
-            });
-
-            return res.status(404).json({
-                status: 'fail',
-                message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
-                data: {
-                    greeting: greeting,
-                    truncatedEmail: truncatedEmail,
-                    action: 'signup_suggested'
-                }
-            });
-        }
-
-        // Case 2: Signup attempt but user already exists
-        if (isSignup === true && user) {
-            console.log('Signup attempt with Google: User already exists');
-
-            await SystemLog.create({
-                action: 'google_signup_user_exists',
-                entity: 'User',
-                entityId: user._id,
-                performedBy: user._id,
-                performedByModel: 'User',
-                performedByEmail: user.email,
-                performedByName: `${user.firstName} ${user.lastName}`,
-                status: 'failed',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: rawDeviceInfo.ip,
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                location: formattedLocation.formatted,
-                metadata: {
-                    email: originalEmail,
-                    existingAuthProvider: user.authProvider,
-                    signupAttempt: true,
-                    timezoneOffset: timezoneOffset,
-                    isSignup: true
-                }
-            });
-
-            const locationString = rawDeviceInfo.location || 'Unknown location';
-            const deviceString = rawDeviceInfo.device || 'Unknown device';
-            const ipAddress = rawDeviceInfo.ip || 'Unknown IP';
-            const attemptTime = new Date().toLocaleString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                timeZoneName: 'short'
-            });
-
-            try {
-                let cleanDevice = deviceString;
-                if (deviceString.includes('Chrome/')) cleanDevice = 'Google Chrome';
-                else if (deviceString.includes('Firefox/')) cleanDevice = 'Mozilla Firefox';
-                else if (deviceString.includes('Safari/') && !deviceString.includes('Chrome/')) cleanDevice = 'Safari';
-                else if (deviceString.includes('Edg/')) cleanDevice = 'Microsoft Edge';
-                else if (deviceString.includes('Opera/') || deviceString.includes('OPR/')) cleanDevice = 'Opera';
-
-                let cleanOS = 'Unknown';
-                if (deviceString.includes('Windows NT 10.0')) cleanOS = 'Windows 10/11';
-                else if (deviceString.includes('Windows NT 6.1')) cleanOS = 'Windows 7';
-                else if (deviceString.includes('Mac OS X')) cleanOS = 'macOS';
-                else if (deviceString.includes('Android')) cleanOS = 'Android';
-                else if (deviceString.includes('iPhone') || deviceString.includes('iPad')) cleanOS = 'iOS';
-                else if (deviceString.includes('Linux')) cleanOS = 'Linux';
-
-                await sendProfessionalEmail({
-                    email: email,
-                    template: 'default',
-                    data: {
-                        name: user.firstName,
-                        message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}).`,
-                        details: `
-                            <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                                <p style="margin: 0 0 10px 0;"><strong>Location:</strong> ${locationString}</p>
-                                <p style="margin: 0 0 10px 0;"><strong>Device:</strong> ${cleanDevice} on ${cleanOS}</p>
-                                <p style="margin: 0 0 10px 0;"><strong>IP Address:</strong> ${ipAddress}</p>
-                                <p style="margin: 0 0 0 0;"><strong>Time:</strong> ${attemptTime}</p>
-                            </div>
-                        `,
-                        actionRequired: 'If this was you, please log in to your existing account. If this was not you, please contact our support team immediately to secure your account.',
-                        buttonText: 'Login to Your Account',
-                        actionLink: 'https://www.bithashcapital.live/login',
-                        referenceId: `SEC-DUPLICATE-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-                    }
-                });
-                console.log(`Security email sent to ${email} about duplicate signup attempt from ${locationString}`);
-            } catch (emailError) {
-                console.error('Failed to send duplicate signup alert email:', emailError);
-            }
-
-            return res.status(409).json({
-                status: 'fail',
-                message: `${greeting} ${user.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
-                data: {
-                    greeting: greeting,
-                    userName: user.firstName,
-                    truncatedEmail: truncatedEmail,
-                    action: 'login_suggested'
-                }
-            });
-        }
-
-        // =============================================
-        // NORMAL FLOW - Create or update user
-        // =============================================
-
-        if (!user) {
-            try {
-                const referralCode = generateReferralCode();
-                user = await User.create({
-                    firstName: given_name || 'Google',
-                    lastName: family_name || 'User',
-                    email: originalEmail,
-                    googleId: sub,
-                    isVerified: true,
-                    referralCode,
-                    status: 'active',
-                    accountType: 'individual',
-                    authProvider: 'google',
-                    metadata: {
-                        signupMethod: 'google_oauth',
-                        signupDate: new Date(),
-                        ipAddress: rawDeviceInfo.ip,
-                        userAgent: rawDeviceInfo.device,
-                        timezoneOffset: timezoneOffset
-                    }
-                });
-                isNewUser = true;
-                console.log('New user created via Google SIGNUP:', originalEmail);
-
-                await SystemLog.create({
-                    action: 'google_signup_success',
-                    entity: 'User',
-                    entityId: user._id,
-                    performedBy: user._id,
-                    performedByModel: 'User',
-                    performedByEmail: user.email,
-                    performedByName: `${user.firstName} ${user.lastName}`,
-                    status: 'success',
-                    requestMethod: req.method,
-                    requestPath: req.path,
-                    ip: rawDeviceInfo.ip,
-                    userAgent: req.headers['user-agent'] || 'Unknown',
-                    location: formattedLocation.formatted,
-                    deviceType: formattedDeviceInfo.type,
-                    os: formattedDeviceInfo.os.name,
-                    browser: formattedDeviceInfo.browser.name,
-                    countryCode: formattedLocation.country.code,
-                    city: formattedLocation.city,
-                    region: formattedLocation.region.name,
-                    latitude: formattedLocation.latitude,
-                    longitude: formattedLocation.longitude,
-                    metadata: {
-                        email: originalEmail,
-                        authProvider: 'google',
-                        timezoneOffset: timezoneOffset,
-                        googleId: sub
-                    }
-                });
-
-                // Admin notification for Google signup
-                const brandHeader = `
-                    <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                    </div>
-                `;
-
-                const brandFooter = `
-                    <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
-                            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                        </p>
-                    </div>
-                `;
-
-                const formattedTimestamp = new Date().toLocaleString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    timeZoneName: 'short'
-                });
-
-                const signupAdminEmailHtml = `
-                    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                        ${brandHeader}
-                        <div style="padding: 30px; background: #FFFFFF;">
-                            <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                                        <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                                        <path d="M12 8V12M12 16H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
-                                    </svg>
-                                </div>
-                                <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW GOOGLE SIGNUP!</h2>
-                                <p style="color: #065F46; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} just signed up using Google</p>
-                            </div>
-
-                            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                                <table style="width: 100%; border-collapse: collapse;">
-                                    <tr style="border-bottom: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Email:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${user.email}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">SIGNUP (New Account)</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Device:</strong><td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Signed Up At:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
-                                    </tr>
-                                </table>
-                            </div>
-
-                            <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Google Signup Details</p>
-                                <p style="color: #78350F; margin: 0; font-size: 14px;">User signed up using Google OAuth. No password required for login. OTP sent for verification.</p>
-                            </div>
-
-                            <div style="text-align: center; margin: 30px 0;">
-                                <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
-                            </div>
-
-                            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-                        </div>
-                        ${brandFooter}
-                    </div>
-                `;
-
-                await supportTransporter.sendMail({
-                    from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-                    to: 'thieretw@gmail.com',
-                    subject: `🆕 NEW GOOGLE SIGNUP: ${user.firstName} ${user.lastName} joined BitHash`,
-                    html: signupAdminEmailHtml
-                });
-                console.log(`✅ Admin Google SIGNUP notification sent to thieretw@gmail.com for user: ${user.email}`);
-
-            } catch (createError) {
-                console.error('User creation error:', createError);
-                return res.status(500).json({
-                    status: 'error',
-                    message: 'Failed to create user account'
-                });
-            }
-        } else if (!user.googleId) {
-            try {
-                user.googleId = sub;
-                user.isVerified = true;
-                user.authProvider = 'google';
-                await user.save();
-                console.log('Existing user linked with Google:', originalEmail);
-
-                await SystemLog.create({
-                    action: 'google_account_linked',
-                    entity: 'User',
-                    entityId: user._id,
-                    performedBy: user._id,
-                    performedByModel: 'User',
-                    performedByEmail: user.email,
-                    performedByName: `${user.firstName} ${user.lastName}`,
-                    status: 'success',
-                    requestMethod: req.method,
-                    requestPath: req.path,
-                    ip: rawDeviceInfo.ip,
-                    userAgent: req.headers['user-agent'] || 'Unknown',
-                    metadata: {
-                        email: originalEmail,
-                        googleId: sub
-                    }
-                });
-
-            } catch (updateError) {
-                console.error('User update error:', updateError);
-                return res.status(500).json({
-                    status: 'error',
-                    message: 'Failed to link Google account'
-                });
-            }
-        }
-
-        // ✅ AUTH PROVIDER CHECK - User must log in with the method they signed up with
-        if (user.authProvider !== 'google') {
-            await SystemLog.create({
-                action: 'google_login_wrong_provider',
-                entity: 'User',
-                entityId: user._id,
-                performedBy: user._id,
-                performedByModel: 'User',
-                performedByEmail: user.email,
-                performedByName: `${user.firstName} ${user.lastName}`,
-                status: 'failed',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: rawDeviceInfo.ip,
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                metadata: {
-                    attemptedProvider: 'google',
-                    actualProvider: user.authProvider,
-                    email: originalEmail,
-                    timezoneOffset: timezoneOffset
-                }
-            });
-
-            return res.status(403).json({
-                status: 'fail',
-                message: `This account was created using ${user.authProvider}. Please log in using that method.`,
-                data: { provider: user.authProvider }
-            });
-        }
-
-        if (user.status !== 'active') {
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Your account has been suspended. Please contact support.'
-            });
-        }
-
-        // Generate OTP for Google sign-in
-        try {
-            const otp = Math.floor(100000 + Math.random() * 900000).toString();
-            const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-            await OTP.create({
-                email: originalEmail,
-                otp,
-                type: isNewUser ? 'signup' : 'login',
-                expiresAt,
-                ipAddress: rawDeviceInfo.ip,
-                userAgent: rawDeviceInfo.device
-            });
-
-            await sendProfessionalEmail({
-                email: originalEmail,
-                template: 'otp',
-                data: {
-                    name: user.firstName,
-                    otp: otp,
-                    action: isNewUser ? 'account verification' : 'Google sign-in verification'
-                }
-            });
-
-            await UserLog.create({
-                user: user._id,
-                username: user.email,
-                email: user.email,
-                userFullName: `${user.firstName} ${user.lastName}`,
-                action: isNewUser ? 'signup_attempt' : 'login_attempt',
-                actionCategory: 'authentication',
-                ipAddress: rawDeviceInfo.ip,
-                userAgent: rawDeviceInfo.device,
-                deviceInfo: formattedDeviceInfo,
-                location: formattedLocation,
-                status: 'pending',
-                metadata: {
-                    email: originalEmail,
-                    loginMethod: 'google',
-                    otpSent: true,
-                    isNewUser: isNewUser,
-                    isGoogleLogin: true,
-                    operation: isNewUser ? 'signup' : 'login',
-                    otpType: isNewUser ? 'signup' : 'login',
-                    timezoneOffset: timezoneOffset
-                }
-            });
-
-            await SystemLog.create({
-                action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
-                entity: 'User',
-                entityId: user._id,
-                performedBy: user._id,
-                performedByModel: 'User',
-                performedByEmail: user.email,
-                performedByName: `${user.firstName} ${user.lastName}`,
-                status: 'pending',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: rawDeviceInfo.ip,
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                metadata: {
-                    email: originalEmail,
-                    isNewUser: isNewUser,
-                    timezoneOffset: timezoneOffset,
-                    otpType: isNewUser ? 'signup' : 'login'
-                }
-            });
-
-            // Admin notification for Google login (existing user)
-            if (!isNewUser) {
-                const brandHeader = `
-                    <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                    </div>
-                `;
-
-                const brandFooter = `
-                    <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> |
-                            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                        </p>
-                    </div>
-                `;
-
-                const formattedTimestamp = new Date().toLocaleString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    timeZoneName: 'short'
-                });
-
-                const loginAdminEmailHtml = `
-                    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                        ${brandHeader}
-                        <div style="padding: 30px; background: #FFFFFF;">
-                            <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                        <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                    </svg>
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                        <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                    </svg>
-                                </div>
-                                <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">GOOGLE LOGIN INITIATED!</h2>
-                                <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated Google login (awaiting OTP)</p>
-                            </div>
-
-                            <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                                <table style="width: 100%; border-collapse: collapse;">
-                                    <tr style="border-bottom: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>User:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">LOGIN (Existing User)</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google + OTP</span></strong></td>
-                                    </tr>
-                                    <tr style="border-top: 1px solid #E2E8F0;">
-                                        <td style="padding: 8px 0;"><strong>Time:</strong></td>
-                                        <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
-                                    </tr>
-                                </table>
-                            </div>
-
-                            <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
-                                <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Using Google OAuth for authentication</p>
-                                <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">Login success email will be sent after OTP verification.</p>
-                            </div>
-
-                            <div style="text-align: center; margin: 30px 0;">
-                                <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Activity</a>
-                            </div>
-
-                            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-                        </div>
-                        ${brandFooter}
-                    </div>
-                `;
-
-                await supportTransporter.sendMail({
-                    from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-                    to: 'thieretw@gmail.com',
-                    subject: `🔐 GOOGLE LOGIN INITIATED: ${user.firstName} ${user.lastName} logged into BitHash`,
-                    html: loginAdminEmailHtml
-                });
-                console.log(`✅ Admin Google LOGIN notification sent to thieretw@gmail.com for user: ${user.email}`);
-            }
-
-        } catch (otpError) {
-            console.error('OTP creation error:', otpError);
-        }
-
-        const tempToken = generateJWT(user._id);
-
-        try {
-            user.lastLogin = new Date();
-            user.loginHistory.push(rawDeviceInfo);
-            await user.save();
-        } catch (updateError) {
-            console.error('User update error:', updateError);
-        }
-
-        res.status(200).json({
-            status: 'success',
-            message: isNewUser
-                ? 'Account created! OTP sent to your email. Please verify to complete signup.'
-                : 'OTP sent to your email. Please verify to complete Google sign-in.',
-            tempToken,
-            needsOtp: true,
-            isNewUser: isNewUser,
-            data: {
-                user: {
-                    id: user._id,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    email: user.email,
-                    accountType: user.accountType,
-                    authProvider: user.authProvider
-                }
-            }
-        });
-
-        try {
-            await SystemLog.create({
-                action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
-                entity: 'User',
-                entityId: user._id,
-                performedBy: user._id,
-                performedByModel: 'User',
-                performedByEmail: user.email,
-                performedByName: `${user.firstName} ${user.lastName}`,
-                status: 'pending',
-                requestMethod: req.method,
-                requestPath: req.path,
-                ip: rawDeviceInfo.ip,
-                userAgent: req.headers['user-agent'] || 'Unknown',
-                location: formattedLocation.formatted,
-                deviceType: formattedDeviceInfo.type,
-                os: formattedDeviceInfo.os.name,
-                browser: formattedDeviceInfo.browser.name,
-                metadata: {
-                    isNewUser,
-                    provider: 'google',
-                    email: originalEmail,
-                    operation: isNewUser ? 'signup' : 'login',
-                    timezoneOffset: timezoneOffset
-                }
-            });
-        } catch (logError) {
-            console.error('Activity logging error:', logError);
-        }
-
-    } catch (err) {
-        console.error('Google auth UNEXPECTED error:', err);
-        console.error('Error stack:', err.stack);
-
-        await SystemLog.create({
-            action: 'google_auth_error',
-            entity: 'User',
-            performedBy: null,
-            performedByModel: 'System',
-            status: 'failed',
-            requestMethod: req.method,
-            requestPath: req.path,
-            ip: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            errorMessage: err.message,
-            errorStack: err.stack,
-            metadata: {
-                isSignup: req.body.isSignup || false,
-                timezoneOffset: req.body.timezoneOffset || 0
-            }
-        });
-
-        res.status(500).json({
-            status: 'error',
-            message: 'An unexpected error occurred during Google authentication'
-        });
-    }
-});
 
 // =============================================
 // OTP VERIFICATION ENDPOINT
@@ -32009,1003 +33151,6 @@ app.get('/api/investments/active', protect, async (req, res) => {
 
 
 
-
-// =============================================
-// WEB3 AUTHENTICATION SYSTEM - USING EXISTING ENUMS ONLY
-// =============================================
-
-// =============================================
-// 1. GET NONCE
-// =============================================
-app.get('/api/web3/nonce', async (req, res) => {
-    try {
-        const { walletAddress, type, isSignup, accountType, referralCode } = req.query;
-
-        if (!walletAddress) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Wallet address is required'
-            });
-        }
-
-        const normalizedAddress = walletAddress.toLowerCase();
-
-        const existingWeb3User = await Web3User.findOne({
-            'wallets.address': normalizedAddress
-        });
-
-        const isSignupRequest = isSignup === 'true' || isSignup === true;
-
-        if (isSignupRequest && existingWeb3User) {
-            return res.status(409).json({
-                status: 'fail',
-                message: 'This wallet is already registered. Please login instead.',
-                data: {
-                    action: 'login_suggested',
-                    exists: true
-                }
-            });
-        }
-
-        if (!isSignupRequest && !existingWeb3User) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'Wallet not registered. Please sign up first.',
-                data: {
-                    action: 'signup_suggested',
-                    exists: false
-                }
-            });
-        }
-
-        const nonce = generateNonce();
-        const message = `Sign this message to authenticate with BitHash Capital.\n\nNonce: ${nonce}\n\nWallet: ${normalizedAddress}\n\nTimestamp: ${new Date().toISOString()}`;
-
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-        await Web3Nonce.create({
-            walletAddress: normalizedAddress,
-            nonce: nonce,
-            message: message,
-            type: type === 'signup' ? 'signup' : 'login',
-            used: false,
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            expiresAt: expiresAt,
-            metadata: {
-                accountType: accountType || 'individual',
-                referralCode: referralCode || null,
-                isSignup: isSignupRequest,
-                pageSource: req.headers.referer?.includes('signup') ? 'signup' : 'login'
-            }
-        });
-
-        if (existingWeb3User) {
-            existingWeb3User.web3Auth.nonce = nonce;
-            existingWeb3User.web3Auth.nonceExpires = expiresAt;
-            existingWeb3User.web3Auth.message = message;
-            existingWeb3User.web3Auth.signature = null;
-            await existingWeb3User.save();
-        }
-
-        // Log nonce generation - using valid enum 'nonce_generated'
-        await Web3Log.create({
-            walletAddress: normalizedAddress,
-            walletType: 'metamask',
-            action: 'nonce_generated', // Valid enum
-            status: 'success',
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            metadata: {
-                isSignup: isSignupRequest,
-                accountType: accountType || 'individual'
-            },
-            relatedEntity: null,
-            relatedEntityModel: null
-        });
-
-        console.log(`🔑 Generated nonce for ${normalizedAddress}`);
-
-        res.status(200).json({
-            status: 'success',
-            data: {
-                nonce: nonce,
-                message: message,
-                expiresAt: expiresAt,
-                walletAddress: normalizedAddress,
-                isSignup: isSignupRequest,
-                exists: !!existingWeb3User
-            }
-        });
-
-    } catch (err) {
-        console.error('Error generating nonce:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to generate nonce'
-        });
-    }
-});
-
-// =============================================
-// 2. VERIFY SIGNATURE
-// =============================================
-app.post('/api/web3/verify', async (req, res) => {
-    try {
-        const { walletAddress, signature, nonce, isSignup, accountType, walletType, referralCode } = req.body;
-
-        if (!walletAddress || !signature || !nonce) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Wallet address, signature, and nonce are required'
-            });
-        }
-
-        const normalizedAddress = walletAddress.toLowerCase();
-
-        const nonceRecord = await Web3Nonce.findOne({
-            walletAddress: normalizedAddress,
-            nonce: nonce,
-            used: false,
-            expiresAt: { $gt: new Date() }
-        });
-
-        if (!nonceRecord) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid or expired nonce. Please try again.'
-            });
-        }
-
-        try {
-            const recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
-            
-            if (recoveredAddress.toLowerCase() !== normalizedAddress) {
-                return res.status(400).json({
-                    status: 'fail',
-                    message: 'Signature verification failed. Address mismatch.'
-                });
-            }
-        } catch (signErr) {
-            console.error('Signature verification error:', signErr);
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid signature. Please try again.'
-            });
-        }
-
-        nonceRecord.used = true;
-        nonceRecord.usedAt = new Date();
-        await nonceRecord.save();
-
-        const isSignupRequest = isSignup === true || isSignup === 'true';
-
-        let web3User = await Web3User.findOne({
-            'wallets.address': normalizedAddress
-        });
-
-        if (isSignupRequest && web3User) {
-            return res.status(409).json({
-                status: 'fail',
-                message: 'This wallet is already registered. Please login instead.',
-                data: {
-                    action: 'login_suggested'
-                }
-            });
-        }
-
-        if (!isSignupRequest && !web3User) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'Wallet not registered. Please sign up first.',
-                data: {
-                    action: 'signup_suggested'
-                }
-            });
-        }
-
-        let userEmail = null;
-        let userId = null;
-        let fullUser = null;
-
-        if (web3User) {
-            userEmail = web3User.email;
-            userId = web3User.user;
-            fullUser = await User.findById(userId).select('email firstName lastName');
-        }
-
-        const tempToken = jwt.sign(
-            { 
-                walletAddress: normalizedAddress, 
-                isSignup: isSignupRequest,
-                email: userEmail || null,
-                userId: userId || null
-            },
-            JWT_SECRET,
-            { expiresIn: '10m' }
-        );
-
-        // Log signature verification - using valid enum 'signature_verified'
-        await Web3Log.create({
-            walletAddress: normalizedAddress,
-            walletType: walletType || 'metamask',
-            action: 'signature_verified', // Valid enum
-            status: 'success',
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            metadata: {
-                isSignup: isSignupRequest,
-                accountType: accountType || 'individual',
-                nonceUsed: nonce
-            },
-            user: userId || null,
-            relatedEntity: nonceRecord._id,
-            relatedEntityModel: 'Web3Nonce' // Valid enum
-        });
-
-        res.status(200).json({
-            status: 'success',
-            message: isSignupRequest ? 'Signature verified. Please complete signup.' : 'Signature verified.',
-            data: {
-                tempToken: tempToken,
-                isNewUser: !web3User,
-                isSignup: isSignupRequest,
-                email: userEmail,
-                userId: userId,
-                user: fullUser ? {
-                    firstName: fullUser.firstName,
-                    lastName: fullUser.lastName,
-                    email: fullUser.email
-                } : null,
-                needsOtp: true
-            }
-        });
-
-    } catch (err) {
-        console.error('Signature verification error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to verify signature'
-        });
-    }
-});
-
-// =============================================
-// 3. WEB3 SIGNUP
-// =============================================
-app.post('/api/web3/signup', async (req, res) => {
-    try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Authorization required'
-            });
-        }
-
-        const tempToken = authHeader.split(' ')[1];
-        let decoded;
-        try {
-            decoded = jwt.verify(tempToken, JWT_SECRET);
-        } catch (err) {
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Invalid or expired token'
-            });
-        }
-
-        const {
-            firstName,
-            lastName,
-            email,
-            city,
-            accountType,
-            walletAddress,
-            walletType,
-            organizationName,
-            role,
-            country,
-            workEmail,
-            referralCode
-        } = req.body;
-
-        if (!walletAddress) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Wallet address is required'
-            });
-        }
-
-        if (!email) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Email is required'
-            });
-        }
-
-        const normalizedAddress = walletAddress.toLowerCase();
-
-        const existingWeb3User = await Web3User.findOne({
-            'wallets.address': normalizedAddress
-        });
-
-        if (existingWeb3User) {
-            return res.status(409).json({
-                status: 'fail',
-                message: 'This wallet is already registered. Please login instead.'
-            });
-        }
-
-        const existingUser = await User.findOne({ email: email });
-        if (existingUser) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Email already in use. Please use a different email.'
-            });
-        }
-
-        // Create main User account
-        const newUser = await User.create({
-            firstName: firstName,
-            lastName: lastName,
-            email: email,
-            city: city || '',
-            country: country || '',
-            isVerified: false,
-            status: 'active',
-            accountType: accountType || 'individual',
-            authProvider: 'web3',
-            organizationName: organizationName || null,
-            role: role || null,
-            workEmail: workEmail || null,
-            referralCode: generateReferralCode(),
-            referredBy: null,
-            metadata: {
-                signupMethod: 'web3',
-                signupDate: new Date(),
-                ipAddress: getRealClientIP(req),
-                userAgent: req.headers['user-agent']
-            },
-            balances: {
-                main: new Map(),
-                active: new Map(),
-                matured: new Map()
-            }
-        });
-
-        // Create Web3User record
-        const web3User = await Web3User.create({
-            user: newUser._id,
-            wallets: [{
-                address: normalizedAddress,
-                type: walletType || 'metamask',
-                isPrimary: true,
-                isVerified: true,
-                connectedAt: new Date(),
-                lastUsed: new Date(),
-                metadata: {
-                    chainId: 1,
-                    networkName: 'Ethereum Mainnet',
-                    userAgent: req.headers['user-agent'],
-                    ipAddress: getRealClientIP(req)
-                }
-            }],
-            email: email,
-            firstName: firstName,
-            lastName: lastName,
-            city: city || '',
-            country: country || '',
-            accountType: accountType || 'individual',
-            organizationName: organizationName || null,
-            role: role || null,
-            workEmail: workEmail || null,
-            isEmailVerified: false,
-            status: 'active',
-            signupSource: `web3_${walletType || 'metamask'}`,
-            referralCode: newUser.referralCode,
-            signupCompletedAt: new Date(),
-            metadata: {
-                signupIP: getRealClientIP(req),
-                signupUserAgent: req.headers['user-agent'],
-                signupLocation: req.clientLocation?.location || 'Unknown'
-            }
-        });
-
-        if (referralCode) {
-            const referrer = await User.findOne({ referralCode: referralCode });
-            if (referrer) {
-                newUser.referredBy = referrer._id;
-                await newUser.save();
-                
-                web3User.referredBy = referrer._id;
-                await web3User.save();
-
-                await User.findByIdAndUpdate(referrer._id, {
-                    $inc: { 'referralStats.totalReferrals': 1 }
-                });
-            }
-        }
-
-        await User.findByIdAndUpdate(newUser._id, {
-            $set: { web3UserId: web3User._id }
-        });
-
-        const otpToken = jwt.sign(
-            { 
-                userId: newUser._id, 
-                email: email,
-                walletAddress: normalizedAddress 
-            },
-            JWT_SECRET,
-            { expiresIn: '10m' }
-        );
-
-        // Generate and send OTP
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-        await OTP.deleteMany({ 
-            email: email, 
-            type: 'signup',
-            used: false 
-        });
-
-        await OTP.create({
-            email: email,
-            otp: otp,
-            type: 'signup',
-            expiresAt: expiresAt,
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown'
-        });
-
-        await sendProfessionalEmail({
-            email: email,
-            template: 'otp',
-            data: {
-                name: newUser.firstName || 'Web3 User',
-                otp: otp,
-                action: 'Web3 wallet verification'
-            }
-        });
-
-        // Log signup success - using valid enum 'signup_success'
-        await Web3Log.create({
-            user: newUser._id,
-            walletAddress: normalizedAddress,
-            walletType: walletType || 'metamask',
-            action: 'signup_success', // Valid enum
-            status: 'success',
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            metadata: {
-                accountType: accountType || 'individual',
-                referralCode: referralCode || null,
-                organizationName: organizationName || null
-            },
-            relatedEntity: web3User._id,
-            relatedEntityModel: 'Web3User' // Valid enum
-        });
-
-        await sendAdminWeb3SignupNotification(newUser, web3User, req);
-
-        console.log(`✅ Web3 signup completed for ${email}`);
-
-        res.status(201).json({
-            status: 'success',
-            message: 'Account created successfully. Please verify your email with the OTP sent.',
-            tempToken: otpToken,
-            data: {
-                user: {
-                    id: newUser._id,
-                    firstName: newUser.firstName,
-                    lastName: newUser.lastName,
-                    email: newUser.email,
-                    accountType: newUser.accountType,
-                    walletAddress: normalizedAddress
-                },
-                needsOtp: true
-            }
-        });
-
-    } catch (err) {
-        console.error('Web3 signup error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to create account'
-        });
-    }
-});
-
-// =============================================
-// 4. WEB3 SEND OTP
-// =============================================
-app.post('/api/web3/send-otp', async (req, res) => {
-    try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Authorization required'
-            });
-        }
-
-        const tempToken = authHeader.split(' ')[1];
-        let decoded;
-        try {
-            decoded = jwt.verify(tempToken, JWT_SECRET);
-        } catch (err) {
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Invalid or expired token'
-            });
-        }
-
-        const { email } = req.body;
-        if (!email) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Email is required'
-            });
-        }
-
-        let user;
-        let web3User;
-
-        if (decoded.userId) {
-            user = await User.findById(decoded.userId);
-            if (user) {
-                web3User = await Web3User.findOne({ user: user._id });
-            }
-        } else if (decoded.walletAddress) {
-            web3User = await Web3User.findOne({
-                'wallets.address': decoded.walletAddress.toLowerCase()
-            });
-            if (web3User) {
-                user = await User.findById(web3User.user);
-            }
-        }
-
-        if (!user) {
-            user = await User.findOne({ email: email });
-            if (user) {
-                web3User = await Web3User.findOne({ user: user._id });
-            }
-        }
-
-        if (!user) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'User not found'
-            });
-        }
-
-        const recentOtp = await OTP.findOne({
-            email: email,
-            type: 'signup',
-            used: false,
-            createdAt: { $gte: new Date(Date.now() - 60 * 1000) }
-        });
-
-        if (recentOtp) {
-            return res.status(429).json({
-                status: 'fail',
-                message: 'Please wait 60 seconds before requesting a new OTP'
-            });
-        }
-
-        await OTP.deleteMany({ 
-            email: email, 
-            type: 'signup',
-            used: false 
-        });
-
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-        await OTP.create({
-            email: email,
-            otp: otp,
-            type: 'signup',
-            expiresAt: expiresAt,
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown'
-        });
-
-        await sendProfessionalEmail({
-            email: email,
-            template: 'otp',
-            data: {
-                name: user.firstName || 'Web3 User',
-                otp: otp,
-                action: 'Web3 wallet verification'
-            }
-        });
-
-        console.log(`📧 Web3 OTP sent to ${email}`);
-
-        res.status(200).json({
-            status: 'success',
-            message: 'OTP sent successfully'
-        });
-
-    } catch (err) {
-        console.error('Send Web3 OTP error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to send OTP'
-        });
-    }
-});
-
-// =============================================
-// 5. WEB3 VERIFY OTP
-// =============================================
-app.post('/api/web3/verify-otp', async (req, res) => {
-    try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Authorization required'
-            });
-        }
-
-        const tempToken = authHeader.split(' ')[1];
-        let decoded;
-        try {
-            decoded = jwt.verify(tempToken, JWT_SECRET);
-        } catch (err) {
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Invalid or expired token'
-            });
-        }
-
-        const { email, otp } = req.body;
-        if (!email || !otp) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Email and OTP are required'
-            });
-        }
-
-        let user;
-        let web3User;
-
-        if (decoded.userId) {
-            user = await User.findById(decoded.userId);
-            if (user) {
-                web3User = await Web3User.findOne({ user: user._id });
-            }
-        } else if (decoded.walletAddress) {
-            web3User = await Web3User.findOne({
-                'wallets.address': decoded.walletAddress.toLowerCase()
-            });
-            if (web3User) {
-                user = await User.findById(web3User.user);
-            }
-        }
-
-        if (!user) {
-            user = await User.findOne({ email: email });
-            if (user) {
-                web3User = await Web3User.findOne({ user: user._id });
-            }
-        }
-
-        if (!user) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'User not found'
-            });
-        }
-
-        const otpRecord = await OTP.findOne({
-            email: email,
-            otp: otp,
-            type: 'signup',
-            used: false,
-            expiresAt: { $gt: new Date() }
-        });
-
-        if (!otpRecord) {
-            const expiredOtp = await OTP.findOne({
-                email: email,
-                otp: otp,
-                type: 'signup',
-                used: false,
-                expiresAt: { $lte: new Date() }
-            });
-
-            if (expiredOtp) {
-                return res.status(400).json({
-                    status: 'fail',
-                    message: 'OTP has expired. Please request a new one.'
-                });
-            }
-
-            await OTP.updateMany(
-                { email: email, otp: otp, type: 'signup', used: false },
-                { $inc: { attempts: 1 } }
-            );
-
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid OTP. Please try again.'
-            });
-        }
-
-        if (otpRecord.attempts >= otpRecord.maxAttempts) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Too many failed attempts. Please request a new OTP.'
-            });
-        }
-
-        otpRecord.used = true;
-        await otpRecord.save();
-
-        user.isVerified = true;
-        await user.save();
-
-        if (web3User) {
-            web3User.isEmailVerified = true;
-            await web3User.save();
-        }
-
-        const finalToken = generateJWT(user._id);
-
-        // Log OTP verification - using valid enum 'login_success' (closest match)
-        await Web3Log.create({
-            user: user._id,
-            walletAddress: web3User?.wallets[0]?.address || 'unknown',
-            walletType: web3User?.wallets[0]?.type || 'metamask',
-            action: 'login_success', // Valid enum
-            status: 'success',
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            metadata: {
-                email: email,
-                verificationType: 'web3'
-            },
-            relatedEntity: otpRecord._id,
-            relatedEntityModel: null // Not using relatedEntityModel for OTP
-        });
-
-        await sendAutomatedEmail(user, 'welcome', {
-            name: user.firstName,
-            email: user.email
-        });
-
-        console.log(`✅ Web3 OTP verified for ${email}`);
-
-        res.status(200).json({
-            status: 'success',
-            message: 'Email verified successfully! Welcome to BitHash Capital.',
-            token: finalToken,
-            data: {
-                user: {
-                    id: user._id,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    email: user.email,
-                    isVerified: user.isVerified,
-                    accountType: user.accountType
-                }
-            }
-        });
-
-    } catch (err) {
-        console.error('Web3 OTP verification error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to verify OTP'
-        });
-    }
-});
-
-// =============================================
-// 6. WEB3 CHECK USER
-// =============================================
-app.get('/api/web3/check-user', async (req, res) => {
-    try {
-        const { walletAddress } = req.query;
-
-        if (!walletAddress) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Wallet address is required'
-            });
-        }
-
-        const normalizedAddress = walletAddress.toLowerCase();
-
-        const web3User = await Web3User.findOne({
-            'wallets.address': normalizedAddress
-        }).populate('user', 'firstName lastName email status isVerified');
-
-        if (web3User) {
-            return res.status(200).json({
-                status: 'success',
-                data: {
-                    exists: true,
-                    user: web3User.user ? {
-                        id: web3User.user._id,
-                        firstName: web3User.user.firstName,
-                        lastName: web3User.user.lastName,
-                        email: web3User.user.email,
-                        status: web3User.user.status,
-                        isVerified: web3User.user.isVerified
-                    } : null,
-                    web3User: {
-                        id: web3User._id,
-                        isEmailVerified: web3User.isEmailVerified,
-                        accountType: web3User.accountType,
-                        wallets: web3User.wallets.map(w => ({
-                            address: w.address,
-                            type: w.type,
-                            isPrimary: w.isPrimary
-                        }))
-                    }
-                }
-            });
-        }
-
-        res.status(200).json({
-            status: 'success',
-            data: {
-                exists: false,
-                user: null,
-                web3User: null
-            }
-        });
-
-    } catch (err) {
-        console.error('Check user error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to check user'
-        });
-    }
-});
-
-// =============================================
-// HELPER: Admin Web3 Signup Notification
-// =============================================
-async function sendAdminWeb3SignupNotification(user, web3User, req) {
-    try {
-        const formattedTimestamp = new Date().toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            timeZoneName: 'short'
-        });
-
-        const walletAddress = web3User.wallets[0]?.address || 'Unknown';
-        const walletType = web3User.wallets[0]?.type || 'metamask';
-
-        const brandHeader = `
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-        `;
-
-        const brandFooter = `
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-                    <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                </p>
-            </div>
-        `;
-
-        const adminEmailHtml = `
-            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                ${brandHeader}
-                <div style="padding: 30px; background: #FFFFFF;">
-                    <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                                <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                            </svg>
-                        </div>
-                        <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW WEB3 USER REGISTERED!</h2>
-                        <p style="color: #065F46; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} joined using Web3 Wallet</p>
-                    </div>
-
-                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="border-bottom: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Email:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.email}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: ${user.accountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${(user.accountType || 'individual').toUpperCase()}</span></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: #6C3DFF; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Web3 Wallet</span></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Wallet Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px; word-break: break-all;">${walletAddress}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${walletType.toUpperCase()}</span></td>
-                            </tr>
-                            ${user.organizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Organization:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.organizationName}</td>
-                            </tr>` : ''}
-                            ${user.role ? `<tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Role:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.role}</td>
-                            </tr>` : ''}
-                            ${user.country ? `<tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Country:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.country}</td>
-                            </tr>` : ''}
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>City:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.city || 'Not provided'}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${getRealClientIP(req)}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Registered At:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
-                            </tr>
-                        </table>
-                    </div>
-
-                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Web3 Signup Details</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">User signed up using Web3 wallet authentication. OTP has been sent for email verification.</p>
-                    </div>
-
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
-                    </div>
-
-                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-                </div>
-                ${brandFooter}
-            </div>
-        `;
-
-        await supportTransporter.sendMail({
-            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-            to: 'thieretw@gmail.com',
-            subject: `🆕 NEW WEB3 USER: ${user.firstName} ${user.lastName} joined BitHash`,
-            html: adminEmailHtml
-        });
-
-        console.log(`✅ Admin Web3 signup notification sent to thieretw@gmail.com for user: ${user.email}`);
-    } catch (err) {
-        console.error('Failed to send admin Web3 signup notification:', err);
-    }
-}
 
 
 
