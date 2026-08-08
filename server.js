@@ -2293,6 +2293,11 @@ Web3DepositAddressSchema.index({ isActive: 1 });
 
 const Web3DepositAddress = mongoose.model('Web3DepositAddress', Web3DepositAddressSchema);
 
+
+
+
+
+
 // =============================================
 // 6. WEB3 NONCE SCHEMA (for signature verification)
 // =============================================
@@ -2303,39 +2308,54 @@ const Web3NonceSchema = new mongoose.Schema({
     lowercase: true,
     index: true
   },
+
+  chainId: {
+    type: Number,
+    required: true,
+    index: true
+  },
+
   nonce: {
     type: String,
     required: true,
     unique: true,
     index: true
   },
+
   message: {
     type: String,
     required: true
   },
+
   type: {
     type: String,
     enum: ['login', 'signup', 'wallet_link', 'transaction'],
     default: 'login'
   },
+
   used: {
     type: Boolean,
     default: false
   },
+
   usedAt: {
     type: Date
   },
+
   ipAddress: {
     type: String
   },
+
   userAgent: {
     type: String
   },
+
   expiresAt: {
     type: Date,
     required: true,
     index: { expireAfterSeconds: 0 }
   },
+
   metadata: {
     accountType: String,
     referralCode: String,
@@ -2349,10 +2369,28 @@ const Web3NonceSchema = new mongoose.Schema({
   timestamps: true
 });
 
-Web3NonceSchema.index({ walletAddress: 1, used: 1 });
-Web3NonceSchema.index({ nonce: 1 });
+Web3NonceSchema.index({
+  walletAddress: 1,
+  chainId: 1,
+  used: 1
+});
+
+Web3NonceSchema.index({
+  walletAddress: 1,
+  chainId: 1,
+  nonce: 1
+});
+
+Web3NonceSchema.index({
+  nonce: 1
+});
 
 const Web3Nonce = mongoose.model('Web3Nonce', Web3NonceSchema);
+
+
+
+
+
 
 // =============================================
 // 7. WEB3 LOG SCHEMA
