@@ -23745,522 +23745,6 @@ app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance
 
 
 
-// =============================================
-// SPOT WITHDRAWAL ENDPOINT - Complete with Visual Email Body Only (NO Platform Fee)
-// =============================================
-app.post('/api/withdrawals/spot', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const {
-      amount,           // USD amount requested
-      asset,            // crypto asset symbol (btc, eth, trx, etc.)
-      walletAddress,    // destination wallet address
-      exchangeRate,     // current exchange rate (optional)
-      network           // blockchain network (optional)
-    } = req.body;
-
-    const MIN_WITHDRAWAL_USD = 350;
-    const GAS_FEE_BTC_LOW = 0.0056;
-    const GAS_FEE_BTC_HIGH = 0.0072;
-    
-    const requestId = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    
-    console.log('=' .repeat(80));
-    console.log('💰 SPOT WITHDRAWAL REQUEST');
-    console.log('=' .repeat(80));
-    console.log(`Request ID: ${requestId}`);
-    console.log(`User ID: ${userId}`);
-    console.log(`Amount USD: $${amount}`);
-    console.log(`Asset: ${asset.toUpperCase()}`);
-    console.log(`Wallet: ${walletAddress.substring(0, 20)}...`);
-    console.log('=' .repeat(80));
-
-    // =============================================
-    // 1. VALIDATION
-    // =============================================
-    
-    if (!amount || amount < MIN_WITHDRAWAL_USD) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Minimum withdrawal amount is $${MIN_WITHDRAWAL_USD} USD`
-      });
-    }
-
-    if (!asset) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Asset type is required'
-      });
-    }
-
-    if (!walletAddress || walletAddress.trim().length < 10) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Valid ${asset.toUpperCase()} wallet address is required`
-      });
-    }
-
-    // =============================================
-    // 2. DETECT NETWORK
-    // =============================================
-    
-    const assetNetworkMap = {
-      'btc': { network: 'Bitcoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
-      'eth': { network: 'Ethereum', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
-      'usdt': { network: network || 'TRC20', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
-      'usdc': { network: network || 'ERC20', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
-      'bnb': { network: 'BSC', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
-      'sol': { network: 'Solana', decimals: 9, logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
-      'xrp': { network: 'XRP Ledger', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
-      'doge': { network: 'Dogecoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
-      'trx': { network: 'TRON', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
-      'ltc': { network: 'Litecoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' },
-      'ada': { network: 'Cardano', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
-      'matic': { network: 'Polygon', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' }
-    };
-    
-    const assetLower = asset.toLowerCase();
-    const assetInfo = assetNetworkMap[assetLower] || { 
-      network: 'Blockchain', 
-      decimals: 8,
-      logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
-    };
-    
-    const detectedNetwork = assetInfo.network;
-    const assetLogo = assetInfo.logo;
-    const decimals = assetInfo.decimals;
-
-    // =============================================
-    // 3. GET REAL-TIME PRICES FROM AGGREGATOR
-    // =============================================
-    
-    let targetPrice = exchangeRate;
-    if (!targetPrice || targetPrice <= 0) {
-      targetPrice = await getCryptoPrice(asset.toUpperCase());
-      
-      if (!targetPrice || targetPrice <= 0) {
-        return res.status(400).json({
-          status: 'fail',
-          message: `Unable to fetch current ${asset.toUpperCase()} price`
-        });
-      }
-    }
-    
-    let btcPrice = 0;
-    btcPrice = await getCryptoPrice('BTC');
-    
-    if (!btcPrice || btcPrice <= 0) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Unable to fetch BTC price for gas fee calculation'
-      });
-    }
-
-    // =============================================
-    // 4. CALCULATE GAS FEE (NO PLATFORM FEE)
-    // =============================================
-    
-    const gasFeeInBTC = amount < 10000 ? GAS_FEE_BTC_LOW : GAS_FEE_BTC_HIGH;
-    const gasFeeInUSD = gasFeeInBTC * btcPrice;
-    let gasFeeInTargetAsset = gasFeeInUSD / targetPrice;
-    gasFeeInTargetAsset = Number(gasFeeInTargetAsset.toFixed(decimals));
-    
-    const withdrawalCryptoAmount = Number((amount / targetPrice).toFixed(decimals));
-    const totalCryptoNeeded = withdrawalCryptoAmount + gasFeeInTargetAsset;
-
-    // =============================================
-    // 5. GET USER AND CHECK BALANCES
-    // =============================================
-    
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    if (!user.balances) {
-      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
-    }
-    if (!user.balances.main) user.balances.main = new Map();
-    if (!user.balances.matured) user.balances.matured = new Map();
-
-    const mainBalance = user.balances.main.get(assetLower) || 0;
-    const maturedBalance = user.balances.matured.get(assetLower) || 0;
-    const totalBalance = mainBalance + maturedBalance;
-
-    // Check gas fee in MAIN wallet
-    if (mainBalance < gasFeeInTargetAsset) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient ${asset.toUpperCase()} in MAIN wallet for gas fee. Required: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (≈ $${gasFeeInUSD.toFixed(2)} USD)`
-      });
-    }
-    
-    if (totalBalance < totalCryptoNeeded) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient total ${asset.toUpperCase()} balance. Required: ${totalCryptoNeeded.toFixed(decimals)} ${asset.toUpperCase()}`
-      });
-    }
-
-    // =============================================
-    // 6. DETERMINE WITHDRAWAL SOURCE
-    // =============================================
-    
-    let remainingMainAfterGas = mainBalance - gasFeeInTargetAsset;
-    let withdrawalFromMain = 0;
-    let withdrawalFromMatured = 0;
-    let balanceSource = '';
-    
-    if (remainingMainAfterGas >= withdrawalCryptoAmount) {
-      withdrawalFromMain = withdrawalCryptoAmount;
-      withdrawalFromMatured = 0;
-      balanceSource = 'main';
-    } else {
-      withdrawalFromMain = remainingMainAfterGas;
-      withdrawalFromMatured = withdrawalCryptoAmount - remainingMainAfterGas;
-      balanceSource = 'both';
-    }
-    
-    const totalMainDeduction = gasFeeInTargetAsset + withdrawalFromMain;
-    const totalMaturedDeduction = withdrawalFromMatured;
-
-    // =============================================
-    // 7. PERFORM DEDUCTIONS (Gas fee + withdrawal amount together)
-    // =============================================
-    
-    if (totalMainDeduction > 0) {
-      const newMainBalance = mainBalance - totalMainDeduction;
-      if (newMainBalance <= 0.00000001) {
-        user.balances.main.delete(assetLower);
-      } else {
-        user.balances.main.set(assetLower, newMainBalance);
-      }
-    }
-    
-    if (totalMaturedDeduction > 0) {
-      const newMaturedBalance = maturedBalance - totalMaturedDeduction;
-      if (newMaturedBalance <= 0.00000001) {
-        user.balances.matured.delete(assetLower);
-      } else {
-        user.balances.matured.set(assetLower, newMaturedBalance);
-      }
-    }
-    
-    // Update USD equivalents
-    const currentMainUSD = user.balances.main.get('usd') || 0;
-    const currentMaturedUSD = user.balances.matured.get('usd') || 0;
-    
-    if (totalMainDeduction > 0) {
-      const newMainUSD = currentMainUSD - (gasFeeInUSD + (withdrawalFromMain / withdrawalCryptoAmount) * amount);
-      if (newMainUSD <= 0.01) {
-        user.balances.main.delete('usd');
-      } else {
-        user.balances.main.set('usd', newMainUSD);
-      }
-    }
-    
-    if (totalMaturedDeduction > 0) {
-      const newMaturedUSD = currentMaturedUSD - (withdrawalFromMatured / withdrawalCryptoAmount) * amount;
-      if (newMaturedUSD <= 0.01) {
-        user.balances.matured.delete('usd');
-      } else {
-        user.balances.matured.set('usd', newMaturedUSD);
-      }
-    }
-    
-    await user.save();
-
-    // =============================================
-    // 8. CREATE TRANSACTION (NO platform fee - fee = 0)
-    // =============================================
-    
-    const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    
-    const transaction = await Transaction.create({
-      user: userId,
-      type: 'withdrawal',
-      amount: amount,
-      asset: asset.toLowerCase(),
-      assetAmount: withdrawalCryptoAmount,
-      currency: 'USD',
-      status: 'pending',
-      method: asset.toUpperCase(),
-      reference: reference,
-      details: {
-        requestId: requestId,
-        withdrawalAddress: walletAddress,
-        exchangeRate: targetPrice,
-        network: detectedNetwork,
-        gasFee: {
-          amount: gasFeeInTargetAsset,
-          asset: asset.toUpperCase(),
-          usdValue: gasFeeInUSD,
-          btcEquivalent: gasFeeInBTC
-        },
-        balanceSource: balanceSource,
-        mainAmountUsed: withdrawalFromMain,
-        maturedAmountUsed: withdrawalFromMatured,
-        gasFeeFromMain: gasFeeInTargetAsset,
-        fundsAlreadyDeducted: true,
-        totalDeducted: totalCryptoNeeded
-      },
-      btcAddress: walletAddress,
-      fee: 0,
-      netAmount: amount,
-      exchangeRateAtTime: targetPrice,
-      network: detectedNetwork
-    });
-
-    // =============================================
-    // 9. SEND VISUAL EMAIL (NO platform fee displayed)
-    // =============================================
-    
-    const cryptoAsset = asset.toUpperCase();
-    const cryptoLogo = getCryptoLogo(cryptoAsset);
-    const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedCryptoAmount = withdrawalCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedGasFee = gasFeeInTargetAsset.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedGasFeeUSD = gasFeeInUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedTotalDeducted = totalCryptoNeeded.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedTotalDeductedUSD = (amount + gasFeeInUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedRate = targetPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    
-    const emailHtml = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-        </div>
-        
-        <div style="padding: 30px; background: #FFFFFF;">
-          <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-              <img src="${cryptoLogo}" width="32" height="32" style="border-radius: 50%;">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
-                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-            </div>
-            <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WITHDRAWAL REQUEST RECEIVED!</h2>
-            <p style="color: #92400E; font-size: 13px; margin: 0;">Your withdrawal request is pending review</p>
-          </div>
-          
-          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-          <p style="color: #333333; line-height: 1.6;">We have received your withdrawal request. Our team will review and process it shortly.</p>
-          
-          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-              <img src="${cryptoLogo}" width="32" height="32" style="border-radius: 50%;">
-              <div>
-                <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${cryptoAsset}</div>
-                <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD requested</div>
-              </div>
-            </div>
-            
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Exchange Rate (Locked):</strong></td>
-                <td style="padding: 8px 0; text-align: right;">1 ${cryptoAsset} = $${formattedRate}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong style="color: #EF4444;">Network Gas Fee:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${formattedGasFee} ${cryptoAsset} (≈ $${formattedGasFeeUSD} USD)</strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Total Deducted:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedTotalDeducted} ${cryptoAsset} (≈ $${formattedTotalDeductedUSD} USD)</strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Destination Address:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${walletAddress}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Network:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${detectedNetwork}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${reference}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
-              </tr>
-            </table>
-          </div>
-          
-          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ What Happens Next?</p>
-            <p style="color: #78350F; margin: 0; font-size: 14px;">Our team will review your request within 24 hours. You will receive an email notification once approved or rejected.</p>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Request</a>
-          </div>
-          
-          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-        </div>
-        
-        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-          </p>
-        </div>
-      </div>
-    `;
-
-    const mailTransporter = infoTransporter;
-    await mailTransporter.sendMail({
-      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-      to: user.email,
-      subject: `Withdrawal Request Submitted - ₿itHash Capital`,
-      html: emailHtml
-    });
-    
-    console.log(`📧 Visual withdrawal email sent to ${user.email}`);
-    console.log(`   Asset: ${asset.toUpperCase()}`);
-    console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)}`);
-    console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} (deducted from ${balanceSource} wallet)`);
-
-    // =============================================
-    // 10. CREATE SYSTEM LOG
-    // =============================================
-    
-    await SystemLog.create({
-      action: 'withdrawal_created',
-      entity: 'withdrawal_request',
-      entityId: transaction._id,
-      performedBy: userId,
-      performedByModel: 'User',
-      performedByEmail: user.email,
-      performedByName: `${user.firstName} ${user.lastName}`,
-      ip: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      deviceType: getDeviceType(req),
-      status: 'success',
-      riskLevel: 'medium',
-      location: `${req.clientLocation?.city || 'Unknown'}, ${req.clientLocation?.country || 'Unknown'}`,
-      metadata: {
-        requestId: requestId,
-        reference: reference,
-        amountUSD: amount,
-        asset: asset.toUpperCase(),
-        cryptoAmount: withdrawalCryptoAmount,
-        walletAddress: walletAddress,
-        network: detectedNetwork,
-        gasFee: {
-          amount: gasFeeInTargetAsset,
-          asset: asset.toUpperCase(),
-          usdValue: gasFeeInUSD,
-          btcEquivalent: gasFeeInBTC
-        },
-        balanceSource: balanceSource,
-        mainAmountUsed: withdrawalFromMain,
-        maturedAmountUsed: withdrawalFromMatured,
-        exchangeRate: targetPrice,
-        btcPrice: btcPrice
-      },
-      financial: {
-        amount: amount,
-        amountUSD: amount,
-        cryptoAmount: withdrawalCryptoAmount,
-        cryptoAsset: asset.toUpperCase(),
-        fee: 0,
-        exchangeRate: targetPrice,
-        balanceAfter: (user.balances.main.get('usd') || 0) + (user.balances.matured.get('usd') || 0),
-        walletType: 'main',
-        transactionId: transaction._id,
-        reference: reference
-      }
-    });
-
-    // =============================================
-    // 11. EMIT REAL-TIME UPDATE
-    // =============================================
-    
-    const io = req.app.get('io');
-    if (io) {
-      let newMainUSD = 0;
-      let newMaturedUSD = 0;
-      
-      for (const [crypto, balance] of user.balances.main) {
-        if (crypto !== 'usd' && balance > 0) {
-          const price = await getCryptoPrice(crypto.toUpperCase());
-          if (price) newMainUSD += balance * price;
-        }
-      }
-      
-      for (const [crypto, balance] of user.balances.matured) {
-        if (crypto !== 'usd' && balance > 0) {
-          const price = await getCryptoPrice(crypto.toUpperCase());
-          if (price) newMaturedUSD += balance * price;
-        }
-      }
-      
-      io.to(`user_${userId}`).emit('balance_update', {
-        main: newMainUSD,
-        matured: newMaturedUSD,
-        active: user.balances.active?.get('usd') || 0,
-        timestamp: Date.now()
-      });
-    }
-
-    // =============================================
-    // 12. RETURN SUCCESS RESPONSE
-    // =============================================
-    
-    console.log(`\n✅ WITHDRAWAL SUBMITTED SUCCESSFULLY`);
-    console.log(`   Reference: ${reference}`);
-    console.log(`   Network: ${detectedNetwork}`);
-    console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)} ${asset.toUpperCase()}`);
-    console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (deducted from ${balanceSource} wallet)`);
-    console.log(`   Email sent to: ${user.email}`);
-    console.log('=' .repeat(80));
-    
-    res.status(201).json({
-      status: 'success',
-      message: `Withdrawal request submitted successfully on ${detectedNetwork} network.`,
-      data: {
-        transaction: {
-          id: transaction._id,
-          reference: reference,
-          requestId: requestId,
-          amountUSD: amount,
-          cryptoAmount: withdrawalCryptoAmount,
-          asset: asset.toUpperCase(),
-          network: detectedNetwork,
-          status: 'pending'
-        },
-        gasFee: {
-          amount: gasFeeInTargetAsset,
-          asset: asset.toUpperCase(),
-          usdValue: gasFeeInUSD,
-          btcEquivalent: gasFeeInBTC
-        },
-        balanceInfo: {
-          source: balanceSource,
-          mainAmountUsed: withdrawalFromMain,
-          maturedAmountUsed: withdrawalFromMatured,
-          gasFeeFromMain: gasFeeInTargetAsset
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('❌ Withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to process withdrawal'
-    });
-  }
-});
 
 // POST /api/admin/withdrawals/:id/approve - Approve withdrawal (NO platform fee)
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
@@ -35114,393 +34598,871 @@ app.get('/api/prices/:asset', protect, async (req, res) => {
     }
 });
 
+
+
+
 // =============================================
-// 8. POST /api/withdrawals/spot - Spot withdrawal with gas fee
+// SPOT WITHDRAWAL ENDPOINT - WITH RESTRICTION CHECKS
 // =============================================
 app.post('/api/withdrawals/spot', protect, async (req, res) => {
-    try {
-        const {
-            amount,
-            asset,
-            walletAddress,
-            exchangeRate,
-            network
-        } = req.body;
+  try {
+    const userId = req.user._id;
+    const {
+      amount,           // USD amount requested
+      asset,            // crypto asset symbol (btc, eth, trx, etc.)
+      walletAddress,    // destination wallet address
+      exchangeRate,     // current exchange rate (optional)
+      network           // blockchain network (optional)
+    } = req.body;
 
-        const userId = req.user._id;
-        const user = await User.findById(userId);
-        
-        if (!user) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'User not found'
-            });
-        }
+    const MIN_WITHDRAWAL_USD = 350;
+    const GAS_FEE_BTC_LOW = 0.0056;
+    const GAS_FEE_BTC_HIGH = 0.0072;
+    
+    const requestId = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    
+    console.log('=' .repeat(80));
+    console.log('💰 SPOT WITHDRAWAL REQUEST');
+    console.log('=' .repeat(80));
+    console.log(`Request ID: ${requestId}`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Amount USD: $${amount}`);
+    console.log(`Asset: ${asset.toUpperCase()}`);
+    console.log(`Wallet: ${walletAddress.substring(0, 20)}...`);
+    console.log('=' .repeat(80));
 
-        const assetUpper = asset.toUpperCase();
-        const assetLower = asset.toLowerCase();
-
-        if (!amount || amount <= 0) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Valid amount is required'
-            });
-        }
-
-        if (!walletAddress) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Wallet address is required'
-            });
-        }
-
-        if (!user.web3Wallet || !user.web3Wallet.address) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'No web3 wallet linked. Please link a wallet first.',
-                data: { action: 'link_wallet' }
-            });
-        }
-
-        if (!platformWallet.isAssetSupported(assetUpper)) {
-            return res.status(400).json({
-                status: 'fail',
-                message: `Asset ${assetUpper} is not supported`
-            });
-        }
-
-        const currentPrice = await getCryptoPrice(assetUpper);
-        if (!currentPrice || currentPrice <= 0) {
-            return res.status(503).json({
-                status: 'error',
-                message: 'Unable to fetch current price. Please try again later.'
-            });
-        }
-
-        const cryptoAmount = amount / currentPrice;
-        
-        if (!user.balances || !user.balances.main) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Insufficient balance'
-            });
-        }
-
-        const currentBalance = user.balances.main.get(assetLower) || 0;
-        
-        if (currentBalance < cryptoAmount) {
-            return res.status(400).json({
-                status: 'fail',
-                message: `Insufficient ${assetUpper} balance. Available: ${currentBalance.toFixed(8)}, Required: ${cryptoAmount.toFixed(8)}`
-            });
-        }
-
-        // Calculate gas fee (0.5% of amount, min 0.0001)
-        const gasFee = Math.max(cryptoAmount * 0.005, 0.0001);
-        const netAmount = cryptoAmount - gasFee;
-
-        // Deduct from main balance
-        const newBalance = currentBalance - cryptoAmount;
-        if (newBalance <= 0) {
-            user.balances.main.delete(assetLower);
-        } else {
-            user.balances.main.set(assetLower, newBalance);
-        }
-
-        // Update USD equivalent
-        const currentUsdBalance = user.balances.main.get('usd') || 0;
-        user.balances.main.set('usd', currentUsdBalance - amount);
-        
-        await user.save();
-
-        // Create transaction record
-        const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-        
-        const transaction = await Transaction.create({
-            user: userId,
-            type: 'withdrawal',
-            amount: amount,
-            asset: assetLower,
-            assetAmount: netAmount,
-            currency: 'USD',
-            status: 'pending',
-            method: assetUpper,
-            reference: reference,
-            details: {
-                walletAddress: walletAddress,
-                network: network || platformWallet.getNetworkName(assetUpper),
-                exchangeRate: currentPrice,
-                gasFee: gasFee,
-                grossAmount: cryptoAmount,
-                netAmount: netAmount,
-                userWalletAddress: user.web3Wallet.address
-            },
-            btcAddress: walletAddress,
-            fee: gasFee * currentPrice,
-            netAmount: amount,
-            exchangeRateAtTime: currentPrice,
-            network: network || platformWallet.getNetworkName(assetUpper)
-        });
-
-        // =============================================
-        // SEND EMAIL NOTIFICATIONS - BUILT FROM SCRATCH
-        // =============================================
-        const cryptoLogoUrl = getCryptoLogo(assetUpper);
-        const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const formattedCryptoAmount = netAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-        const formattedGrossAmount = cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-        const formattedGasFee = gasFee.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-        const formattedPrice = currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const networkName = network || platformWallet.getNetworkName(assetUpper);
-
-        // User withdrawal initiated email
-        const userEmailHtml = `
-            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                    <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-                    <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-                </div>
-                
-                <div style="padding: 30px; background: #FFFFFF;">
-                    <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                            <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
-                                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-                            </svg>
-                        </div>
-                        <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WITHDRAWAL REQUEST RECEIVED</h2>
-                        <p style="color: #92400E; font-size: 13px; margin: 0;">Your withdrawal request is pending review</p>
-                    </div>
-                    
-                    <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-                    <p style="color: #333333; line-height: 1.6;">We have received your withdrawal request. Our team will review and process it shortly.</p>
-                    
-                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-                            <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
-                            <div>
-                                <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${assetUpper}</div>
-                                <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
-                            </div>
-                        </div>
-                        
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">1 ${assetUpper} = $${formattedPrice}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Gross Amount:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${formattedGrossAmount} ${assetUpper}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong style="color: #EF4444;">Network Gas Fee:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${formattedGasFee} ${assetUpper}</strong></td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Net Amount:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedCryptoAmount} ${assetUpper}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Destination:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${walletAddress}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Network:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${networkName}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${reference}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ What Happens Next?</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">Our team will review your request within 24 hours. You will receive an email notification once approved or rejected.</p>
-                    </div>
-                    
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Request</a>
-                    </div>
-                    
-                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-                </div>
-                
-                <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-                    <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                        <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-                        <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-                    </p>
-                </div>
-            </div>
-        `;
-
-        await infoTransporter.sendMail({
-            from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-            to: user.email,
-            subject: `💳 Withdrawal Request Submitted - ₿itHash Capital`,
-            html: userEmailHtml
-        });
-
-        console.log(`📧 Withdrawal email sent to ${user.email}`);
-
-        // Admin withdrawal notification
-        const deviceInfo = await getUserDeviceInfo(req);
-        
-        const adminHtml = `
-            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-                ${brandHeader}
-                <div style="padding: 30px; background: #FFFFFF;">
-                    <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                        <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW WITHDRAWAL REQUEST!</h2>
-                        <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} requested a withdrawal</p>
-                    </div>
-                    
-                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="border-bottom: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>User:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Asset:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;"><img src="${cryptoLogoUrl}" width="16" height="16" style="vertical-align: middle; border-radius: 50%;"> ${assetUpper}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Amount Requested:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${formattedCryptoAmount} ${assetUpper} (≈ $${formattedAmount})</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">1 ${assetUpper} = $${formattedPrice}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Network Gas Fee:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; color: #EF4444;">${formattedGasFee} ${assetUpper} (≈ $${(gasFee * currentPrice).toFixed(2)})</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Destination:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${walletAddress}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Network:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${networkName}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>User Wallet:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${user.web3Wallet?.address || 'N/A'}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Remaining Balance:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${newBalance.toFixed(8)} ${assetUpper}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${deviceInfo.location || 'Unknown'} ${deviceInfo.exactLocation ? '📍' : ''}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${deviceInfo.ip}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${deviceInfo.device || 'Unknown'}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
-                                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${reference}</td>
-                            </tr>
-                            <tr style="border-top: 1px solid #E2E8F0;">
-                                <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
-                                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Action Required</p>
-                        <p style="color: #78350F; margin: 0; font-size: 14px;">Review this withdrawal request and approve or reject it. User location: ${deviceInfo.location || 'Unknown'}</p>
-                    </div>
-                    
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://www.bithashcapital.live/admin/withdrawals/${transaction._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Review Request</a>
-                    </div>
-                    
-                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${new Date().toLocaleString()}</p>
-                </div>
-                
-                ${brandFooter}
-            </div>
-        `;
-
-        await supportTransporter.sendMail({
-            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-            to: 'thieretw@gmail.com',
-            subject: `💳 WITHDRAWAL REQUEST: ${user.firstName} ${user.lastName} requested ${formattedCryptoAmount} ${assetUpper}`,
-            html: adminHtml
-        });
-
-        console.log(`✅ Admin withdrawal notification sent to thieretw@gmail.com for user: ${user.email}`);
-
-        // Emit real-time update
-        const io = req.app.get('io');
-        if (io) {
-            io.to(`user_${userId}`).emit('balance_update', {
-                main: user.balances.main?.get('usd') || 0,
-                active: user.balances.active?.get('usd') || 0,
-                matured: user.balances.matured?.get('usd') || 0,
-                timestamp: Date.now()
-            });
-        }
-
-        // Log the activity
-        await logActivity('withdrawal_created', 'Transaction', transaction._id, userId, 'User', req, {
-            asset: assetUpper,
-            amount: amount,
-            cryptoAmount: cryptoAmount,
-            netAmount: netAmount,
-            gasFee: gasFee,
-            walletAddress: walletAddress,
-            network: networkName
-        });
-
-        res.status(201).json({
-            status: 'success',
-            message: 'Withdrawal request submitted successfully',
-            data: {
-                transaction: {
-                    id: transaction._id,
-                    reference: reference,
-                    asset: assetUpper,
-                    amount: amount,
-                    cryptoAmount: cryptoAmount,
-                    netAmount: netAmount,
-                    gasFee: gasFee,
-                    status: 'pending',
-                    createdAt: transaction.createdAt
-                }
-            }
-        });
-
-    } catch (err) {
-        console.error('Withdrawal error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to process withdrawal'
-        });
+    // =============================================
+    // 1. VALIDATION
+    // =============================================
+    
+    if (!amount || amount < MIN_WITHDRAWAL_USD) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Minimum withdrawal amount is $${MIN_WITHDRAWAL_USD} USD`
+      });
     }
+
+    if (!asset) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Asset type is required'
+      });
+    }
+
+    if (!walletAddress || walletAddress.trim().length < 10) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Valid ${asset.toUpperCase()} wallet address is required`
+      });
+    }
+
+    // =============================================
+    // 2. USER AND RESTRICTION CHECKS
+    // =============================================
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // =============================================
+    // 2a. ACCOUNT STATUS CHECK
+    // =============================================
+    
+    if (user.status !== 'active') {
+      await SystemLog.create({
+        action: 'withdrawal_blocked_inactive_account',
+        entity: 'User',
+        entityId: userId,
+        performedBy: userId,
+        performedByModel: 'User',
+        performedByEmail: user.email,
+        performedByName: `${user.firstName} ${user.lastName}`,
+        status: 'failed',
+        metadata: {
+          reason: 'Account is not active',
+          status: user.status,
+          requestId: requestId
+        }
+      });
+
+      return res.status(403).json({
+        status: 'fail',
+        message: 'Your account is not active. Please contact support.',
+        errorCode: 'ACCOUNT_INACTIVE'
+      });
+    }
+
+    // =============================================
+    // 2b. KYC VERIFICATION CHECK
+    // =============================================
+    
+    const kycRecord = await KYC.findOne({ user: userId });
+    
+    // Check if KYC is verified
+    const isKYCVerified = kycRecord && kycRecord.overallStatus === 'verified';
+    
+    // Check if KYC is pending
+    const isKYCPending = kycRecord && kycRecord.overallStatus === 'pending';
+    
+    // Check if KYC is rejected
+    const isKYCRejected = kycRecord && kycRecord.overallStatus === 'rejected';
+    
+    // Check if KYC is not started or in progress
+    const isKYCNotCompleted = !kycRecord || 
+                             kycRecord.overallStatus === 'not-started' || 
+                             kycRecord.overallStatus === 'in-progress';
+
+    // If KYC is rejected or not completed, block withdrawal
+    if (isKYCRejected || isKYCNotCompleted) {
+      await SystemLog.create({
+        action: 'withdrawal_blocked_kyc',
+        entity: 'User',
+        entityId: userId,
+        performedBy: userId,
+        performedByModel: 'User',
+        performedByEmail: user.email,
+        performedByName: `${user.firstName} ${user.lastName}`,
+        status: 'failed',
+        metadata: {
+          reason: isKYCRejected ? 'KYC Rejected' : 'KYC Not Completed',
+          kycStatus: kycRecord?.overallStatus || 'not-started',
+          requestId: requestId,
+          withdrawalAmount: amount
+        }
+      });
+
+      return res.status(403).json({
+        status: 'fail',
+        message: isKYCRejected 
+          ? 'Your KYC verification was rejected. Please contact support to resolve this issue.'
+          : 'KYC verification is required to make withdrawals. Please complete your KYC verification first.',
+        errorCode: isKYCRejected ? 'KYC_REJECTED' : 'KYC_REQUIRED',
+        action: isKYCRejected ? 'contact_support' : 'complete_kyc',
+        kycStatus: kycRecord?.overallStatus || 'not-started'
+      });
+    }
+
+    // If KYC is pending, allow withdrawal but with lower limit
+    let dailyLimit = 10000; // Default for verified users
+    
+    if (isKYCPending) {
+      dailyLimit = 1000; // Lower limit for pending KYC
+      
+      await SystemLog.create({
+        action: 'withdrawal_pending_kyc_limit',
+        entity: 'User',
+        entityId: userId,
+        performedBy: userId,
+        performedByModel: 'User',
+        performedByEmail: user.email,
+        performedByName: `${user.firstName} ${user.lastName}`,
+        status: 'pending',
+        metadata: {
+          reason: 'KYC Pending - Limited withdrawal allowed',
+          kycStatus: 'pending',
+          dailyLimit: dailyLimit,
+          requestedAmount: amount,
+          requestId: requestId
+        }
+      });
+    }
+
+    // =============================================
+    // 2c. DAILY WITHDRAWAL LIMIT CHECK
+    // =============================================
+    
+    // Calculate today's date range
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    // Get today's completed withdrawals
+    const todayWithdrawals = await Transaction.find({
+      user: userId,
+      type: 'withdrawal',
+      status: { $in: ['completed', 'pending'] },
+      createdAt: { $gte: todayStart, $lte: todayEnd }
+    });
+
+    // Calculate total withdrawn today
+    const totalWithdrawnToday = todayWithdrawals.reduce((sum, tx) => sum + tx.amount, 0);
+    
+    // Check if this withdrawal would exceed the daily limit
+    if (totalWithdrawnToday + amount > dailyLimit) {
+      await SystemLog.create({
+        action: 'withdrawal_blocked_daily_limit',
+        entity: 'User',
+        entityId: userId,
+        performedBy: userId,
+        performedByModel: 'User',
+        performedByEmail: user.email,
+        performedByName: `${user.firstName} ${user.lastName}`,
+        status: 'failed',
+        metadata: {
+          reason: 'Daily withdrawal limit exceeded',
+          dailyLimit: dailyLimit,
+          alreadyWithdrawnToday: totalWithdrawnToday,
+          requestedAmount: amount,
+          requestId: requestId
+        }
+      });
+
+      return res.status(403).json({
+        status: 'fail',
+        message: `Daily withdrawal limit of $${dailyLimit.toLocaleString()} exceeded. You have withdrawn $${totalWithdrawnToday.toLocaleString()} today.`,
+        errorCode: 'DAILY_LIMIT_EXCEEDED',
+        data: {
+          dailyLimit: dailyLimit,
+          alreadyWithdrawn: totalWithdrawnToday,
+          requestedAmount: amount,
+          remainingLimit: Math.max(0, dailyLimit - totalWithdrawnToday)
+        }
+      });
+    }
+
+    // =============================================
+    // 2d. TRANSACTION ACTIVITY CHECK
+    // =============================================
+    
+    // Check if user has any completed transactions (for new accounts)
+    const hasRecentTransaction = await Transaction.findOne({
+      user: userId,
+      status: 'completed',
+      type: { $in: ['deposit', 'investment'] }
+    });
+
+    if (!hasRecentTransaction) {
+      await SystemLog.create({
+        action: 'withdrawal_blocked_no_transaction_history',
+        entity: 'User',
+        entityId: userId,
+        performedBy: userId,
+        performedByModel: 'User',
+        performedByEmail: user.email,
+        performedByName: `${user.firstName} ${user.lastName}`,
+        status: 'failed',
+        metadata: {
+          reason: 'No transaction history',
+          requestId: requestId
+        }
+      });
+
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You must have at least one completed deposit or investment before making a withdrawal.',
+        errorCode: 'NO_TRANSACTION_HISTORY',
+        action: 'make_deposit_or_investment'
+      });
+    }
+
+    // =============================================
+    // 2e. GET RESTRICTIONS FROM ACCOUNT RESTRICTIONS SETTINGS
+    // =============================================
+    
+    const restrictions = await AccountRestrictions.getInstance();
+    const userRestrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
+
+    // Check if user has specific restrictions
+    if (userRestrictionStatus) {
+      if (userRestrictionStatus.kyc_restricted) {
+        await SystemLog.create({
+          action: 'withdrawal_blocked_kyc_restriction',
+          entity: 'User',
+          entityId: userId,
+          performedBy: userId,
+          performedByModel: 'User',
+          performedByEmail: user.email,
+          performedByName: `${user.firstName} ${user.lastName}`,
+          status: 'failed',
+          metadata: {
+            reason: 'KYC Restricted',
+            restrictionReason: userRestrictionStatus.kyc_restriction_reason,
+            requestId: requestId
+          }
+        });
+
+        return res.status(403).json({
+          status: 'fail',
+          message: userRestrictionStatus.kyc_restriction_reason || 'Your account has KYC restrictions. Please complete verification.',
+          errorCode: 'KYC_RESTRICTED',
+          action: 'complete_kyc'
+        });
+      }
+
+      if (userRestrictionStatus.transaction_restricted) {
+        await SystemLog.create({
+          action: 'withdrawal_blocked_transaction_restriction',
+          entity: 'User',
+          entityId: userId,
+          performedBy: userId,
+          performedByModel: 'User',
+          performedByEmail: user.email,
+          performedByName: `${user.firstName} ${user.lastName}`,
+          status: 'failed',
+          metadata: {
+            reason: 'Transaction Restricted',
+            restrictionReason: userRestrictionStatus.transaction_restriction_reason,
+            requestId: requestId
+          }
+        });
+
+        return res.status(403).json({
+          status: 'fail',
+          message: userRestrictionStatus.transaction_restriction_reason || 'Your account has transaction restrictions. Please complete a deposit or withdrawal to lift them.',
+          errorCode: 'TRANSACTION_RESTRICTED',
+          action: 'complete_transaction'
+        });
+      }
+    }
+
+    // =============================================
+    // 2f. CHECK FOR OUTSTANDING LOANS
+    // =============================================
+    
+    const outstandingLoans = await Loan.find({
+      user: userId,
+      status: { $in: ['active', 'pending'] }
+    });
+
+    if (outstandingLoans.length > 0) {
+      const totalLoanAmount = outstandingLoans.reduce((sum, loan) => sum + loan.amount, 0);
+      
+      await SystemLog.create({
+        action: 'withdrawal_blocked_outstanding_loan',
+        entity: 'User',
+        entityId: userId,
+        performedBy: userId,
+        performedByModel: 'User',
+        performedByEmail: user.email,
+        performedByName: `${user.firstName} ${user.lastName}`,
+        status: 'failed',
+        metadata: {
+          reason: 'Outstanding loan',
+          loanCount: outstandingLoans.length,
+          totalLoanAmount: totalLoanAmount,
+          requestId: requestId
+        }
+      });
+
+      return res.status(403).json({
+        status: 'fail',
+        message: `You have ${outstandingLoans.length} outstanding loan(s) totaling $${totalLoanAmount.toLocaleString()}. Please repay your loans before making a withdrawal.`,
+        errorCode: 'OUTSTANDING_LOAN',
+        action: 'repay_loan',
+        data: {
+          loanCount: outstandingLoans.length,
+          totalLoanAmount: totalLoanAmount
+        }
+      });
+    }
+
+    // =============================================
+    // 2g. CHECK FOR ABNORMAL ACTIVITY (SECURITY)
+    // =============================================
+    
+    const recentFailedAttempts = await SystemLog.countDocuments({
+      'metadata.email': user.email,
+      action: { $in: ['withdrawal_failed', 'withdrawal_blocked'] },
+      status: 'failed',
+      createdAt: { $gte: new Date(Date.now() - 30 * 60 * 1000) } // Last 30 minutes
+    });
+
+    if (recentFailedAttempts >= 5) {
+      await SystemLog.create({
+        action: 'withdrawal_blocked_too_many_failures',
+        entity: 'User',
+        entityId: userId,
+        performedBy: userId,
+        performedByModel: 'User',
+        performedByEmail: user.email,
+        performedByName: `${user.firstName} ${user.lastName}`,
+        status: 'failed',
+        metadata: {
+          reason: 'Too many failed attempts',
+          failedAttempts: recentFailedAttempts,
+          requestId: requestId
+        }
+      });
+
+      return res.status(429).json({
+        status: 'fail',
+        message: 'Too many failed withdrawal attempts. Please try again later or contact support.',
+        errorCode: 'TOO_MANY_FAILED_ATTEMPTS',
+        retryAfter: 30 // minutes
+      });
+    }
+
+    // =============================================
+    // ALL RESTRICTION CHECKS PASSED - PROCEED WITH WITHDRAWAL
+    // =============================================
+    
+    console.log(`✅ All restriction checks passed for user ${userId}`);
+    console.log(`   KYC Status: ${kycRecord?.overallStatus || 'not-started'}`);
+    console.log(`   Daily Limit: $${dailyLimit}`);
+    console.log(`   Withdrawn Today: $${totalWithdrawnToday}`);
+    console.log(`   Requested: $${amount}`);
+
+    // =============================================
+    // 3. DETECT NETWORK
+    // =============================================
+    
+    const assetNetworkMap = {
+      'btc': { network: 'Bitcoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
+      'eth': { network: 'Ethereum', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
+      'usdt': { network: network || 'TRC20', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
+      'usdc': { network: network || 'ERC20', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
+      'bnb': { network: 'BSC', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
+      'sol': { network: 'Solana', decimals: 9, logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
+      'xrp': { network: 'XRP Ledger', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
+      'doge': { network: 'Dogecoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
+      'trx': { network: 'TRON', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
+      'ltc': { network: 'Litecoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' },
+      'ada': { network: 'Cardano', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
+      'matic': { network: 'Polygon', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' }
+    };
+    
+    const assetLower = asset.toLowerCase();
+    const assetInfo = assetNetworkMap[assetLower] || { 
+      network: 'Blockchain', 
+      decimals: 8,
+      logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
+    };
+    
+    const detectedNetwork = assetInfo.network;
+    const assetLogo = assetInfo.logo;
+    const decimals = assetInfo.decimals;
+
+    // =============================================
+    // 4. GET REAL-TIME PRICES FROM AGGREGATOR
+    // =============================================
+    
+    let targetPrice = exchangeRate;
+    if (!targetPrice || targetPrice <= 0) {
+      targetPrice = await getCryptoPrice(asset.toUpperCase());
+      
+      if (!targetPrice || targetPrice <= 0) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `Unable to fetch current ${asset.toUpperCase()} price`
+        });
+      }
+    }
+    
+    let btcPrice = 0;
+    btcPrice = await getCryptoPrice('BTC');
+    
+    if (!btcPrice || btcPrice <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Unable to fetch BTC price for gas fee calculation'
+      });
+    }
+
+    // =============================================
+    // 5. CALCULATE GAS FEE (NO PLATFORM FEE)
+    // =============================================
+    
+    const gasFeeInBTC = amount < 10000 ? GAS_FEE_BTC_LOW : GAS_FEE_BTC_HIGH;
+    const gasFeeInUSD = gasFeeInBTC * btcPrice;
+    let gasFeeInTargetAsset = gasFeeInUSD / targetPrice;
+    gasFeeInTargetAsset = Number(gasFeeInTargetAsset.toFixed(decimals));
+    
+    const withdrawalCryptoAmount = Number((amount / targetPrice).toFixed(decimals));
+    const totalCryptoNeeded = withdrawalCryptoAmount + gasFeeInTargetAsset;
+
+    // =============================================
+    // 6. CHECK USER BALANCES
+    // =============================================
+    
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    if (!user.balances.matured) user.balances.matured = new Map();
+
+    const mainBalance = user.balances.main.get(assetLower) || 0;
+    const maturedBalance = user.balances.matured.get(assetLower) || 0;
+    const totalBalance = mainBalance + maturedBalance;
+
+    // Check gas fee in MAIN wallet
+    if (mainBalance < gasFeeInTargetAsset) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${asset.toUpperCase()} in MAIN wallet for gas fee. Required: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (≈ $${gasFeeInUSD.toFixed(2)} USD)`
+      });
+    }
+    
+    if (totalBalance < totalCryptoNeeded) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient total ${asset.toUpperCase()} balance. Required: ${totalCryptoNeeded.toFixed(decimals)} ${asset.toUpperCase()}`
+      });
+    }
+
+    // =============================================
+    // 7. DETERMINE WITHDRAWAL SOURCE
+    // =============================================
+    
+    let remainingMainAfterGas = mainBalance - gasFeeInTargetAsset;
+    let withdrawalFromMain = 0;
+    let withdrawalFromMatured = 0;
+    let balanceSource = '';
+    
+    if (remainingMainAfterGas >= withdrawalCryptoAmount) {
+      withdrawalFromMain = withdrawalCryptoAmount;
+      withdrawalFromMatured = 0;
+      balanceSource = 'main';
+    } else {
+      withdrawalFromMain = remainingMainAfterGas;
+      withdrawalFromMatured = withdrawalCryptoAmount - remainingMainAfterGas;
+      balanceSource = 'both';
+    }
+    
+    const totalMainDeduction = gasFeeInTargetAsset + withdrawalFromMain;
+    const totalMaturedDeduction = withdrawalFromMatured;
+
+    // =============================================
+    // 8. PERFORM DEDUCTIONS
+    // =============================================
+    
+    if (totalMainDeduction > 0) {
+      const newMainBalance = mainBalance - totalMainDeduction;
+      if (newMainBalance <= 0.00000001) {
+        user.balances.main.delete(assetLower);
+      } else {
+        user.balances.main.set(assetLower, newMainBalance);
+      }
+    }
+    
+    if (totalMaturedDeduction > 0) {
+      const newMaturedBalance = maturedBalance - totalMaturedDeduction;
+      if (newMaturedBalance <= 0.00000001) {
+        user.balances.matured.delete(assetLower);
+      } else {
+        user.balances.matured.set(assetLower, newMaturedBalance);
+      }
+    }
+    
+    // Update USD equivalents
+    const currentMainUSD = user.balances.main.get('usd') || 0;
+    const currentMaturedUSD = user.balances.matured.get('usd') || 0;
+    
+    if (totalMainDeduction > 0) {
+      const newMainUSD = currentMainUSD - (gasFeeInUSD + (withdrawalFromMain / withdrawalCryptoAmount) * amount);
+      if (newMainUSD <= 0.01) {
+        user.balances.main.delete('usd');
+      } else {
+        user.balances.main.set('usd', newMainUSD);
+      }
+    }
+    
+    if (totalMaturedDeduction > 0) {
+      const newMaturedUSD = currentMaturedUSD - (withdrawalFromMatured / withdrawalCryptoAmount) * amount;
+      if (newMaturedUSD <= 0.01) {
+        user.balances.matured.delete('usd');
+      } else {
+        user.balances.matured.set('usd', newMaturedUSD);
+      }
+    }
+    
+    await user.save();
+
+    // =============================================
+    // 9. CREATE TRANSACTION
+    // =============================================
+    
+    const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'withdrawal',
+      amount: amount,
+      asset: asset.toLowerCase(),
+      assetAmount: withdrawalCryptoAmount,
+      currency: 'USD',
+      status: 'pending',
+      method: asset.toUpperCase(),
+      reference: reference,
+      details: {
+        requestId: requestId,
+        withdrawalAddress: walletAddress,
+        exchangeRate: targetPrice,
+        network: detectedNetwork,
+        gasFee: {
+          amount: gasFeeInTargetAsset,
+          asset: asset.toUpperCase(),
+          usdValue: gasFeeInUSD,
+          btcEquivalent: gasFeeInBTC
+        },
+        balanceSource: balanceSource,
+        mainAmountUsed: withdrawalFromMain,
+        maturedAmountUsed: withdrawalFromMatured,
+        gasFeeFromMain: gasFeeInTargetAsset,
+        fundsAlreadyDeducted: true,
+        totalDeducted: totalCryptoNeeded,
+        // Add restriction check data for audit
+        restrictionCheck: {
+          kycStatus: kycRecord?.overallStatus || 'not-started',
+          dailyLimit: dailyLimit,
+          withdrawnToday: totalWithdrawnToday + amount,
+          remainingDailyLimit: dailyLimit - (totalWithdrawnToday + amount),
+          hasOutstandingLoans: outstandingLoans.length > 0,
+          accountStatus: user.status
+        }
+      },
+      btcAddress: walletAddress,
+      fee: 0,
+      netAmount: amount,
+      exchangeRateAtTime: targetPrice,
+      network: detectedNetwork
+    });
+
+    // =============================================
+    // 10. LOG SUCCESSFUL WITHDRAWAL REQUEST
+    // =============================================
+    
+    await SystemLog.create({
+      action: 'withdrawal_request_success',
+      entity: 'Transaction',
+      entityId: transaction._id,
+      performedBy: userId,
+      performedByModel: 'User',
+      performedByEmail: user.email,
+      performedByName: `${user.firstName} ${user.lastName}`,
+      status: 'success',
+      metadata: {
+        requestId: requestId,
+        reference: reference,
+        amountUSD: amount,
+        asset: asset.toUpperCase(),
+        cryptoAmount: withdrawalCryptoAmount,
+        walletAddress: walletAddress,
+        network: detectedNetwork,
+        gasFee: {
+          amount: gasFeeInTargetAsset,
+          asset: asset.toUpperCase(),
+          usdValue: gasFeeInUSD,
+          btcEquivalent: gasFeeInBTC
+        },
+        balanceSource: balanceSource,
+        exchangeRate: targetPrice,
+        kycStatus: kycRecord?.overallStatus || 'not-started',
+        dailyLimit: dailyLimit,
+        withdrawnToday: totalWithdrawnToday + amount,
+        remainingDailyLimit: dailyLimit - (totalWithdrawnToday + amount)
+      }
+    });
+
+    // =============================================
+    // 11. SEND VISUAL EMAIL
+    // =============================================
+    
+    const cryptoAsset = asset.toUpperCase();
+    const cryptoLogo = getCryptoLogo(cryptoAsset);
+    const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedCryptoAmount = withdrawalCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedGasFee = gasFeeInTargetAsset.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedGasFeeUSD = gasFeeInUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedTotalDeducted = totalCryptoNeeded.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedTotalDeductedUSD = (amount + gasFeeInUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedRate = targetPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    const emailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+        </div>
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <img src="${cryptoLogo}" width="32" height="32" style="border-radius: 50%;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
+                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WITHDRAWAL REQUEST RECEIVED!</h2>
+            <p style="color: #92400E; font-size: 13px; margin: 0;">Your withdrawal request is pending review</p>
+          </div>
+          
+          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
+          <p style="color: #333333; line-height: 1.6;">We have received your withdrawal request. Our team will review and process it shortly.</p>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+              <img src="${cryptoLogo}" width="32" height="32" style="border-radius: 50%;">
+              <div>
+                <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${cryptoAsset}</div>
+                <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD requested</div>
+              </div>
+            </div>
+            
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Exchange Rate (Locked):</strong></td>
+                <td style="padding: 8px 0; text-align: right;">1 ${cryptoAsset} = $${formattedRate}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong style="color: #EF4444;">Network Gas Fee:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${formattedGasFee} ${cryptoAsset} (≈ $${formattedGasFeeUSD} USD)</strong></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Total Deducted:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedTotalDeducted} ${cryptoAsset} (≈ $${formattedTotalDeductedUSD} USD)</strong></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Destination Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${walletAddress}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Network:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${detectedNetwork}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${reference}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ What Happens Next?</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">Our team will review your request within 24 hours. You will receive an email notification once approved or rejected.</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Request</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
+        </div>
+        
+        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+          </p>
+        </div>
+      </div>
+    `;
+
+    const mailTransporter = infoTransporter;
+    await mailTransporter.sendMail({
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: user.email,
+      subject: `Withdrawal Request Submitted - ₿itHash Capital`,
+      html: emailHtml
+    });
+    
+    console.log(`📧 Visual withdrawal email sent to ${user.email}`);
+    console.log(`   Asset: ${asset.toUpperCase()}`);
+    console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)}`);
+    console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} (deducted from ${balanceSource} wallet)`);
+
+    // =============================================
+    // 12. EMIT REAL-TIME UPDATE
+    // =============================================
+    
+    const io = req.app.get('io');
+    if (io) {
+      let newMainUSD = 0;
+      let newMaturedUSD = 0;
+      
+      for (const [crypto, balance] of user.balances.main) {
+        if (crypto !== 'usd' && balance > 0) {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) newMainUSD += balance * price;
+        }
+      }
+      
+      for (const [crypto, balance] of user.balances.matured) {
+        if (crypto !== 'usd' && balance > 0) {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) newMaturedUSD += balance * price;
+        }
+      }
+      
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: newMainUSD,
+        matured: newMaturedUSD,
+        active: user.balances.active?.get('usd') || 0,
+        timestamp: Date.now()
+      });
+    }
+
+    // =============================================
+    // 13. RETURN SUCCESS RESPONSE
+    // =============================================
+    
+    console.log(`\n✅ WITHDRAWAL SUBMITTED SUCCESSFULLY`);
+    console.log(`   Reference: ${reference}`);
+    console.log(`   Network: ${detectedNetwork}`);
+    console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)} ${asset.toUpperCase()}`);
+    console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (deducted from ${balanceSource} wallet)`);
+    console.log(`   Email sent to: ${user.email}`);
+    console.log('=' .repeat(80));
+    
+    res.status(201).json({
+      status: 'success',
+      message: `Withdrawal request submitted successfully on ${detectedNetwork} network.`,
+      data: {
+        transaction: {
+          id: transaction._id,
+          reference: reference,
+          requestId: requestId,
+          amountUSD: amount,
+          cryptoAmount: withdrawalCryptoAmount,
+          asset: asset.toUpperCase(),
+          network: detectedNetwork,
+          status: 'pending'
+        },
+        gasFee: {
+          amount: gasFeeInTargetAsset,
+          asset: asset.toUpperCase(),
+          usdValue: gasFeeInUSD,
+          btcEquivalent: gasFeeInBTC
+        },
+        balanceInfo: {
+          source: balanceSource,
+          mainAmountUsed: withdrawalFromMain,
+          maturedAmountUsed: withdrawalFromMatured,
+          gasFeeFromMain: gasFeeInTargetAsset
+        },
+        // Include restriction info in response
+        restrictionInfo: {
+          kycStatus: kycRecord?.overallStatus || 'not-started',
+          dailyLimit: dailyLimit,
+          remainingDailyLimit: dailyLimit - (totalWithdrawnToday + amount)
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to process withdrawal'
+    });
+  }
 });
+
+
+
 
 // =============================================
 // 9. HELPER FUNCTION - Get 24h price change
