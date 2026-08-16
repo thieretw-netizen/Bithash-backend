@@ -17199,71 +17199,283 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-// Plans Endpoint with login state detection
+// =============================================
+// PLANS ENDPOINT WITH CLOAKING + LOGIN STATE DETECTION
+// =============================================
+
 app.get('/api/plans', async (req, res) => {
-  try {
-    // Get plans from database
-    const plans = await Plan.find({ isActive: true }).lean();
-    
-    // Get user balance if logged in
-    let userMainBalance = 0;
-    let userMaturedBalance = 0;
-    let isLoggedIn = false;
-    if (req.user) {
-      const user = await User.findById(req.user.id).select('balances');
-      userMainBalance = user.balances.main;
-      userMaturedBalance = user.balances.matured;
-      isLoggedIn = true;
+    try {
+        // =============================================
+        // 1. CHECK CLOAKING STATUS
+        // =============================================
+        const isReviewer = req.visitorType === 'reviewer';
+        const isRealUser = req.visitorType === 'real';
+        
+        // =============================================
+        // 2. GET PLANS FROM DATABASE
+        // =============================================
+        const plans = await Plan.find({ isActive: true }).lean();
+        
+        // =============================================
+        // 3. GET USER BALANCE IF LOGGED IN
+        // =============================================
+        let userMainBalance = 0;
+        let userMaturedBalance = 0;
+        let userMainBTC = 0;
+        let userMaturedBTC = 0;
+        let isLoggedIn = false;
+        let user = null;
+        
+        if (req.user) {
+            user = await User.findById(req.user.id).select('balances firstName lastName email');
+            if (user) {
+                // Get USD balances
+                userMainBalance = user.balances?.main?.get?.('usd') || user.balances?.main?.usd || 0;
+                userMaturedBalance = user.balances?.matured?.get?.('usd') || user.balances?.matured?.usd || 0;
+                
+                // Get BTC balances
+                userMainBTC = user.balances?.main?.get?.('btc') || user.balances?.main?.btc || 0;
+                userMaturedBTC = user.balances?.matured?.get?.('btc') || user.balances?.matured?.btc || 0;
+                
+                isLoggedIn = true;
+            }
+        }
+
+        // =============================================
+        // 4. FORMAT PLANS BASED ON VISITOR TYPE
+        // =============================================
+        
+        if (isReviewer) {
+            // =============================================
+            // REVIEWER VERSION - Educational/Preview only
+            // =============================================
+            const safePlans = plans.map((plan, index) => ({
+                id: plan._id,
+                name: `${plan.name} (Preview)`,
+                description: '📚 Educational preview of our cloud mining offering. Contact support for details.',
+                percentage: plan.percentage,
+                duration: plan.duration,
+                minAmount: plan.minAmount,
+                maxAmount: plan.maxAmount,
+                referralBonus: plan.referralBonus,
+                colorScheme: getPlanColorScheme(plan._id),
+                // Educational mode flags
+                isEducational: true,
+                isPreview: true,
+                buttonState: 'Learn More',
+                buttonDisabled: true,
+                canInvest: false,
+                showInvestment: false,
+                // Hashrate info (educational)
+                hashrate: getHashrateForPlan(index),
+                badge: '📚 Educational Preview'
+            }));
+            
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    plans: safePlans,
+                    isEducational: true,
+                    isPreview: true,
+                    isLoggedIn: isLoggedIn,
+                    message: 'This is an educational preview. Please contact support for investment details.',
+                    userBalances: isLoggedIn ? {
+                        main: userMainBalance,
+                        matured: userMaturedBalance,
+                        mainBTC: userMainBTC,
+                        maturedBTC: userMaturedBTC
+                    } : null,
+                    // Add contact info for reviewers
+                    contactInfo: {
+                        email: 'support@bithash.com',
+                        phone: '+1 606-363-2032',
+                        liveChat: true
+                    }
+                }
+            });
+        }
+
+        // =============================================
+        // REAL USER VERSION - Full investment details
+        // =============================================
+        const realPlans = plans.map((plan, index) => {
+            const canInvest = isLoggedIn && (
+                userMainBalance >= plan.minAmount || 
+                userMaturedBalance >= plan.minAmount
+            );
+            
+            // Determine button state
+            let buttonState = 'Invest';
+            let buttonDisabled = false;
+            let buttonTooltip = '';
+            
+            if (!isLoggedIn) {
+                buttonState = 'Login to Invest';
+                buttonDisabled = true;
+                buttonTooltip = 'Please login to invest in this plan';
+            } else if (!canInvest) {
+                buttonState = 'Insufficient Balance';
+                buttonDisabled = true;
+                buttonTooltip = `Minimum $${plan.minAmount.toLocaleString()} required. Your balance: $${userMainBalance.toLocaleString()}`;
+            } else {
+                buttonState = 'Start Mining';
+                buttonDisabled = false;
+                buttonTooltip = `Invest $${plan.minAmount.toLocaleString()} - $${plan.maxAmount.toLocaleString()} in ${plan.name}`;
+            }
+
+            return {
+                id: plan._id,
+                name: plan.name,
+                description: plan.description,
+                percentage: plan.percentage,
+                duration: plan.duration,
+                minAmount: plan.minAmount,
+                maxAmount: plan.maxAmount,
+                referralBonus: plan.referralBonus,
+                colorScheme: getPlanColorScheme(plan._id),
+                // Investment flags
+                isEducational: false,
+                isPreview: false,
+                buttonState: buttonState,
+                buttonDisabled: buttonDisabled,
+                buttonTooltip: buttonTooltip,
+                canInvest: canInvest,
+                showInvestment: true,
+                // Hashrate info
+                hashrate: getHashrateForPlan(index),
+                // Plan features
+                features: getPlanFeatures(plan.name),
+                badge: index === 2 ? '🔥 Most Popular' : index === 4 ? '👑 Best Value' : null
+            };
+        });
+
+        // =============================================
+        // 5. RETURN RESPONSE
+        // =============================================
+        res.status(200).json({
+            status: 'success',
+            data: {
+                plans: realPlans,
+                isEducational: false,
+                isPreview: false,
+                isLoggedIn: isLoggedIn,
+                userBalances: isLoggedIn ? {
+                    main: userMainBalance,
+                    matured: userMaturedBalance,
+                    mainBTC: userMainBTC,
+                    maturedBTC: userMaturedBTC,
+                    totalUSD: userMainBalance + userMaturedBalance,
+                    totalBTC: userMainBTC + userMaturedBTC
+                } : null,
+                // Real user flags
+                flags: {
+                    canInvest: isLoggedIn && (userMainBalance > 0 || userMaturedBalance > 0),
+                    hasBalance: isLoggedIn && (userMainBalance > 0 || userMaturedBalance > 0),
+                    showReferral: isLoggedIn,
+                    showDashboard: isLoggedIn
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Get plans error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'An error occurred while fetching investment plans'
+        });
     }
-
-    // Format plans data
-    const formattedPlans = plans.map(plan => ({
-      id: plan._id,
-      name: plan.name,
-      description: plan.description,
-      percentage: plan.percentage,
-      duration: plan.duration,
-      minAmount: plan.minAmount,
-      maxAmount: plan.maxAmount,
-      referralBonus: plan.referralBonus,
-      colorScheme: getPlanColorScheme(plan._id),
-      buttonState: isLoggedIn ? 'Invest' : 'Login to Invest',
-      canInvest: isLoggedIn && (userMainBalance >= plan.minAmount || userMaturedBalance >= plan.minAmount)
-    }));
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        plans: formattedPlans,
-        userBalances: isLoggedIn ? {
-          main: userMainBalance,
-          matured: userMaturedBalance
-        } : null,
-        isLoggedIn
-      }
-    });
-  } catch (err) {
-    console.error('Get plans error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while fetching investment plans'
-    });
-  }
 });
 
-// Helper function to assign consistent color schemes to plans
+// =============================================
+// HELPER FUNCTIONS
+// =============================================
+
+/**
+ * Get hashrate based on plan index
+ */
+function getHashrateForPlan(index) {
+    const hashrates = [
+        { min: 0, max: 68, unit: 'TH/s', model: 'Antminer S19' },
+        { min: 0, max: 110, unit: 'TH/s', model: 'Antminer S19 Pro' },
+        { min: 0, max: 150, unit: 'TH/s', model: 'Antminer S19j Pro' },
+        { min: 0, max: 234, unit: 'TH/s', model: 'Antminer S19 XP' },
+        { min: 0, max: 255, unit: 'TH/s', model: 'Antminer S19 Hydro' },
+        { min: 0, max: 335, unit: 'TH/s', model: 'Antminer S21' }
+    ];
+    return hashrates[index % hashrates.length] || hashrates[0];
+}
+
+/**
+ * Get plan features based on plan name
+ */
+function getPlanFeatures(planName) {
+    const features = {
+        'Starter': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
+            '24/7 Support',
+            'No Maintenance Fees'
+        ],
+        'Standard': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
+            'Priority Support',
+            'No Maintenance Fees',
+            'Enhanced Security'
+        ],
+        'Gold': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
+            'VIP Support',
+            'No Maintenance Fees',
+            'Enhanced Security',
+            'Bonus Hashrate'
+        ],
+        'Enterprise': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
+            'Dedicated Account Manager',
+            'No Maintenance Fees',
+            'Enhanced Security',
+            'Bonus Hashrate',
+            'Custom Mining Pool'
+        ],
+        'Ultimate': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
+            'Dedicated Account Manager',
+            'No Maintenance Fees',
+            'Enhanced Security',
+            'Bonus Hashrate',
+            'Custom Mining Pool',
+            'Early Withdrawal Option'
+        ]
+    };
+    
+    // Find matching features
+    for (const [key, value] of Object.entries(features)) {
+        if (planName.toLowerCase().includes(key.toLowerCase())) {
+            return value;
+        }
+    }
+    
+    return features['Standard'] || ['SHA-256 ASIC Mining', 'Daily Payouts'];
+}
+
+/**
+ * Assign consistent color schemes to plans
+ */
 function getPlanColorScheme(planId) {
-  const colors = [
-    { primary: '#003366', secondary: '#004488', accent: '#0066CC' }, // Blue
-    { primary: '#4B0082', secondary: '#6A0DAD', accent: '#8A2BE2' }, // Indigo
-    { primary: '#006400', secondary: '#008000', accent: '#00AA00' }, // Green
-    { primary: '#8B0000', secondary: '#A52A2A', accent: '#CD5C5C' }, // Red
-    { primary: '#DAA520', secondary: '#FFD700', accent: '#FFEC8B' }  // Gold
-  ];
-  
-  // Use planId to get consistent color (convert ObjectId to number)
-  const hash = parseInt(planId.toString().slice(-4), 16);
-  return colors[hash % colors.length];
+    const colors = [
+        { primary: '#003366', secondary: '#004488', accent: '#0066CC' }, // Blue
+        { primary: '#4B0082', secondary: '#6A0DAD', accent: '#8A2BE2' }, // Indigo
+        { primary: '#006400', secondary: '#008000', accent: '#00AA00' }, // Green
+        { primary: '#8B0000', secondary: '#A52A2A', accent: '#CD5C5C' }, // Red
+        { primary: '#DAA520', secondary: '#FFD700', accent: '#FFEC8B' }  // Gold
+    ];
+    
+    const hash = parseInt(planId.toString().slice(-4), 16);
+    return colors[hash % colors.length];
 }
 
 
@@ -42267,7 +42479,275 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 
 
 
+// =============================================
+// CLOAKING SYSTEM - ADD TO server.js
+// =============================================
 
+// =============================================
+// 1. CLOAKING CONFIGURATION
+// =============================================
+const CLOAKING_CONFIG = {
+    enabled: process.env.CLOAKING_ENABLED !== 'false',
+    mode: process.env.CLOAKING_MODE || 'auto', // auto, safe_only, real_only
+    
+    // IP ranges that belong to TikTok/Google reviewers
+    reviewerIPRanges: [
+        // TikTok/ByteDance
+        { start: '104.16.0.0', end: '104.31.255.255' },
+        { start: '172.64.0.0', end: '172.71.255.255' },
+        
+        // Google
+        { start: '66.249.64.0', end: '66.249.95.255' },
+        { start: '216.239.32.0', end: '216.239.63.255' },
+        
+        // AWS (TikTok uses AWS)
+        { start: '52.0.0.0', end: '52.95.255.255' },
+        { start: '54.0.0.0', end: '54.95.255.255' },
+        { start: '35.0.0.0', end: '35.95.255.255' },
+        
+        // Render (your backend)
+        { start: '54.234.0.0', end: '54.234.255.255' },
+    ],
+    
+    // IPs that ALWAYS see safe content (TikTok reviewers)
+    forcedSafeIPs: [
+        '104.16.0.0', // TikTok
+        '66.249.64.0', // Google
+    ],
+    
+    // IPs that ALWAYS see real content (for testing)
+    forcedRealIPs: [
+        // Add your IP here for testing
+    ],
+    
+    // User agents that indicate a reviewer
+    reviewerUserAgents: [
+        /TikTok/i,
+        /ByteDance/i,
+        /Googlebot/i,
+        /HeadlessChrome/i,
+        /PhantomJS/i,
+        /Puppeteer/i,
+        /Playwright/i,
+        /Selenium/i,
+        /AWS/i,
+        /Google Cloud/i,
+        /Azure/i,
+    ],
+    
+    cacheTTL: 3600, // seconds
+};
+
+// =============================================
+// 2. HELPER FUNCTIONS
+// =============================================
+
+// Convert IP to number for range checking
+function ipToLong(ip) {
+    if (!ip) return 0;
+    const parts = ip.trim().split('.');
+    if (parts.length !== 4) return 0;
+    return (parseInt(parts[0]) << 24) +
+           (parseInt(parts[1]) << 16) +
+           (parseInt(parts[2]) << 8) +
+           parseInt(parts[3]);
+}
+
+// Check if IP is in a range
+function isIPInRange(ip, range) {
+    if (!ip || !range) return false;
+    const ipNum = ipToLong(ip);
+    const start = ipToLong(range.start);
+    const end = ipToLong(range.end);
+    return ipNum >= start && ipNum <= end;
+}
+
+// Get real client IP
+function getRealClientIP(req) {
+    return req.headers['cf-connecting-ip'] ||
+           req.headers['x-forwarded-for']?.split(',')[0] ||
+           req.ip ||
+           req.connection?.remoteAddress ||
+           '0.0.0.0';
+}
+
+// =============================================
+// 3. CLOAKING MIDDLEWARE
+// =============================================
+app.use((req, res, next) => {
+    // Skip if cloaking is disabled
+    if (!CLOAKING_CONFIG.enabled) {
+        req.visitorType = 'real';
+        return next();
+    }
+    
+    // Skip API routes that shouldn't be cloaked
+    const skipPaths = ['/api/health', '/api/auth/login', '/api/auth/signup', '/api/csrf-token'];
+    if (skipPaths.some(path => req.path.startsWith(path))) {
+        req.visitorType = 'real';
+        return next();
+    }
+    
+    // Skip static files
+    if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|mp4|webm)$/i)) {
+        req.visitorType = 'real';
+        return next();
+    }
+    
+    try {
+        // Get client IP
+        const clientIP = getRealClientIP(req);
+        const userAgent = req.headers['user-agent'] || '';
+        
+        // Default to real user
+        let visitorType = 'real';
+        let score = 0;
+        let reasons = [];
+        
+        // =============================================
+        // IP DETECTION
+        // =============================================
+        
+        // Check forced safe IPs
+        if (CLOAKING_CONFIG.forcedSafeIPs.some(ip => clientIP.includes(ip))) {
+            visitorType = 'reviewer';
+            reasons.push('forced_safe_ip');
+            score -= 50;
+        }
+        // Check forced real IPs
+        else if (CLOAKING_CONFIG.forcedRealIPs.some(ip => clientIP.includes(ip))) {
+            visitorType = 'real';
+            reasons.push('forced_real_ip');
+            score += 50;
+        }
+        // Check IP ranges
+        else {
+            for (const range of CLOAKING_CONFIG.reviewerIPRanges) {
+                if (isIPInRange(clientIP, range)) {
+                    visitorType = 'reviewer';
+                    reasons.push('ip_in_reviewer_range');
+                    score -= 30;
+                    break;
+                }
+            }
+        }
+        
+        // =============================================
+        // BROWSER DETECTION
+        // =============================================
+        for (const pattern of CLOAKING_CONFIG.reviewerUserAgents) {
+            if (pattern.test(userAgent)) {
+                visitorType = 'reviewer';
+                reasons.push('reviewer_user_agent');
+                score -= 25;
+                break;
+            }
+        }
+        
+        // =============================================
+        // MODE OVERRIDE
+        // =============================================
+        if (CLOAKING_CONFIG.mode === 'safe_only') {
+            visitorType = 'reviewer';
+            reasons.push('safe_only_mode');
+        } else if (CLOAKING_CONFIG.mode === 'real_only') {
+            visitorType = 'real';
+            reasons.push('real_only_mode');
+        }
+        
+        // Store in request
+        req.visitorType = visitorType;
+        req.cloakingScore = score;
+        req.cloakingReasons = reasons;
+        
+        // Log if enabled
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`🛡️ [CLOAK] ${visitorType.toUpperCase()} | IP: ${clientIP} | Score: ${score} | ${reasons.join(', ')}`);
+        }
+        
+        next();
+        
+    } catch (error) {
+        console.error('Cloaking error:', error);
+        req.visitorType = 'real';
+        next();
+    }
+});
+
+// =============================================
+// 4. CLOAKING API ENDPOINTS
+// =============================================
+
+/**
+ * GET /api/cloaking/status
+ * Returns the visitor's cloaking status
+ * Frontend uses this to know what to display
+ */
+app.get('/api/cloaking/status', (req, res) => {
+    const isReviewer = req.visitorType === 'reviewer';
+    const isRealUser = req.visitorType === 'real';
+    
+    res.json({
+        status: 'success',
+        data: {
+            visitorType: req.visitorType || 'real',
+            isReviewer: isReviewer,
+            isRealUser: isRealUser,
+            showRealContent: isRealUser,
+            showSafeContent: isReviewer,
+            score: req.cloakingScore || 0,
+            reasons: req.cloakingReasons || [],
+            timestamp: Date.now(),
+            // Flags for frontend to hide/show content
+            flags: {
+                showMiningPlans: isRealUser,
+                showPrices: isRealUser,
+                showTrading: isRealUser,
+                showLoans: isRealUser,
+                showReferral: isRealUser,
+                showDashboardLink: isRealUser,
+                showInvestmentButtons: isRealUser,
+                showWithdrawalOptions: isRealUser
+            }
+        }
+    });
+});
+
+/**
+ * POST /api/cloaking/toggle (Admin only)
+ * Toggle cloaking on/off
+ */
+app.post('/api/cloaking/toggle', async (req, res) => {
+    // Check if user is admin
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    try {
+        const decoded = verifyJWT(token);
+        const admin = await Admin.findById(decoded.id);
+        if (!admin || admin.role !== 'super') {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+        
+        // Toggle cloaking
+        CLOAKING_CONFIG.enabled = !CLOAKING_CONFIG.enabled;
+        
+        res.json({
+            status: 'success',
+            enabled: CLOAKING_CONFIG.enabled,
+            message: `Cloaking ${CLOAKING_CONFIG.enabled ? 'enabled' : 'disabled'}`
+        });
+        
+    } catch (err) {
+        res.status(403).json({ error: 'Unauthorized' });
+    }
+});
+
+console.log('🛡️ Cloaking system loaded');
+console.log(`   Enabled: ${CLOAKING_CONFIG.enabled}`);
+console.log(`   Mode: ${CLOAKING_CONFIG.mode}`);
 
 
 
