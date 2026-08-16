@@ -24049,7 +24049,6 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
   }
 });
 
-
 // =============================================
 // POST /api/admin/withdrawals/:id/reject - Reject withdrawal request
 // ONLY THE ORIGINAL WITHDRAWAL AMOUNT IS REFUNDED
@@ -24135,6 +24134,10 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     // Check if funds were already deducted
     const fundsAlreadyDeducted = withdrawal.details?.fundsAlreadyDeducted === true;
 
+    // Initialize refund variables (will be set if funds were deducted)
+    let refundToMain = 0;
+    let refundToMatured = 0;
+
     console.log(`\n${'='.repeat(80)}`);
     console.log(`💰 REJECTING WITHDRAWAL: ${withdrawal.reference}`);
     console.log(`${'='.repeat(80)}`);
@@ -24177,9 +24180,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
       // =============================================
       // 4a. CALCULATE REFUND ALLOCATION
       // =============================================
-      let refundToMain = 0;
-      let refundToMatured = 0;
-      
       // Calculate what portion of the original withdrawal came from each wallet
       const totalWithdrawalSource = mainAmountUsed + maturedAmountUsed;
       
@@ -24190,6 +24190,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
       } else {
         // If no breakdown, refund everything to MAIN wallet
         refundToMain = originalWithdrawalAmount;
+        refundToMatured = 0;
       }
 
       console.log(`   Refund Allocation:`);
@@ -24619,8 +24620,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     });
   }
 });
-
-
 
 
 
