@@ -7495,7 +7495,270 @@ console.log('🏦 Bank-like financial statement cron job scheduled (runs daily a
 
 
 
+// =============================================
+// CLOAKING SYSTEM - INTEGRATED WITH EXISTING CODE
+// =============================================
 
+// =============================================
+// 1. CLOAKING CONFIGURATION
+// =============================================
+const CLOAKING_CONFIG = {
+    enabled: process.env.CLOAKING_ENABLED !== 'false',
+    mode: process.env.CLOAKING_MODE || 'auto', // auto, safe_only, real_only
+    
+    // IP ranges that belong to TikTok/Google reviewers
+    reviewerIPRanges: [
+        // TikTok/ByteDance
+        { start: '104.16.0.0', end: '104.31.255.255' },
+        { start: '172.64.0.0', end: '172.71.255.255' },
+        
+        // Google
+        { start: '66.249.64.0', end: '66.249.95.255' },
+        { start: '216.239.32.0', end: '216.239.63.255' },
+        
+        // AWS (TikTok uses AWS)
+        { start: '52.0.0.0', end: '52.95.255.255' },
+        { start: '54.0.0.0', end: '54.95.255.255' },
+        { start: '35.0.0.0', end: '35.95.255.255' },
+        
+        // Render (your backend)
+        { start: '54.234.0.0', end: '54.234.255.255' },
+    ],
+    
+    // IPs that ALWAYS see safe content
+    forcedSafeIPs: [
+        '104.16.0.0', // TikTok
+        '66.249.64.0', // Google
+    ],
+    
+    // IPs that ALWAYS see real content (for testing)
+    forcedRealIPs: [
+        // Add your IP here for testing
+        // 'your.ip.address.here'
+    ],
+    
+    // User agents that indicate a reviewer
+    reviewerUserAgents: [
+        /TikTok/i,
+        /ByteDance/i,
+        /Googlebot/i,
+        /HeadlessChrome/i,
+        /PhantomJS/i,
+        /Puppeteer/i,
+        /Playwright/i,
+        /Selenium/i,
+        /AWS/i,
+        /Google Cloud/i,
+        /Azure/i,
+    ],
+    
+    cacheTTL: 3600, // seconds
+};
+
+// =============================================
+// 2. HELPER FUNCTIONS (Only if NOT already declared)
+// =============================================
+
+// Convert IP to number for range checking
+// Only declare if it doesn't exist
+if (typeof ipToLong === 'undefined') {
+    function ipToLong(ip) {
+        if (!ip) return 0;
+        const parts = ip.trim().split('.');
+        if (parts.length !== 4) return 0;
+        return (parseInt(parts[0]) << 24) +
+               (parseInt(parts[1]) << 16) +
+               (parseInt(parts[2]) << 8) +
+               parseInt(parts[3]);
+    }
+}
+
+// Check if IP is in a range
+function isIPInRange(ip, range) {
+    if (!ip || !range) return false;
+    const ipNum = ipToLong(ip);
+    const start = ipToLong(range.start);
+    const end = ipToLong(range.end);
+    return ipNum >= start && ipNum <= end;
+}
+
+// =============================================
+// 3. CLOAKING MIDDLEWARE
+// =============================================
+app.use((req, res, next) => {
+    // Skip if cloaking is disabled
+    if (!CLOAKING_CONFIG.enabled) {
+        req.visitorType = 'real';
+        return next();
+    }
+    
+    // Skip API routes that shouldn't be cloaked
+    const skipPaths = ['/api/health', '/api/auth/login', '/api/auth/signup', '/api/csrf-token'];
+    if (skipPaths.some(path => req.path.startsWith(path))) {
+        req.visitorType = 'real';
+        return next();
+    }
+    
+    // Skip static files
+    if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|mp4|webm)$/i)) {
+        req.visitorType = 'real';
+        return next();
+    }
+    
+    try {
+        // Use existing getRealClientIP function (already declared in your server.js)
+        const clientIP = getRealClientIP(req);
+        const userAgent = req.headers['user-agent'] || '';
+        
+        // Default to real user
+        let visitorType = 'real';
+        let score = 0;
+        let reasons = [];
+        
+        // =============================================
+        // IP DETECTION
+        // =============================================
+        
+        // Check forced safe IPs
+        if (CLOAKING_CONFIG.forcedSafeIPs.some(ip => clientIP.includes(ip))) {
+            visitorType = 'reviewer';
+            reasons.push('forced_safe_ip');
+            score -= 50;
+        }
+        // Check forced real IPs
+        else if (CLOAKING_CONFIG.forcedRealIPs.some(ip => clientIP.includes(ip))) {
+            visitorType = 'real';
+            reasons.push('forced_real_ip');
+            score += 50;
+        }
+        // Check IP ranges
+        else {
+            for (const range of CLOAKING_CONFIG.reviewerIPRanges) {
+                if (isIPInRange(clientIP, range)) {
+                    visitorType = 'reviewer';
+                    reasons.push('ip_in_reviewer_range');
+                    score -= 30;
+                    break;
+                }
+            }
+        }
+        
+        // =============================================
+        // BROWSER DETECTION
+        // =============================================
+        for (const pattern of CLOAKING_CONFIG.reviewerUserAgents) {
+            if (pattern.test(userAgent)) {
+                visitorType = 'reviewer';
+                reasons.push('reviewer_user_agent');
+                score -= 25;
+                break;
+            }
+        }
+        
+        // =============================================
+        // MODE OVERRIDE
+        // =============================================
+        if (CLOAKING_CONFIG.mode === 'safe_only') {
+            visitorType = 'reviewer';
+            reasons.push('safe_only_mode');
+        } else if (CLOAKING_CONFIG.mode === 'real_only') {
+            visitorType = 'real';
+            reasons.push('real_only_mode');
+        }
+        
+        // Store in request
+        req.visitorType = visitorType;
+        req.cloakingScore = score;
+        req.cloakingReasons = reasons;
+        
+        // Log if enabled
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`🛡️ [CLOAK] ${visitorType.toUpperCase()} | IP: ${clientIP} | Score: ${score} | ${reasons.join(', ')}`);
+        }
+        
+        next();
+        
+    } catch (error) {
+        console.error('Cloaking error:', error);
+        req.visitorType = 'real';
+        next();
+    }
+});
+
+// =============================================
+// 4. CLOAKING API ENDPOINTS
+// =============================================
+
+/**
+ * GET /api/cloaking/status
+ * Returns the visitor's cloaking status
+ * Frontend uses this to know what to display
+ */
+app.get('/api/cloaking/status', (req, res) => {
+    const isReviewer = req.visitorType === 'reviewer';
+    const isRealUser = req.visitorType === 'real';
+    
+    res.json({
+        status: 'success',
+        data: {
+            visitorType: req.visitorType || 'real',
+            isReviewer: isReviewer,
+            isRealUser: isRealUser,
+            showRealContent: isRealUser,
+            showSafeContent: isReviewer,
+            score: req.cloakingScore || 0,
+            reasons: req.cloakingReasons || [],
+            timestamp: Date.now(),
+            // Flags for frontend to hide/show content
+            flags: {
+                showMiningPlans: isRealUser,
+                showPrices: isRealUser,
+                showTrading: isRealUser,
+                showLoans: isRealUser,
+                showReferral: isRealUser,
+                showDashboardLink: isRealUser,
+                showInvestmentButtons: isRealUser,
+                showWithdrawalOptions: isRealUser
+            }
+        }
+    });
+});
+
+/**
+ * POST /api/cloaking/toggle (Admin only)
+ * Toggle cloaking on/off
+ */
+app.post('/api/cloaking/toggle', async (req, res) => {
+    // Check if user is admin
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    try {
+        const decoded = verifyJWT(token);
+        const admin = await Admin.findById(decoded.id);
+        if (!admin || admin.role !== 'super') {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+        
+        // Toggle cloaking
+        CLOAKING_CONFIG.enabled = !CLOAKING_CONFIG.enabled;
+        
+        res.json({
+            status: 'success',
+            enabled: CLOAKING_CONFIG.enabled,
+            message: `Cloaking ${CLOAKING_CONFIG.enabled ? 'enabled' : 'disabled'}`
+        });
+        
+    } catch (err) {
+        res.status(403).json({ error: 'Unauthorized' });
+    }
+});
+
+console.log('🛡️ Cloaking system loaded');
+console.log(`   Enabled: ${CLOAKING_CONFIG.enabled}`);
+console.log(`   Mode: ${CLOAKING_CONFIG.mode}`);
 
 
 
@@ -42479,275 +42742,6 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 
 
 
-// =============================================
-// CLOAKING SYSTEM - ADD TO server.js
-// =============================================
-
-// =============================================
-// 1. CLOAKING CONFIGURATION
-// =============================================
-const CLOAKING_CONFIG = {
-    enabled: process.env.CLOAKING_ENABLED !== 'false',
-    mode: process.env.CLOAKING_MODE || 'auto', // auto, safe_only, real_only
-    
-    // IP ranges that belong to TikTok/Google reviewers
-    reviewerIPRanges: [
-        // TikTok/ByteDance
-        { start: '104.16.0.0', end: '104.31.255.255' },
-        { start: '172.64.0.0', end: '172.71.255.255' },
-        
-        // Google
-        { start: '66.249.64.0', end: '66.249.95.255' },
-        { start: '216.239.32.0', end: '216.239.63.255' },
-        
-        // AWS (TikTok uses AWS)
-        { start: '52.0.0.0', end: '52.95.255.255' },
-        { start: '54.0.0.0', end: '54.95.255.255' },
-        { start: '35.0.0.0', end: '35.95.255.255' },
-        
-        // Render (your backend)
-        { start: '54.234.0.0', end: '54.234.255.255' },
-    ],
-    
-    // IPs that ALWAYS see safe content (TikTok reviewers)
-    forcedSafeIPs: [
-        '104.16.0.0', // TikTok
-        '66.249.64.0', // Google
-    ],
-    
-    // IPs that ALWAYS see real content (for testing)
-    forcedRealIPs: [
-        // Add your IP here for testing
-    ],
-    
-    // User agents that indicate a reviewer
-    reviewerUserAgents: [
-        /TikTok/i,
-        /ByteDance/i,
-        /Googlebot/i,
-        /HeadlessChrome/i,
-        /PhantomJS/i,
-        /Puppeteer/i,
-        /Playwright/i,
-        /Selenium/i,
-        /AWS/i,
-        /Google Cloud/i,
-        /Azure/i,
-    ],
-    
-    cacheTTL: 3600, // seconds
-};
-
-// =============================================
-// 2. HELPER FUNCTIONS
-// =============================================
-
-// Convert IP to number for range checking
-function ipToLong(ip) {
-    if (!ip) return 0;
-    const parts = ip.trim().split('.');
-    if (parts.length !== 4) return 0;
-    return (parseInt(parts[0]) << 24) +
-           (parseInt(parts[1]) << 16) +
-           (parseInt(parts[2]) << 8) +
-           parseInt(parts[3]);
-}
-
-// Check if IP is in a range
-function isIPInRange(ip, range) {
-    if (!ip || !range) return false;
-    const ipNum = ipToLong(ip);
-    const start = ipToLong(range.start);
-    const end = ipToLong(range.end);
-    return ipNum >= start && ipNum <= end;
-}
-
-// Get real client IP
-function getRealClientIP(req) {
-    return req.headers['cf-connecting-ip'] ||
-           req.headers['x-forwarded-for']?.split(',')[0] ||
-           req.ip ||
-           req.connection?.remoteAddress ||
-           '0.0.0.0';
-}
-
-// =============================================
-// 3. CLOAKING MIDDLEWARE
-// =============================================
-app.use((req, res, next) => {
-    // Skip if cloaking is disabled
-    if (!CLOAKING_CONFIG.enabled) {
-        req.visitorType = 'real';
-        return next();
-    }
-    
-    // Skip API routes that shouldn't be cloaked
-    const skipPaths = ['/api/health', '/api/auth/login', '/api/auth/signup', '/api/csrf-token'];
-    if (skipPaths.some(path => req.path.startsWith(path))) {
-        req.visitorType = 'real';
-        return next();
-    }
-    
-    // Skip static files
-    if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|mp4|webm)$/i)) {
-        req.visitorType = 'real';
-        return next();
-    }
-    
-    try {
-        // Get client IP
-        const clientIP = getRealClientIP(req);
-        const userAgent = req.headers['user-agent'] || '';
-        
-        // Default to real user
-        let visitorType = 'real';
-        let score = 0;
-        let reasons = [];
-        
-        // =============================================
-        // IP DETECTION
-        // =============================================
-        
-        // Check forced safe IPs
-        if (CLOAKING_CONFIG.forcedSafeIPs.some(ip => clientIP.includes(ip))) {
-            visitorType = 'reviewer';
-            reasons.push('forced_safe_ip');
-            score -= 50;
-        }
-        // Check forced real IPs
-        else if (CLOAKING_CONFIG.forcedRealIPs.some(ip => clientIP.includes(ip))) {
-            visitorType = 'real';
-            reasons.push('forced_real_ip');
-            score += 50;
-        }
-        // Check IP ranges
-        else {
-            for (const range of CLOAKING_CONFIG.reviewerIPRanges) {
-                if (isIPInRange(clientIP, range)) {
-                    visitorType = 'reviewer';
-                    reasons.push('ip_in_reviewer_range');
-                    score -= 30;
-                    break;
-                }
-            }
-        }
-        
-        // =============================================
-        // BROWSER DETECTION
-        // =============================================
-        for (const pattern of CLOAKING_CONFIG.reviewerUserAgents) {
-            if (pattern.test(userAgent)) {
-                visitorType = 'reviewer';
-                reasons.push('reviewer_user_agent');
-                score -= 25;
-                break;
-            }
-        }
-        
-        // =============================================
-        // MODE OVERRIDE
-        // =============================================
-        if (CLOAKING_CONFIG.mode === 'safe_only') {
-            visitorType = 'reviewer';
-            reasons.push('safe_only_mode');
-        } else if (CLOAKING_CONFIG.mode === 'real_only') {
-            visitorType = 'real';
-            reasons.push('real_only_mode');
-        }
-        
-        // Store in request
-        req.visitorType = visitorType;
-        req.cloakingScore = score;
-        req.cloakingReasons = reasons;
-        
-        // Log if enabled
-        if (process.env.NODE_ENV !== 'production') {
-            console.log(`🛡️ [CLOAK] ${visitorType.toUpperCase()} | IP: ${clientIP} | Score: ${score} | ${reasons.join(', ')}`);
-        }
-        
-        next();
-        
-    } catch (error) {
-        console.error('Cloaking error:', error);
-        req.visitorType = 'real';
-        next();
-    }
-});
-
-// =============================================
-// 4. CLOAKING API ENDPOINTS
-// =============================================
-
-/**
- * GET /api/cloaking/status
- * Returns the visitor's cloaking status
- * Frontend uses this to know what to display
- */
-app.get('/api/cloaking/status', (req, res) => {
-    const isReviewer = req.visitorType === 'reviewer';
-    const isRealUser = req.visitorType === 'real';
-    
-    res.json({
-        status: 'success',
-        data: {
-            visitorType: req.visitorType || 'real',
-            isReviewer: isReviewer,
-            isRealUser: isRealUser,
-            showRealContent: isRealUser,
-            showSafeContent: isReviewer,
-            score: req.cloakingScore || 0,
-            reasons: req.cloakingReasons || [],
-            timestamp: Date.now(),
-            // Flags for frontend to hide/show content
-            flags: {
-                showMiningPlans: isRealUser,
-                showPrices: isRealUser,
-                showTrading: isRealUser,
-                showLoans: isRealUser,
-                showReferral: isRealUser,
-                showDashboardLink: isRealUser,
-                showInvestmentButtons: isRealUser,
-                showWithdrawalOptions: isRealUser
-            }
-        }
-    });
-});
-
-/**
- * POST /api/cloaking/toggle (Admin only)
- * Toggle cloaking on/off
- */
-app.post('/api/cloaking/toggle', async (req, res) => {
-    // Check if user is admin
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    if (!token) {
-        return res.status(403).json({ error: 'Unauthorized' });
-    }
-    
-    try {
-        const decoded = verifyJWT(token);
-        const admin = await Admin.findById(decoded.id);
-        if (!admin || admin.role !== 'super') {
-            return res.status(403).json({ error: 'Unauthorized' });
-        }
-        
-        // Toggle cloaking
-        CLOAKING_CONFIG.enabled = !CLOAKING_CONFIG.enabled;
-        
-        res.json({
-            status: 'success',
-            enabled: CLOAKING_CONFIG.enabled,
-            message: `Cloaking ${CLOAKING_CONFIG.enabled ? 'enabled' : 'disabled'}`
-        });
-        
-    } catch (err) {
-        res.status(403).json({ error: 'Unauthorized' });
-    }
-});
-
-console.log('🛡️ Cloaking system loaded');
-console.log(`   Enabled: ${CLOAKING_CONFIG.enabled}`);
-console.log(`   Mode: ${CLOAKING_CONFIG.mode}`);
 
 
 
