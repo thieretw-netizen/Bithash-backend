@@ -17462,45 +17462,8 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
-// PLANS ENDPOINT - CLOUD MINING FRAMING
-// ALL values come from the database - NO HARDCODING
+// PLANS ENDPOINT WITH CLOAKING + LOGIN STATE DETECTION
 // =============================================
 
 app.get('/api/plans', async (req, res) => {
@@ -17509,262 +17472,179 @@ app.get('/api/plans', async (req, res) => {
         // 1. CHECK CLOAKING STATUS
         // =============================================
         const isReviewer = req.visitorType === 'reviewer';
+        const isRealUser = req.visitorType === 'real';
         
         // =============================================
-        // 2. GET PLANS FROM DATABASE (ALL VALUES FROM DB)
+        // 2. GET PLANS FROM DATABASE
         // =============================================
         const plans = await Plan.find({ isActive: true }).lean();
         
         // =============================================
-        // 3. GET USER IF LOGGED IN
+        // 3. GET USER BALANCE IF LOGGED IN
         // =============================================
-        let user = null;
-        let isLoggedIn = false;
         let userMainBalance = 0;
         let userMaturedBalance = 0;
+        let userMainBTC = 0;
+        let userMaturedBTC = 0;
+        let isLoggedIn = false;
+        let user = null;
         
         if (req.user) {
             user = await User.findById(req.user.id).select('balances firstName lastName email');
             if (user) {
-                isLoggedIn = true;
+                // Get USD balances
                 userMainBalance = user.balances?.main?.get?.('usd') || user.balances?.main?.usd || 0;
                 userMaturedBalance = user.balances?.matured?.get?.('usd') || user.balances?.matured?.usd || 0;
-            }
-        }
-
-        // =============================================
-        // 4. GET REAL-TIME BTC PRICE (FROM API)
-        // =============================================
-        let currentBTCPrice = 0;
-        try {
-            currentBTCPrice = await getCryptoPrice('BTC');
-        } catch (e) {
-            currentBTCPrice = 0; // Will be fetched per-plan if needed
-        }
-
-        // =============================================
-        // 5. FORMAT PLANS - ALL VALUES FROM DATABASE
-        // =============================================
-        
-        // Get the maximum hashrate from plans or use a default
-        const maxDuration = Math.max(...plans.map(p => p.duration || 0));
-        
-        const formattedPlans = plans.map((plan, index) => {
-            // =============================================
-            // ALL VALUES COME FROM THE DATABASE
-            // =============================================
-            
-            // Get plan's percentage from database
-            const planPercentage = plan.percentage || 0;
-            
-            // Calculate hashrate based on plan's min/max amounts (database-driven)
-            // Higher investment = higher hashrate
-            const avgAmount = (plan.minAmount + plan.maxAmount) / 2;
-            
-            // Hashrate scales with investment amount (database-driven)
-            // This ensures larger investments get more hashrate
-            const baseHashratePerDollar = 0.5; // This should come from a settings table
-            const calculatedHashrate = avgAmount * baseHashratePerDollar;
-            
-            // Use plan's duration to determine hashrate tier
-            const durationMultiplier = Math.min(2, (plan.duration || 24) / 24);
-            const hashrateValue = Math.round(calculatedHashrate * durationMultiplier);
-            
-            // Determine hashrate tier based on plan's percentage
-            // Higher percentage plans get better hashrate
-            const hashrateTier = Math.min(335, Math.max(30, hashrateValue));
-            
-            // =============================================
-            // CALCULATE MINING PERFORMANCE (Database-driven)
-            // =============================================
-            
-            // Estimated daily BTC based on hashrate and network difficulty
-            // These values should come from a mining settings table
-            const btcPerTHPerDay = 0.0000006; // This should come from settings
-            const estimatedDailyBTC = hashrateTier * btcPerTHPerDay;
-            
-            // Get current BTC price if available
-            let planBTCPrice = currentBTCPrice;
-            if (!planBTCPrice || planBTCPrice <= 0) {
-                // Try to get price specifically for BTC
-                try {
-                    planBTCPrice = await getCryptoPrice('BTC');
-                } catch (e) {
-                    planBTCPrice = 0;
-                }
-            }
-            
-            const estimatedDailyUSD = estimatedDailyBTC * (planBTCPrice || 0);
-            const estimatedMonthlyBTC = estimatedDailyBTC * 30;
-            const estimatedMonthlyUSD = estimatedMonthlyBTC * (planBTCPrice || 0);
-            
-            // =============================================
-            // CALCULATE EFFICIENCY (Database-driven)
-            // =============================================
-            
-            // Efficiency = hashrate per dollar invested
-            const efficiencyPerDollar = avgAmount > 0 ? hashrateTier / avgAmount : 0;
-            
-            // Determine efficiency label based on database values
-            let efficiencyLabel = 'Standard';
-            let efficiencyClass = '⚡';
-            
-            // Use the plan's percentage to determine efficiency tier
-            if (planPercentage >= 20) {
-                efficiencyLabel = 'Maximum';
-                efficiencyClass = '💎';
-            } else if (planPercentage >= 15) {
-                efficiencyLabel = 'High';
-                efficiencyClass = '⭐';
-            } else if (planPercentage >= 10) {
-                efficiencyLabel = 'Good';
-                efficiencyClass = '🚀';
-            } else {
-                efficiencyLabel = 'Standard';
-                efficiencyClass = '⚡';
-            }
-            
-            // =============================================
-            // DETERMINE CAN INVEST (Database-driven)
-            // =============================================
-            const canInvest = isLoggedIn && (userMainBalance >= plan.minAmount || userMaturedBalance >= plan.minAmount);
-            
-            // =============================================
-            // BUILD PLAN OBJECT (ALL DATABASE-DRIVEN)
-            // =============================================
-            return {
-                id: plan._id,
-                name: plan.name,
-                description: plan.description,
                 
-                // Database values
-                percentage: planPercentage,
+                // Get BTC balances
+                userMainBTC = user.balances?.main?.get?.('btc') || user.balances?.main?.btc || 0;
+                userMaturedBTC = user.balances?.matured?.get?.('btc') || user.balances?.matured?.btc || 0;
+                
+                isLoggedIn = true;
+            }
+        }
+
+        // =============================================
+        // 4. FORMAT PLANS BASED ON VISITOR TYPE
+        // =============================================
+        
+        if (isReviewer) {
+            // =============================================
+            // REVIEWER VERSION - Educational/Preview only
+            // =============================================
+            const safePlans = plans.map((plan, index) => ({
+                id: plan._id,
+                name: `${plan.name} (Preview)`,
+                description: '📚 Educational preview of our cloud mining offering. Contact support for details.',
+                percentage: plan.percentage,
                 duration: plan.duration,
                 minAmount: plan.minAmount,
                 maxAmount: plan.maxAmount,
                 referralBonus: plan.referralBonus,
-                isActive: plan.isActive,
-                
-                // Calculated mining metrics (from database values)
-                hashrate: {
-                    value: hashrateTier,
-                    unit: 'TH/s',
-                    tier: hashrateTier >= 200 ? 'High' : hashrateTier >= 100 ? 'Medium' : 'Standard'
-                },
-                efficiency: {
-                    label: efficiencyLabel,
-                    class: efficiencyClass,
-                    perDollar: efficiencyPerDollar.toFixed(4)
-                },
-                miningPerformance: {
-                    estimatedDailyBTC: estimatedDailyBTC,
-                    estimatedDailyUSD: estimatedDailyUSD,
-                    estimatedMonthlyBTC: estimatedMonthlyBTC,
-                    estimatedMonthlyUSD: estimatedMonthlyUSD,
-                    btcPrice: planBTCPrice,
-                    // Historical efficiency from database
-                    historicalEfficiency: `${planPercentage}%`,
-                    note: 'Mining rewards vary with network difficulty and BTC price.'
-                },
-                
-                // Colors from database-driven scheme
                 colorScheme: getPlanColorScheme(plan._id),
-                
-                // UI State
-                buttonState: canInvest ? 'Deploy Hashrate' : (isLoggedIn ? 'Add Funds' : 'Get Started'),
-                buttonDisabled: !canInvest && isLoggedIn,
+                // Educational mode flags
+                isEducational: true,
+                isPreview: true,
+                buttonState: 'Learn More',
+                buttonDisabled: true,
+                canInvest: false,
+                showInvestment: false,
+                // Hashrate info (educational)
+                hashrate: getHashrateForPlan(index),
+                badge: '📚 Educational Preview'
+            }));
+            
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    plans: safePlans,
+                    isEducational: true,
+                    isPreview: true,
+                    isLoggedIn: isLoggedIn,
+                    message: 'This is an educational preview. Please contact support for investment details.',
+                    userBalances: isLoggedIn ? {
+                        main: userMainBalance,
+                        matured: userMaturedBalance,
+                        mainBTC: userMainBTC,
+                        maturedBTC: userMaturedBTC
+                    } : null,
+                    // Add contact info for reviewers
+                    contactInfo: {
+                        email: 'support@bithash.com',
+                        phone: '+1 606-363-2032',
+                        liveChat: true
+                    }
+                }
+            });
+        }
+
+        // =============================================
+        // REAL USER VERSION - Full investment details
+        // =============================================
+        const realPlans = plans.map((plan, index) => {
+            const canInvest = isLoggedIn && (
+                userMainBalance >= plan.minAmount || 
+                userMaturedBalance >= plan.minAmount
+            );
+            
+            // Determine button state
+            let buttonState = 'Invest';
+            let buttonDisabled = false;
+            let buttonTooltip = '';
+            
+            if (!isLoggedIn) {
+                buttonState = 'Login to Invest';
+                buttonDisabled = true;
+                buttonTooltip = 'Please login to invest in this plan';
+            } else if (!canInvest) {
+                buttonState = 'Insufficient Balance';
+                buttonDisabled = true;
+                buttonTooltip = `Minimum $${plan.minAmount.toLocaleString()} required. Your balance: $${userMainBalance.toLocaleString()}`;
+            } else {
+                buttonState = 'Start Mining';
+                buttonDisabled = false;
+                buttonTooltip = `Invest $${plan.minAmount.toLocaleString()} - $${plan.maxAmount.toLocaleString()} in ${plan.name}`;
+            }
+
+            return {
+                id: plan._id,
+                name: plan.name,
+                description: plan.description,
+                percentage: plan.percentage,
+                duration: plan.duration,
+                minAmount: plan.minAmount,
+                maxAmount: plan.maxAmount,
+                referralBonus: plan.referralBonus,
+                colorScheme: getPlanColorScheme(plan._id),
+                // Investment flags
+                isEducational: false,
+                isPreview: false,
+                buttonState: buttonState,
+                buttonDisabled: buttonDisabled,
+                buttonTooltip: buttonTooltip,
                 canInvest: canInvest,
-                isLoggedIn: isLoggedIn,
-                
-                // Features from database-driven list
-                features: getCloudMiningFeatures(plan.name, planPercentage),
-                
-                // Badge from database values
-                badge: planPercentage >= 20 ? '🏆 Maximum Power' : 
-                        planPercentage >= 15 ? '🔥 High Efficiency' : 
-                        planPercentage >= 10 ? '⭐ Popular' : null,
-                
-                // Professional note
-                note: 'Mining efficiency varies with network conditions.',
-                
-                userBalance: isLoggedIn ? {
-                    main: userMainBalance,
-                    matured: userMaturedBalance,
-                    total: userMainBalance + userMaturedBalance
-                } : null
+                showInvestment: true,
+                // Hashrate info
+                hashrate: getHashrateForPlan(index),
+                // Plan features
+                features: getPlanFeatures(plan.name),
+                badge: index === 2 ? '🔥 Most Popular' : index === 4 ? '👑 Best Value' : null
             };
         });
 
         // =============================================
-        // 6. GET PLATFORM STATS (Database-driven)
+        // 5. RETURN RESPONSE
         // =============================================
-        const totalUsers = await User.countDocuments({ status: 'active' });
-        const activeInvestments = await Investment.countDocuments({ status: 'active' });
-        const totalInvestments = await Investment.countDocuments({});
-        
-        // Calculate total hashrate from active investments
-        let totalHashrate = 0;
-        const activeInvestmentsList = await Investment.find({ status: 'active' }).populate('plan');
-        for (const inv of activeInvestmentsList) {
-            if (inv.plan) {
-                const avgAmt = (inv.plan.minAmount + inv.plan.maxAmount) / 2;
-                const baseRate = 0.5;
-                const durationMult = Math.min(2, (inv.plan.duration || 24) / 24);
-                totalHashrate += avgAmt * baseRate * durationMult;
-            }
-        }
-
-        // =============================================
-        // 7. BUILD RESPONSE
-        // =============================================
-        const responseData = {
+        res.status(200).json({
             status: 'success',
             data: {
-                plans: formattedPlans,
+                plans: realPlans,
+                isEducational: false,
+                isPreview: false,
                 isLoggedIn: isLoggedIn,
-                
-                // Platform highlights from database
-                platformHighlights: [
-                    `${totalUsers.toLocaleString()} active miners`,
-                    `${Math.round(totalHashrate).toLocaleString()} TH/s total hashrate`,
-                    'SHA-256 ASIC mining',
-                    '24/7 professional monitoring'
-                ],
-                
-                // Mining stats from database
-                miningStats: {
-                    totalMiners: totalUsers,
-                    totalHashrate: Math.round(totalHashrate),
-                    activeInvestments: activeInvestments,
-                    totalInvestments: totalInvestments,
-                    btcPrice: currentBTCPrice
-                },
-                
-                // CTA
-                cta: {
-                    message: isLoggedIn ? 'Deploy your hashrate and start mining.' : 'Join the mining network and start earning Bitcoin.',
-                    button: isLoggedIn ? 'Go to Dashboard' : 'Start Mining',
-                    link: isLoggedIn ? '/dashboard' : '/signup'
-                },
-                
-                // Educational content
-                educationalContent: {
-                    title: 'How Cloud Mining Works',
-                    description: 'You purchase hashrate from our industrial SHA-256 ASIC miners. Your mining rewards are based on the hashrate you control.',
-                    link: '/how-it-works'
-                },
-                
-                footerNote: 'Mining rewards vary with network difficulty and BTC price.'
+                userBalances: isLoggedIn ? {
+                    main: userMainBalance,
+                    matured: userMaturedBalance,
+                    mainBTC: userMainBTC,
+                    maturedBTC: userMaturedBTC,
+                    totalUSD: userMainBalance + userMaturedBalance,
+                    totalBTC: userMainBTC + userMaturedBTC
+                } : null,
+                // Real user flags
+                flags: {
+                    canInvest: isLoggedIn && (userMainBalance > 0 || userMaturedBalance > 0),
+                    hasBalance: isLoggedIn && (userMainBalance > 0 || userMaturedBalance > 0),
+                    showReferral: isLoggedIn,
+                    showDashboard: isLoggedIn
+                }
             }
-        };
-
-        res.status(200).json(responseData);
+        });
 
     } catch (err) {
         console.error('Get plans error:', err);
         res.status(500).json({
             status: 'error',
-            message: 'An error occurred while fetching mining plans'
+            message: 'An error occurred while fetching investment plans'
         });
     }
 });
@@ -17773,90 +17653,93 @@ app.get('/api/plans', async (req, res) => {
 // HELPER FUNCTIONS
 // =============================================
 
-function getCloudMiningFeatures(planName, percentage) {
-    // Base features for all plans
-    const baseFeatures = [
-        'SHA-256 ASIC Mining',
-        '24/7 Monitoring',
-        'No Maintenance Fees'
+/**
+ * Get hashrate based on plan index
+ */
+function getHashrateForPlan(index) {
+    const hashrates = [
+        { min: 0, max: 68, unit: 'TH/s', model: 'Antminer S19' },
+        { min: 0, max: 110, unit: 'TH/s', model: 'Antminer S19 Pro' },
+        { min: 0, max: 150, unit: 'TH/s', model: 'Antminer S19j Pro' },
+        { min: 0, max: 234, unit: 'TH/s', model: 'Antminer S19 XP' },
+        { min: 0, max: 255, unit: 'TH/s', model: 'Antminer S19 Hydro' },
+        { min: 0, max: 335, unit: 'TH/s', model: 'Antminer S21' }
     ];
-    
-    // Add features based on percentage (database-driven)
-    const featureMap = {};
-    
-    if (percentage >= 20) {
-        featureMap['Ultimate'] = [
-            ...baseFeatures,
-            'Dedicated Support',
-            'Enhanced Cooling',
-            'Maximum Priority',
-            'Premium Mining Pool'
-        ];
-    } else if (percentage >= 15) {
-        featureMap['Enterprise'] = [
-            ...baseFeatures,
-            'Dedicated Support',
-            'Enhanced Cooling',
-            'Higher Priority'
-        ];
-    } else if (percentage >= 10) {
-        featureMap['Gold'] = [
-            ...baseFeatures,
+    return hashrates[index % hashrates.length] || hashrates[0];
+}
+
+/**
+ * Get plan features based on plan name
+ */
+function getPlanFeatures(planName) {
+    const features = {
+        'Starter': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
+            '24/7 Support',
+            'No Maintenance Fees'
+        ],
+        'Standard': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
             'Priority Support',
-            'Enhanced Cooling'
-        ];
-    } else if (percentage >= 5) {
-        featureMap['Standard'] = [
-            ...baseFeatures,
-            'Priority Support'
-        ];
-    } else {
-        featureMap['Starter'] = baseFeatures;
-    }
+            'No Maintenance Fees',
+            'Enhanced Security'
+        ],
+        'Gold': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
+            'VIP Support',
+            'No Maintenance Fees',
+            'Enhanced Security',
+            'Bonus Hashrate'
+        ],
+        'Enterprise': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
+            'Dedicated Account Manager',
+            'No Maintenance Fees',
+            'Enhanced Security',
+            'Bonus Hashrate',
+            'Custom Mining Pool'
+        ],
+        'Ultimate': [
+            'SHA-256 ASIC Mining',
+            'Daily Payouts',
+            'Dedicated Account Manager',
+            'No Maintenance Fees',
+            'Enhanced Security',
+            'Bonus Hashrate',
+            'Custom Mining Pool',
+            'Early Withdrawal Option'
+        ]
+    };
     
     // Find matching features
-    for (const [key, value] of Object.entries(featureMap)) {
+    for (const [key, value] of Object.entries(features)) {
         if (planName.toLowerCase().includes(key.toLowerCase())) {
             return value;
         }
     }
     
-    return baseFeatures;
+    return features['Standard'] || ['SHA-256 ASIC Mining', 'Daily Payouts'];
 }
 
+/**
+ * Assign consistent color schemes to plans
+ */
 function getPlanColorScheme(planId) {
     const colors = [
-        { primary: '#003366', secondary: '#004488', accent: '#0066CC' },
-        { primary: '#4B0082', secondary: '#6A0DAD', accent: '#8A2BE2' },
-        { primary: '#006400', secondary: '#008000', accent: '#00AA00' },
-        { primary: '#8B0000', secondary: '#A52A2A', accent: '#CD5C5C' },
-        { primary: '#DAA520', secondary: '#FFD700', accent: '#FFEC8B' }
+        { primary: '#003366', secondary: '#004488', accent: '#0066CC' }, // Blue
+        { primary: '#4B0082', secondary: '#6A0DAD', accent: '#8A2BE2' }, // Indigo
+        { primary: '#006400', secondary: '#008000', accent: '#00AA00' }, // Green
+        { primary: '#8B0000', secondary: '#A52A2A', accent: '#CD5C5C' }, // Red
+        { primary: '#DAA520', secondary: '#FFD700', accent: '#FFEC8B' }  // Gold
     ];
     
     const hash = parseInt(planId.toString().slice(-4), 16);
     return colors[hash % colors.length];
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
