@@ -24049,10 +24049,11 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
   }
 });
 
+
 // =============================================
 // POST /api/admin/withdrawals/:id/reject - Reject withdrawal request
+// ONLY THE ORIGINAL WITHDRAWAL AMOUNT IS REFUNDED
 // GAS FEE IS NON-REFUNDABLE (BACKGROUND LOGIC ONLY)
-// User is only told the withdrawal was rejected
 // =============================================
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -24101,33 +24102,63 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     }
 
     // =============================================
-    // 3. EXTRACT WITHDRAWAL DETAILS
+    // 3. EXTRACT ALL WITHDRAWAL DETAILS
     // =============================================
-    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
-    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
-    const usdAmount = withdrawal.amount;
     
-    // GAS FEE EXTRACTION - THIS IS NON-REFUNDABLE (BACKGROUND LOGIC)
+    // --- ASSET AND AMOUNTS ---
+    const asset = (withdrawal.asset || withdrawal.method || 'eth').toLowerCase();
+    const assetUpper = asset.toUpperCase();
+    
+    // This is the ORIGINAL AMOUNT the user wanted to withdraw (1.27882933 ETH)
+    // THIS IS WHAT GETS REFUNDED
+    const originalWithdrawalAmount = withdrawal.assetAmount || withdrawal.amount;
+    const originalWithdrawalUSD = withdrawal.amount;
+    
+    // --- GAS FEE (NON-REFUNDABLE) ---
+    // This is the gas fee deducted (0.18742954 ETH)
     const gasFeeAmount = withdrawal.details?.gasFee?.amount || 0;
     const gasFeeUSD = withdrawal.details?.gasFee?.usdValue || 0;
-    const gasFeeAsset = withdrawal.details?.gasFee?.asset || asset.toUpperCase();
+    const gasFeeAsset = withdrawal.details?.gasFee?.asset || assetUpper;
     
-    // The amount that was actually withdrawn (crypto amount - gas fee)
-    const netCryptoAmount = cryptoAmount - gasFeeAmount;
-    const netUsdAmount = usdAmount - gasFeeUSD;
+    // --- TOTAL DEDUCTED (Original + Gas Fee) ---
+    // This is what was actually deducted from the user (1.46625887 ETH)
+    const totalDeducted = originalWithdrawalAmount + gasFeeAmount;
+    const totalDeductedUSD = originalWithdrawalUSD + gasFeeUSD;
+    
+    // --- OTHER DETAILS ---
+    const exchangeRate = withdrawal.exchangeRateAtTime || withdrawal.details?.exchangeRate || 0;
+    const destinationAddress = withdrawal.btcAddress || withdrawal.details?.withdrawalAddress || withdrawal.details?.destinationAddress || 'N/A';
+    const network = withdrawal.network || withdrawal.details?.network || 'Blockchain';
+    const requestId = withdrawal.reference || withdrawal.details?.requestId || 'N/A';
+    const requestedAt = withdrawal.createdAt || new Date();
 
     // Check if funds were already deducted
     const fundsAlreadyDeducted = withdrawal.details?.fundsAlreadyDeducted === true;
 
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`💰 REJECTING WITHDRAWAL: ${withdrawal.reference}`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`   Asset: ${assetUpper}`);
+    console.log(`   Original Withdrawal Amount: ${originalWithdrawalAmount} ${assetUpper} (≈ $${originalWithdrawalUSD.toFixed(2)})`);
+    console.log(`   Gas Fee (NON-REFUNDABLE): ${gasFeeAmount} ${assetUpper} (≈ $${gasFeeUSD.toFixed(2)})`);
+    console.log(`   Total Deducted: ${totalDeducted} ${assetUpper} (≈ $${totalDeductedUSD.toFixed(2)})`);
+    console.log(`   Exchange Rate: 1 ${assetUpper} = $${exchangeRate.toFixed(2)}`);
+    console.log(`   Destination: ${destinationAddress}`);
+    console.log(`   Network: ${network}`);
+    console.log(`   Request ID: ${requestId}`);
+    console.log(`   Requested At: ${requestedAt.toLocaleString()}`);
+    console.log(`   Funds Already Deducted: ${fundsAlreadyDeducted}`);
+    console.log(`   Reason: ${reason}`);
+    console.log(`${'='.repeat(80)}\n`);
+
     // =============================================
-    // 4. REFUND ONLY THE WITHDRAWAL AMOUNT (GAS FEE IS NON-REFUNDABLE)
+    // 4. REFUND ONLY THE ORIGINAL WITHDRAWAL AMOUNT
+    // GAS FEE IS NON-REFUNDABLE
     // =============================================
     if (fundsAlreadyDeducted) {
-      console.log(`💰 Processing refund for withdrawal ${withdrawal.reference}`);
-      console.log(`   Asset: ${asset}`);
-      console.log(`   Withdrawal Amount: ${cryptoAmount} ${asset.toUpperCase()}`);
-      console.log(`   Gas Fee (NON-REFUNDABLE): ${gasFeeAmount} ${asset.toUpperCase()}`);
-      console.log(`   Net Amount to Refund: ${netCryptoAmount} ${asset.toUpperCase()}`);
+      console.log(`💰 Processing refund...`);
+      console.log(`   Refunding: ${originalWithdrawalAmount} ${assetUpper} (≈ $${originalWithdrawalUSD.toFixed(2)})`);
+      console.log(`   Gas Fee Kept (NON-REFUNDABLE): ${gasFeeAmount} ${assetUpper} (≈ $${gasFeeUSD.toFixed(2)})`);
 
       // Initialize balances if needed
       if (!user.balances) {
@@ -24144,65 +24175,71 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
       const gasFeeFromMain = withdrawal.details?.gasFeeFromMain || gasFeeAmount;
 
       // =============================================
-      // 4a. REFUND WITHDRAWAL AMOUNT TO THE CORRECT WALLETS
-      // ONLY THE NET AMOUNT (cryptoAmount - gasFee) IS REFUNDED
+      // 4a. CALCULATE REFUND ALLOCATION
       // =============================================
-      
       let refundToMain = 0;
       let refundToMatured = 0;
       
-      if (mainAmountUsed > 0 || maturedAmountUsed > 0) {
-        const totalDeducted = mainAmountUsed + maturedAmountUsed + gasFeeFromMain;
-        if (totalDeducted > 0) {
-          refundToMain = (mainAmountUsed / totalDeducted) * netCryptoAmount;
-          refundToMatured = (maturedAmountUsed / totalDeducted) * netCryptoAmount;
-        }
+      // Calculate what portion of the original withdrawal came from each wallet
+      const totalWithdrawalSource = mainAmountUsed + maturedAmountUsed;
+      
+      if (totalWithdrawalSource > 0) {
+        // Proportionally allocate the refund based on where the funds came from
+        refundToMain = (mainAmountUsed / totalWithdrawalSource) * originalWithdrawalAmount;
+        refundToMatured = (maturedAmountUsed / totalWithdrawalSource) * originalWithdrawalAmount;
       } else {
-        refundToMain = netCryptoAmount;
+        // If no breakdown, refund everything to MAIN wallet
+        refundToMain = originalWithdrawalAmount;
       }
 
-      console.log(`   Refund breakdown:`);
-      console.log(`   - To MAIN wallet: ${refundToMain.toFixed(8)} ${asset.toUpperCase()}`);
-      console.log(`   - To MATURED wallet: ${refundToMatured.toFixed(8)} ${asset.toUpperCase()}`);
-      
-      // Refund to MAIN wallet
+      console.log(`   Refund Allocation:`);
+      console.log(`   - To MAIN wallet: ${refundToMain.toFixed(8)} ${assetUpper}`);
+      console.log(`   - To MATURED wallet: ${refundToMatured.toFixed(8)} ${assetUpper}`);
+
+      // =============================================
+      // 4b. EXECUTE REFUND TO MAIN WALLET
+      // =============================================
       if (refundToMain > 0) {
         const currentMainBalance = user.balances.main.get(asset) || 0;
         user.balances.main.set(asset, currentMainBalance + refundToMain);
-        console.log(`   ✅ Refunded ${refundToMain.toFixed(8)} to MAIN wallet`);
+        console.log(`   ✅ Refunded ${refundToMain.toFixed(8)} ${assetUpper} to MAIN wallet`);
       }
       
-      // Refund to MATURED wallet
+      // =============================================
+      // 4c. EXECUTE REFUND TO MATURED WALLET
+      // =============================================
       if (refundToMatured > 0) {
         const currentMaturedBalance = user.balances.matured.get(asset) || 0;
         user.balances.matured.set(asset, currentMaturedBalance + refundToMatured);
-        console.log(`   ✅ Refunded ${refundToMatured.toFixed(8)} to MATURED wallet`);
+        console.log(`   ✅ Refunded ${refundToMatured.toFixed(8)} ${assetUpper} to MATURED wallet`);
       }
 
       // =============================================
-      // 4b. UPDATE USD EQUIVALENTS FOR THE REFUNDED AMOUNTS
+      // 4d. UPDATE USD EQUIVALENTS
       // =============================================
-      const currentPrice = await getCryptoPrice(asset.toUpperCase());
+      const currentPrice = await getCryptoPrice(assetUpper);
       if (currentPrice && currentPrice > 0) {
-        const refundUSD = netCryptoAmount * currentPrice;
+        const totalRefundUSD = originalWithdrawalAmount * currentPrice;
         
+        // Update MAIN USD
         const currentMainUSD = user.balances.main.get('usd') || 0;
         const mainRefundUSD = refundToMain * currentPrice;
         user.balances.main.set('usd', currentMainUSD + mainRefundUSD);
         
+        // Update MATURED USD
         const currentMaturedUSD = user.balances.matured.get('usd') || 0;
         const maturedRefundUSD = refundToMatured * currentPrice;
         user.balances.matured.set('usd', currentMaturedUSD + maturedRefundUSD);
         
-        console.log(`   ✅ USD equivalents updated: $${(refundUSD).toFixed(2)} total refund`);
+        console.log(`   ✅ USD equivalents updated: $${totalRefundUSD.toFixed(2)} total refund`);
       }
 
       // =============================================
-      // 4c. RECORD GAS FEE AS PLATFORM REVENUE (BACKGROUND LOGIC - USER NEVER SEES THIS)
+      // 4e. RECORD GAS FEE AS PLATFORM REVENUE (BACKGROUND LOGIC)
       // =============================================
       if (gasFeeAmount > 0) {
         try {
-          const gasFeeUSDValue = gasFeeAmount * (currentPrice || 1);
+          const gasFeeUSDValue = gasFeeAmount * (currentPrice || exchangeRate || 1);
           
           await PlatformRevenue.create({
             source: 'withdrawal_gas_fee',
@@ -24210,26 +24247,36 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
             currency: 'USD',
             transactionId: withdrawal._id,
             userId: user._id,
-            description: `Gas fee for rejected withdrawal ${withdrawal.reference}`,
+            description: `Non-refundable gas fee for rejected withdrawal ${withdrawal.reference}`,
             metadata: {
               withdrawalId: withdrawal._id,
               withdrawalReference: withdrawal.reference,
-              asset: asset.toUpperCase(),
+              asset: assetUpper,
               gasFeeAmount: gasFeeAmount,
               gasFeeAsset: gasFeeAsset,
               gasFeeUSD: gasFeeUSD,
+              exchangeRate: exchangeRate,
+              network: network,
+              destinationAddress: destinationAddress,
+              originalWithdrawalAmount: originalWithdrawalAmount,
+              originalWithdrawalUSD: originalWithdrawalUSD,
+              totalDeducted: totalDeducted,
+              totalDeductedUSD: totalDeductedUSD,
               rejectionReason: reason,
               rejectedBy: req.admin.name,
-              rejectedAt: new Date()
+              rejectedAt: new Date(),
+              requestId: requestId
             }
           });
           
-          console.log(`   ✅ Gas fee recorded as Platform Revenue: ${gasFeeAmount} ${asset.toUpperCase()} ($${gasFeeUSDValue.toFixed(2)})`);
+          console.log(`   ✅ Gas fee recorded as Platform Revenue (BACKGROUND):`);
+          console.log(`      ${gasFeeAmount} ${assetUpper} ($${gasFeeUSDValue.toFixed(2)})`);
         } catch (feeError) {
-          console.error('Failed to record gas fee as Platform Revenue:', feeError);
+          console.error('   ❌ Failed to record gas fee as Platform Revenue:', feeError);
         }
       }
 
+      // Save the user with updated balances
       await user.save();
       console.log(`   ✅ User balances saved successfully`);
 
@@ -24238,35 +24285,45 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     }
 
     // =============================================
-    // 5. UPDATE WITHDRAWAL STATUS
+    // 5. UPDATE WITHDRAWAL STATUS TO FAILED
     // =============================================
     withdrawal.status = 'failed';
     withdrawal.adminNotes = reason;
     withdrawal.processedBy = req.admin._id;
     withdrawal.processedAt = new Date();
     
+    // Store rejection details
     if (!withdrawal.details) withdrawal.details = {};
     withdrawal.details.rejectionReason = reason;
     withdrawal.details.rejectedBy = req.admin.name;
     withdrawal.details.rejectedAt = new Date();
     withdrawal.details.gasFeeKept = gasFeeAmount > 0;
     withdrawal.details.gasFeeAmount = gasFeeAmount;
-    withdrawal.details.refundedAmount = netCryptoAmount;
+    withdrawal.details.gasFeeAsset = gasFeeAsset;
+    withdrawal.details.gasFeeUSD = gasFeeUSD;
+    withdrawal.details.originalWithdrawalAmount = originalWithdrawalAmount;
+    withdrawal.details.originalWithdrawalUSD = originalWithdrawalUSD;
+    withdrawal.details.totalDeducted = totalDeducted;
+    withdrawal.details.totalDeductedUSD = totalDeductedUSD;
+    withdrawal.details.refundedAmount = originalWithdrawalAmount;
+    withdrawal.details.refundedUSD = originalWithdrawalUSD;
+    withdrawal.details.refundedToMain = refundToMain || 0;
+    withdrawal.details.refundedToMatured = refundToMatured || 0;
     
     await withdrawal.save();
 
     // =============================================
     // 6. CREATE REFUND TRANSACTION RECORD
     // =============================================
-    if (fundsAlreadyDeducted && netCryptoAmount > 0) {
+    if (fundsAlreadyDeducted && originalWithdrawalAmount > 0) {
       const refundReference = `REFUND-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
       
       await Transaction.create({
         user: user._id,
         type: 'refund',
-        amount: netUsdAmount,
+        amount: originalWithdrawalUSD,
         asset: asset,
-        assetAmount: netCryptoAmount,
+        assetAmount: originalWithdrawalAmount,
         currency: 'USD',
         status: 'completed',
         method: 'INTERNAL',
@@ -24275,37 +24332,59 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
           type: 'withdrawal_rejection_refund',
           withdrawalId: withdrawal._id,
           withdrawalReference: withdrawal.reference,
-          originalAmount: cryptoAmount,
-          originalUSD: usdAmount,
+          originalWithdrawalAmount: originalWithdrawalAmount,
+          originalWithdrawalUSD: originalWithdrawalUSD,
           gasFeeDeducted: gasFeeAmount,
           gasFeeUSD: gasFeeUSD,
-          netRefundAmount: netCryptoAmount,
-          netRefundUSD: netUsdAmount,
+          totalDeducted: totalDeducted,
+          totalDeductedUSD: totalDeductedUSD,
+          refundAmount: originalWithdrawalAmount,
+          refundUSD: originalWithdrawalUSD,
           refundToMain: refundToMain || 0,
           refundToMatured: refundToMatured || 0,
+          exchangeRate: exchangeRate,
+          network: network,
+          destinationAddress: destinationAddress,
           rejectionReason: reason,
           rejectedBy: req.admin.name,
-          rejectedAt: new Date()
+          rejectedAt: new Date(),
+          requestId: requestId,
+          gasFeeNonRefundable: true,
+          gasFeeKeptAsRevenue: true
         },
         fee: 0,
-        netAmount: netUsdAmount,
+        netAmount: originalWithdrawalUSD,
         processedBy: req.admin._id,
         processedAt: new Date(),
-        adminNotes: `Refund for rejected withdrawal. Gas fee (${gasFeeAmount} ${asset.toUpperCase()}) non-refundable.`
+        adminNotes: `Refund for rejected withdrawal. Original amount: ${originalWithdrawalAmount} ${assetUpper}. Gas fee (${gasFeeAmount} ${assetUpper}) non-refundable.`
       });
       
       console.log(`   ✅ Refund transaction created: ${refundReference}`);
     }
 
     // =============================================
-    // 7. SEND REJECTION EMAIL - USER DOES NOT SEE GAS FEE/REVENUE DETAILS
+    // 7. SEND REJECTION EMAIL TO USER
+    // USER ONLY SEES THE WITHDRAWAL WAS REJECTED
+    // NO MENTION OF GAS FEE OR REVENUE
     // =============================================
-    const cryptoAsset = asset.toUpperCase();
-    const cryptoLogo = getCryptoLogo(cryptoAsset);
-    const formattedAmount = usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedCryptoAmount = cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedRequestDate = new Date(withdrawal.createdAt).toLocaleString();
-    
+    const cryptoLogo = getCryptoLogo(assetUpper);
+    const formattedOriginalAmount = originalWithdrawalAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedOriginalUSD = originalWithdrawalUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedGasFee = gasFeeAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedGasFeeUSD = gasFeeUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedTotalDeducted = totalDeducted.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedTotalDeductedUSD = totalDeductedUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedExchangeRate = exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedRequestedAt = new Date(requestedAt).toLocaleString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
         <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
@@ -24336,19 +24415,35 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
             <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
               <img src="${cryptoLogo}" width="32" height="32" style="border-radius: 50%;">
               <div>
-                <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${cryptoAsset}</div>
-                <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
+                <div style="font-weight: bold; font-size: 18px;">${formattedOriginalAmount} ${assetUpper}</div>
+                <div style="color: #64748B; font-size: 12px;">≈ $${formattedOriginalUSD} USD requested</div>
               </div>
             </div>
             
             <table style="width: 100%; border-collapse: collapse;">
               <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">1 ${assetUpper} = $${formattedExchangeRate}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Requested Amount:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedOriginalAmount} ${assetUpper} (≈ $${formattedOriginalUSD} USD)</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Destination Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${destinationAddress}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Network:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${network}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${withdrawal.reference}</td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${requestId}</td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${formattedRequestDate}</td>
+                <td style="padding: 8px 0; text-align: right;">${formattedRequestedAt}</td>
               </tr>
             </table>
           </div>
@@ -24356,7 +24451,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
           ${fundsAlreadyDeducted ? `
           <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; margin: 20px 0; border-left: 4px solid #10B981;">
             <p style="color: #065F46; margin: 0 0 4px 0; font-weight: 600;">✅ Funds Refunded</p>
-            <p style="color: #047857; margin: 0; font-size: 14px;">The amount has been refunded to your account.</p>
+            <p style="color: #047857; margin: 0; font-size: 14px;">The full requested amount (${formattedOriginalAmount} ${assetUpper}) has been refunded to your account.</p>
           </div>
           ` : ''}
           
@@ -24389,14 +24484,15 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     console.log(`📧 Withdrawal rejection email sent to ${withdrawal.user.email}`);
 
     // =============================================
-    // 8. EMIT REAL-TIME UPDATE
+    // 8. EMIT REAL-TIME UPDATE VIA SOCKET.IO
     // =============================================
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${withdrawal.user._id}`).emit('withdrawal_rejected', {
         withdrawalId: withdrawal._id,
-        amount: usdAmount,
-        asset: asset.toUpperCase(),
+        amount: originalWithdrawalUSD,
+        asset: assetUpper,
+        cryptoAmount: originalWithdrawalAmount,
         reason: reason,
         status: 'rejected',
         fundsRefunded: fundsAlreadyDeducted
@@ -24425,14 +24521,26 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
       req,
       {
         userId: withdrawal.user._id,
-        amount: usdAmount,
-        asset: asset,
-        cryptoAmount: cryptoAmount,
-        gasFee: gasFeeAmount,
-        netRefund: netCryptoAmount,
+        userEmail: withdrawal.user.email,
+        amountUSD: originalWithdrawalUSD,
+        amountCrypto: originalWithdrawalAmount,
+        asset: assetUpper,
+        gasFeeAmount: gasFeeAmount,
+        gasFeeUSD: gasFeeUSD,
+        totalDeducted: totalDeducted,
+        totalDeductedUSD: totalDeductedUSD,
+        refundAmount: originalWithdrawalAmount,
+        refundUSD: originalWithdrawalUSD,
+        refundToMain: refundToMain || 0,
+        refundToMatured: refundToMatured || 0,
+        exchangeRate: exchangeRate,
+        network: network,
+        destinationAddress: destinationAddress,
+        requestId: requestId,
         reason: reason,
         fundsRefunded: fundsAlreadyDeducted,
-        gasFeeKept: gasFeeAmount > 0
+        gasFeeKept: gasFeeAmount > 0,
+        rejectionTimestamp: new Date()
       }
     );
 
@@ -24441,7 +24549,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     // =============================================
     await Notification.create({
       title: 'Withdrawal Rejected',
-      message: `Your withdrawal request of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been rejected. ${fundsAlreadyDeducted ? 'The amount has been refunded to your account.' : ''} Reason: ${reason}`,
+      message: `Your withdrawal request of ${originalWithdrawalAmount.toFixed(8)} ${assetUpper} ($${originalWithdrawalUSD.toLocaleString()}) has been rejected. ${fundsAlreadyDeducted ? 'The full requested amount has been refunded to your account.' : ''} Reason: ${reason}`,
       type: 'withdrawal_rejected',
       recipientType: 'specific',
       specificUserId: withdrawal.user._id,
@@ -24450,19 +24558,26 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     });
 
     // =============================================
-    // 11. RETURN RESPONSE
+    // 11. RETURN SUCCESS RESPONSE
     // =============================================
-    console.log(`\n✅ WITHDRAWAL REJECTED SUCCESSFULLY`);
-    console.log(`   Reference: ${withdrawal.reference}`);
-    console.log(`   Asset: ${asset.toUpperCase()}`);
-    console.log(`   Original Amount: ${cryptoAmount} ${asset.toUpperCase()}`);
-    console.log(`   Gas Fee (NON-REFUNDABLE): ${gasFeeAmount} ${asset.toUpperCase()}`);
-    console.log(`   Net Refund: ${netCryptoAmount} ${asset.toUpperCase()}`);
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`✅ WITHDRAWAL REJECTED SUCCESSFULLY`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`   Request ID: ${requestId}`);
+    console.log(`   Asset: ${assetUpper}`);
+    console.log(`   Original Requested: ${originalWithdrawalAmount} ${assetUpper} ($${originalWithdrawalUSD.toFixed(2)})`);
+    console.log(`   Gas Fee (NON-REFUNDABLE): ${gasFeeAmount} ${assetUpper} ($${gasFeeUSD.toFixed(2)})`);
+    console.log(`   Total Deducted: ${totalDeducted} ${assetUpper} ($${totalDeductedUSD.toFixed(2)})`);
+    console.log(`   Refunded: ${originalWithdrawalAmount} ${assetUpper} ($${originalWithdrawalUSD.toFixed(2)})`);
+    console.log(`   Refund To Main: ${(refundToMain || 0).toFixed(8)} ${assetUpper}`);
+    console.log(`   Refund To Matured: ${(refundToMatured || 0).toFixed(8)} ${assetUpper}`);
+    console.log(`   Gas Fee Kept as Revenue: ${gasFeeAmount > 0}`);
     console.log(`   Reason: ${reason}`);
     console.log(`   Admin: ${req.admin.name}`);
+    console.log(`   User: ${withdrawal.user.email}`);
     console.log(`   Funds Refunded: ${fundsAlreadyDeducted}`);
-    console.log(`   Email sent to: ${withdrawal.user.email}`);
-    console.log('=' .repeat(80));
+    console.log(`   Email Sent: Yes`);
+    console.log(`${'='.repeat(80)}\n`);
 
     res.status(200).json({
       status: 'success',
@@ -24471,26 +24586,39 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
         withdrawal: {
           id: withdrawal._id,
           reference: withdrawal.reference,
-          amount: usdAmount,
-          asset: asset,
-          cryptoAmount: cryptoAmount,
+          requestId: requestId,
+          asset: assetUpper,
+          originalAmount: originalWithdrawalAmount,
+          originalAmountUSD: originalWithdrawalUSD,
+          gasFee: gasFeeAmount,
+          gasFeeUSD: gasFeeUSD,
+          totalDeducted: totalDeducted,
+          totalDeductedUSD: totalDeductedUSD,
+          refundAmount: originalWithdrawalAmount,
+          refundUSD: originalWithdrawalUSD,
+          refundedToMain: refundToMain || 0,
+          refundedToMatured: refundToMatured || 0,
+          exchangeRate: exchangeRate,
+          network: network,
+          destinationAddress: destinationAddress,
           reason: reason,
           status: 'rejected',
-          fundsRefunded: fundsAlreadyDeducted
+          fundsRefunded: fundsAlreadyDeducted,
+          gasFeeKept: gasFeeAmount > 0,
+          rejectedAt: new Date(),
+          rejectedBy: req.admin.name
         }
       }
     });
 
   } catch (err) {
-    console.error('Reject withdrawal error:', err);
+    console.error('❌ Reject withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to reject withdrawal'
     });
   }
 });
-
-
 
 
 
