@@ -17198,75 +17198,536 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
+// =============================================
+// ENHANCED INVESTMENT PLANS - SOPHISTICATED WITH LOGICAL PROGRESSION
+// PRESERVES EXISTING PERCENTAGE RETURNS
+// =============================================
 
-// Plans Endpoint with login state detection
-app.get('/api/plans', async (req, res) => {
-  try {
-    // Get plans from database
-    const plans = await Plan.find({ isActive: true }).lean();
-    
-    // Get user balance if logged in
-    let userMainBalance = 0;
-    let userMaturedBalance = 0;
-    let isLoggedIn = false;
-    if (req.user) {
-      const user = await User.findById(req.user.id).select('balances');
-      userMainBalance = user.balances.main;
-      userMaturedBalance = user.balances.matured;
-      isLoggedIn = true;
+// Plan configuration - SINGLE SOURCE OF TRUTH
+const PLAN_CONFIG = {
+    // Hashpower tiers (TH/s) - each plan has a specific range
+    // Cheaper plan = LESS hashpower (logical progression)
+    hashrate: {
+        starter: { min: 65, max: 72 },
+        basic: { min: 85, max: 95 },
+        standard: { min: 110, max: 125 },
+        gold: { min: 145, max: 165 },
+        enterprise: { min: 195, max: 215 },
+        ultimate: { min: 255, max: 285 }
+    },
+    // Efficiency (TH/s per $1000 invested) - improves with higher plans
+    efficiency: {
+        starter: 2.1,
+        basic: 2.4,
+        standard: 2.8,
+        gold: 3.2,
+        enterprise: 3.7,
+        ultimate: 4.3
+    },
+    // Feature tiers
+    features: {
+        starter: ['Basic Dashboard', 'Email Support', '24/7 Monitoring', 'Daily Reports'],
+        basic: ['Advanced Dashboard', 'Priority Support', '24/7 Monitoring', 'Daily Reports', 'Mobile Alerts'],
+        standard: ['Pro Dashboard', 'Premium Support', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Weekly Analytics'],
+        gold: ['VIP Dashboard', 'Dedicated Support', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Weekly Consultation', 'Priority Queue'],
+        enterprise: ['Enterprise Dashboard', '24/7 Dedicated Support', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Daily Consultation', 'Priority Queue', 'Custom Reports'],
+        ultimate: ['Ultimate Dashboard', '24/7 Dedicated Manager', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Daily Consultation', 'Priority Queue', 'Custom Reports', 'Strategic Planning']
     }
+};
 
-    // Format plans data
-    const formattedPlans = plans.map(plan => ({
-      id: plan._id,
-      name: plan.name,
-      description: plan.description,
-      percentage: plan.percentage,
-      duration: plan.duration,
-      minAmount: plan.minAmount,
-      maxAmount: plan.maxAmount,
-      referralBonus: plan.referralBonus,
-      colorScheme: getPlanColorScheme(plan._id),
-      buttonState: isLoggedIn ? 'Invest' : 'Login to Invest',
-      canInvest: isLoggedIn && (userMainBalance >= plan.minAmount || userMaturedBalance >= plan.minAmount)
-    }));
+/**
+ * Get current mining stats for plan calculations
+ */
+const getMiningStatsForPlans = async () => {
+    try {
+        const stats = await getCurrentMiningStats();
+        return stats;
+    } catch (err) {
+        console.error('Error getting mining stats for plans:', err);
+        return null;
+    }
+};
 
-    res.status(200).json({
-      status: 'success',
-      data: {
-        plans: formattedPlans,
-        userBalances: isLoggedIn ? {
-          main: userMainBalance,
-          matured: userMaturedBalance
-        } : null,
-        isLoggedIn
-      }
-    });
-  } catch (err) {
-    console.error('Get plans error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while fetching investment plans'
-    });
-  }
+/**
+ * Get current BTC price
+ */
+const getCurrentBTCPriceForPlans = async () => {
+    try {
+        const price = await getCryptoPrice('BTC');
+        return price || 43000;
+    } catch (err) {
+        console.error('Error getting BTC price for plans:', err);
+        return 43000;
+    }
+};
+
+/**
+ * Generate sophisticated plan details with logical progression
+ * PRESERVES EXISTING PERCENTAGE RETURNS
+ */
+const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
+    const planName = plan.name.toLowerCase();
+    let tier = 'standard';
+    
+    if (planName.includes('starter')) tier = 'starter';
+    else if (planName.includes('basic')) tier = 'basic';
+    else if (planName.includes('standard')) tier = 'standard';
+    else if (planName.includes('gold')) tier = 'gold';
+    else if (planName.includes('enterprise')) tier = 'enterprise';
+    else if (planName.includes('ultimate')) tier = 'ultimate';
+    
+    // Get hashrate range for this tier (cheaper plan = LESS hashrate)
+    const hashrateRange = PLAN_CONFIG.hashrate[tier] || { min: 100, max: 120 };
+    const hashrateMin = hashrateRange.min;
+    const hashrateMax = hashrateRange.max;
+    
+    // Get efficiency (TH/s per $1000) - improves with higher plans
+    const efficiency = PLAN_CONFIG.efficiency[tier] || 2.8;
+    
+    // Calculate hashrate based on investment amount (linear scaling within range)
+    // Uses the plan's actual minAmount to determine hashrate within its tier
+    const amountRatio = Math.min(plan.minAmount / 30000, 0.8);
+    const hashrateBase = hashrateMin + ((hashrateMax - hashrateMin) * amountRatio);
+    const hashrate = Math.round(hashrateBase + (Math.random() - 0.5) * 6);
+    
+    // Calculate daily BTC yield based on hashrate
+    // Network hashrate ~ 600,000,000 TH/s, BTC per day ~ 450
+    const networkHashrate = 600000000; // TH/s
+    const dailyBTC = (hashrate / networkHashrate) * 450;
+    const dailyUSD = dailyBTC * currentBTCPrice;
+    
+    // =============================================
+    // PRESERVE EXISTING PERCENTAGE RETURNS
+    // Use plan.percentage as the source of truth
+    // =============================================
+    const percentageReturn = plan.percentage || 0;
+    
+    // Calculate returns using the EXISTING percentage
+    const profitAmount = plan.minAmount * (percentageReturn / 100);
+    const totalReturn = plan.minAmount + profitAmount;
+    
+    // Daily profit (spread over duration)
+    const dailyProfit = profitAmount / plan.duration;
+    
+    // ROI metrics using the EXISTING percentage
+    const roiPerDuration = percentageReturn; // Already a percentage
+    const roiDaily = percentageReturn / plan.duration;
+    const roiMonthly = roiDaily * 30;
+    const roiYearly = roiDaily * 365;
+    
+    // Calculate payback period
+    const paybackDays = dailyProfit > 0 ? plan.minAmount / (dailyProfit * 24) : 0;
+    
+    // Profitability score (0-100)
+    const profitabilityScore = Math.min(100, Math.max(20, (roiYearly / 150) * 100));
+    
+    // Calculate upgrade value (progressive improvement)
+    const tierNames = ['starter', 'basic', 'standard', 'gold', 'enterprise', 'ultimate'];
+    const currentIndex = tierNames.indexOf(tier);
+    const totalTiers = tierNames.length;
+    const upgradeValue = ((currentIndex / (totalTiers - 1)) * 100).toFixed(1);
+    
+    // Calculate relative value increase from previous tier
+    let upgradeBonus = 0;
+    let upgradeInfo = null;
+    
+    if (currentIndex > 0) {
+        const prevTier = tierNames[currentIndex - 1];
+        const prevHashrate = PLAN_CONFIG.hashrate[prevTier] || { min: 50, max: 60 };
+        const currentHashrate = PLAN_CONFIG.hashrate[tier] || { min: 100, max: 120 };
+        const prevAvg = (prevHashrate.min + prevHashrate.max) / 2;
+        const currentAvg = (currentHashrate.min + currentHashrate.max) / 2;
+        const percentIncrease = ((currentAvg - prevAvg) / prevAvg) * 100;
+        
+        upgradeBonus = parseFloat(percentIncrease.toFixed(1));
+        
+        // Calculate additional value for upgrading
+        const additionalHashrate = currentAvg - prevAvg;
+        const additionalDailyBTC = (additionalHashrate / networkHashrate) * 450;
+        const additionalDailyUSD = additionalDailyBTC * currentBTCPrice;
+        
+        // Get the previous plan's percentage return
+        const prevPlan = await Plan.findOne({ name: { $regex: new RegExp(prevTier, 'i') } }).lean();
+        const prevPercentage = prevPlan?.percentage || 0;
+        
+        // Calculate additional profit from upgrading
+        const additionalInvestment = plan.minAmount - (prevPlan?.minAmount || plan.minAmount * 0.6);
+        const additionalProfit = (additionalInvestment * (percentageReturn / 100)) - 
+                                (additionalInvestment * (prevPercentage / 100));
+        
+        upgradeInfo = {
+            fromPlan: prevTier.charAt(0).toUpperCase() + prevTier.slice(1),
+            toPlan: tier.charAt(0).toUpperCase() + tier.slice(1),
+            hashrateIncrease: parseFloat(additionalHashrate.toFixed(1)),
+            hashrateIncreasePercent: parseFloat(percentIncrease.toFixed(1)),
+            additionalDailyBTC: parseFloat(additionalDailyBTC.toFixed(6)),
+            additionalDailyUSD: parseFloat(additionalDailyUSD.toFixed(2)),
+            additionalMonthlyUSD: parseFloat((additionalDailyUSD * 30).toFixed(2)),
+            additionalYearlyUSD: parseFloat((additionalDailyUSD * 365).toFixed(2)),
+            additionalProfitPerDuration: parseFloat(additionalProfit.toFixed(2)),
+            percentageIncrease: parseFloat((percentageReturn - prevPercentage).toFixed(2))
+        };
+    }
+    
+    // Get features for this tier
+    const features = PLAN_CONFIG.features[tier] || PLAN_CONFIG.features.standard;
+    
+    // Calculate total active contracts in this tier
+    const tierMultiplier = (currentIndex + 1) / totalTiers;
+    const baseContracts = Math.floor(investorCount * 0.002 * tierMultiplier);
+    const contractsInTier = Math.max(50, baseContracts + Math.floor(Math.random() * 200));
+    
+    return {
+        hashrate: hashrate,
+        hashrateRange: {
+            min: hashrateMin,
+            max: hashrateMax
+        },
+        hashrateLabel: `${hashrate.toLocaleString()} TH/s`,
+        efficiency: efficiency,
+        dailyBTC: parseFloat(dailyBTC.toFixed(6)),
+        dailyUSD: parseFloat(dailyUSD.toFixed(2)),
+        monthlyUSD: parseFloat((dailyUSD * 30).toFixed(2)),
+        yearlyUSD: parseFloat((dailyUSD * 365).toFixed(2)),
+        // Use EXISTING percentage returns
+        percentageReturn: percentageReturn,
+        profitAmount: parseFloat(profitAmount.toFixed(2)),
+        totalReturn: parseFloat(totalReturn.toFixed(2)),
+        dailyProfit: parseFloat(dailyProfit.toFixed(4)),
+        roiPerDuration: parseFloat(roiPerDuration.toFixed(2)),
+        roiDaily: parseFloat(roiDaily.toFixed(4)),
+        roiMonthly: parseFloat(roiMonthly.toFixed(2)),
+        roiYearly: parseFloat(roiYearly.toFixed(2)),
+        paybackDays: Math.ceil(paybackDays),
+        profitabilityScore: Math.min(100, Math.max(20, Math.ceil(profitabilityScore))),
+        upgradeValue: parseFloat(upgradeValue),
+        upgradeInfo: upgradeInfo,
+        features: features,
+        activeContracts: contractsInTier,
+        tier: tier,
+        tierIndex: currentIndex,
+        totalTiers: totalTiers,
+        // Additional value metrics
+        valueMetrics: {
+            efficiency: efficiency,
+            reliability: parseFloat((99.5 - (currentIndex * 0.3)).toFixed(1)),
+            maintenance: parseFloat((1.2 - (currentIndex * 0.15)).toFixed(2)),
+            support: ['Standard', 'Priority', 'Premium', 'VIP', 'Enterprise', 'Ultimate'][currentIndex] || 'Standard'
+        }
+    };
+};
+
+// =============================================
+// ENHANCED PLANS ENDPOINT - WITH SOPHISTICATED DATA
+// PRESERVES EXISTING PERCENTAGE RETURNS
+// =============================================
+app.get('/api/plans', async (req, res) => {
+    try {
+        // Get plans from database - THESE HAVE THE EXISTING PERCENTAGES
+        const plans = await Plan.find({ isActive: true }).lean();
+        
+        // Get real-time data from the mining system
+        const miningStats = await getMiningStatsForPlans();
+        const investorCount = await getCurrentInvestorCount();
+        const currentBTCPrice = await getCurrentBTCPriceForPlans();
+        
+        // Get user balance if logged in
+        let userMainBalance = 0;
+        let userMaturedBalance = 0;
+        let isLoggedIn = false;
+        
+        if (req.user) {
+            const user = await User.findById(req.user.id).select('balances');
+            if (user && user.balances) {
+                userMainBalance = user.balances.main?.get('usd') || 0;
+                userMaturedBalance = user.balances.matured?.get('usd') || 0;
+                isLoggedIn = true;
+            }
+        }
+        
+        // Sort plans by minAmount (cheapest to most expensive)
+        const sortedPlans = [...plans].sort((a, b) => a.minAmount - b.minAmount);
+        
+        // Map plan names to tiers for consistent hashrate mapping
+        const tierMap = {
+            'starter': ['starter'],
+            'basic': ['basic'],
+            'standard': ['standard'],
+            'gold': ['gold'],
+            'enterprise': ['enterprise'],
+            'ultimate': ['ultimate']
+        };
+        
+        // Generate sophisticated plan data
+        const formattedPlans = sortedPlans.map((plan, index) => {
+            const planDetails = generatePlanDetails(plan, investorCount, currentBTCPrice);
+            
+            // Determine if user can invest in this plan
+            const canInvest = isLoggedIn && 
+                (userMainBalance >= plan.minAmount || userMaturedBalance >= plan.minAmount);
+            
+            // Determine if user should upgrade (recommended plan)
+            let recommendation = null;
+            if (index < sortedPlans.length - 1) {
+                const nextPlan = sortedPlans[index + 1];
+                const nextPlanDetails = generatePlanDetails(nextPlan, investorCount, currentBTCPrice);
+                
+                const additionalInvestment = nextPlan.minAmount - plan.minAmount;
+                const additionalReturn = nextPlanDetails.totalReturn - planDetails.totalReturn;
+                const extraROI = additionalInvestment > 0 ? (additionalReturn / additionalInvestment) * 100 : 0;
+                const extraDailyReturn = nextPlanDetails.dailyProfit - planDetails.dailyProfit;
+                
+                if (additionalInvestment > 0 && extraROI > 0) {
+                    recommendation = {
+                        upgradeTo: nextPlan.name,
+                        additionalInvestment: additionalInvestment,
+                        additionalReturn: parseFloat(additionalReturn.toFixed(2)),
+                        additionalProfit: parseFloat((nextPlanDetails.profitAmount - planDetails.profitAmount).toFixed(2)),
+                        additionalDailyReturn: parseFloat(extraDailyReturn.toFixed(4)),
+                        extraMonthlyReturn: parseFloat((extraDailyReturn * 30).toFixed(2)),
+                        extraYearlyReturn: parseFloat((extraDailyReturn * 365).toFixed(2)),
+                        roiOnAdditional: parseFloat(extraROI.toFixed(2)),
+                        hashrateIncrease: nextPlanDetails.hashrate - planDetails.hashrate
+                    };
+                }
+            }
+            
+            // Calculate user's potential position in this plan
+            let userPotential = null;
+            if (isLoggedIn) {
+                const totalUserBalance = userMainBalance + userMaturedBalance;
+                if (totalUserBalance >= plan.minAmount) {
+                    const maxAffordable = Math.floor(totalUserBalance / plan.minAmount);
+                    userPotential = {
+                        canAfford: true,
+                        maxContracts: maxAffordable,
+                        affordableAmount: maxAffordable * plan.minAmount
+                    };
+                } else {
+                    userPotential = {
+                        canAfford: false,
+                        shortfall: parseFloat((plan.minAmount - totalUserBalance).toFixed(2))
+                    };
+                }
+            }
+            
+            // Determine badges
+            const badges = {
+                isPopular: index === Math.floor(sortedPlans.length / 2),
+                isBestValue: planDetails.roiYearly > 100,
+                isHighestYield: index === sortedPlans.length - 1,
+                isEntryLevel: index === 0,
+                hasUpgrade: index < sortedPlans.length - 1,
+                isMostEfficient: planDetails.efficiency >= 4.0
+            };
+            
+            return {
+                id: plan._id,
+                name: plan.name,
+                description: plan.description,
+                // EXISTING FIELDS - PRESERVED
+                percentage: plan.percentage,
+                duration: plan.duration,
+                minAmount: plan.minAmount,
+                maxAmount: plan.maxAmount,
+                referralBonus: plan.referralBonus,
+                isActive: plan.isActive,
+                
+                // Sophisticated plan data
+                planDetails: {
+                    hashrate: planDetails.hashrate,
+                    hashrateRange: planDetails.hashrateRange,
+                    hashrateLabel: planDetails.hashrateLabel,
+                    efficiency: planDetails.efficiency,
+                    dailyBTC: planDetails.dailyBTC,
+                    dailyUSD: planDetails.dailyUSD,
+                    monthlyUSD: planDetails.monthlyUSD,
+                    yearlyUSD: planDetails.yearlyUSD,
+                    // EXISTING PERCENTAGE RETURNS
+                    percentageReturn: planDetails.percentageReturn,
+                    profitAmount: planDetails.profitAmount,
+                    totalReturn: planDetails.totalReturn,
+                    dailyProfit: planDetails.dailyProfit,
+                    roiPerDuration: planDetails.roiPerDuration,
+                    roiDaily: planDetails.roiDaily,
+                    roiMonthly: planDetails.roiMonthly,
+                    roiYearly: planDetails.roiYearly,
+                    paybackDays: planDetails.paybackDays,
+                    profitabilityScore: planDetails.profitabilityScore,
+                    upgradeValue: planDetails.upgradeValue,
+                    valueMetrics: planDetails.valueMetrics,
+                    features: planDetails.features,
+                    activeContracts: planDetails.activeContracts,
+                    tier: planDetails.tier,
+                    tierIndex: planDetails.tierIndex,
+                    totalTiers: planDetails.totalTiers
+                },
+                
+                // Upgrade recommendation
+                upgradeRecommendation: recommendation,
+                
+                // User-specific data
+                userSpecific: {
+                    isLoggedIn: isLoggedIn,
+                    canInvest: canInvest,
+                    userPotential: userPotential,
+                    mainBalance: userMainBalance,
+                    maturedBalance: userMaturedBalance,
+                    totalBalance: userMainBalance + userMaturedBalance
+                },
+                
+                // Badges
+                badges: badges,
+                
+                // Pricing display
+                pricing: {
+                    formattedMin: `$${plan.minAmount.toLocaleString()}`,
+                    formattedMax: `$${plan.maxAmount.toLocaleString()}`,
+                    formattedRange: `$${plan.minAmount.toLocaleString()} - $${plan.maxAmount.toLocaleString()}`
+                },
+                
+                // Duration display
+                durationDisplay: {
+                    hours: plan.duration,
+                    days: (plan.duration / 24).toFixed(1),
+                    label: plan.duration >= 24 ? `${(plan.duration / 24).toFixed(0)} Days` : `${plan.duration} Hours`
+                },
+                
+                // Return summary using EXISTING percentages
+                returnSummary: {
+                    investment: `$${plan.minAmount.toLocaleString()}`,
+                    percentageReturn: `${plan.percentage}%`,
+                    profitAmount: `$${planDetails.profitAmount.toFixed(2)}`,
+                    totalReturn: `$${planDetails.totalReturn.toFixed(2)}`,
+                    dailyProfit: `$${planDetails.dailyProfit.toFixed(4)}`,
+                    monthlyReturn: `$${planDetails.monthlyUSD.toFixed(2)}`,
+                    yearlyReturn: `$${planDetails.yearlyUSD.toFixed(2)}`
+                },
+                
+                // Color scheme
+                colorScheme: getPlanColorScheme(plan._id),
+                
+                // Button state
+                buttonState: isLoggedIn ? (canInvest ? 'Invest Now' : 'Insufficient Balance') : 'Login to Invest',
+                buttonDisabled: !isLoggedIn || !canInvest
+            };
+        });
+        
+        // Calculate overall market summary
+        const totalDailyBTC = formattedPlans.reduce((sum, p) => sum + p.planDetails.dailyBTC, 0);
+        const totalDailyUSD = formattedPlans.reduce((sum, p) => sum + p.planDetails.dailyUSD, 0);
+        const avgROI = formattedPlans.reduce((sum, p) => sum + p.planDetails.roiYearly, 0) / formattedPlans.length;
+        const avgPercentage = formattedPlans.reduce((sum, p) => sum + p.percentage, 0) / formattedPlans.length;
+        
+        res.status(200).json({
+            status: 'success',
+            data: {
+                plans: formattedPlans,
+                marketSummary: {
+                    totalDailyBTC: parseFloat(totalDailyBTC.toFixed(6)),
+                    totalDailyUSD: parseFloat(totalDailyUSD.toFixed(2)),
+                    averageROI: parseFloat(avgROI.toFixed(1)),
+                    averagePercentageReturn: parseFloat(avgPercentage.toFixed(2)),
+                    totalPlans: formattedPlans.length,
+                    highestROI: Math.max(...formattedPlans.map(p => p.planDetails.roiYearly)),
+                    lowestInvestment: Math.min(...formattedPlans.map(p => p.minAmount)),
+                    highestHashrate: Math.max(...formattedPlans.map(p => p.planDetails.hashrate))
+                },
+                userBalances: isLoggedIn ? {
+                    main: userMainBalance,
+                    matured: userMaturedBalance,
+                    total: userMainBalance + userMaturedBalance,
+                    formattedMain: `$${userMainBalance.toLocaleString()}`,
+                    formattedMatured: `$${userMaturedBalance.toLocaleString()}`,
+                    formattedTotal: `$${(userMainBalance + userMaturedBalance).toLocaleString()}`
+                } : null,
+                isLoggedIn: isLoggedIn,
+                btcPrice: currentBTCPrice,
+                investorCount: investorCount,
+                formattedInvestorCount: investorCount.toLocaleString(),
+                timestamp: new Date().toISOString()
+            }
+        });
+        
+    } catch (err) {
+        console.error('Get plans error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'An error occurred while fetching investment plans'
+        });
+    }
 });
 
-// Helper function to assign consistent color schemes to plans
+/**
+ * Helper function to assign consistent color schemes to plans
+ */
 function getPlanColorScheme(planId) {
-  const colors = [
-    { primary: '#003366', secondary: '#004488', accent: '#0066CC' }, // Blue
-    { primary: '#4B0082', secondary: '#6A0DAD', accent: '#8A2BE2' }, // Indigo
-    { primary: '#006400', secondary: '#008000', accent: '#00AA00' }, // Green
-    { primary: '#8B0000', secondary: '#A52A2A', accent: '#CD5C5C' }, // Red
-    { primary: '#DAA520', secondary: '#FFD700', accent: '#FFEC8B' }  // Gold
-  ];
-  
-  // Use planId to get consistent color (convert ObjectId to number)
-  const hash = parseInt(planId.toString().slice(-4), 16);
-  return colors[hash % colors.length];
+    const colors = [
+        { 
+            primary: '#003366', 
+            secondary: '#004488', 
+            accent: '#0066CC',
+            gradient: 'linear-gradient(135deg, #003366 0%, #004488 100%)',
+            text: '#FFFFFF',
+            badgeBg: 'rgba(0, 102, 204, 0.2)',
+            border: 'rgba(0, 102, 204, 0.4)'
+        },
+        { 
+            primary: '#4B0082', 
+            secondary: '#6A0DAD', 
+            accent: '#8A2BE2',
+            gradient: 'linear-gradient(135deg, #4B0082 0%, #6A0DAD 100%)',
+            text: '#FFFFFF',
+            badgeBg: 'rgba(138, 43, 226, 0.2)',
+            border: 'rgba(138, 43, 226, 0.4)'
+        },
+        { 
+            primary: '#006400', 
+            secondary: '#008000', 
+            accent: '#00AA00',
+            gradient: 'linear-gradient(135deg, #006400 0%, #008000 100%)',
+            text: '#FFFFFF',
+            badgeBg: 'rgba(0, 170, 0, 0.2)',
+            border: 'rgba(0, 170, 0, 0.4)'
+        },
+        { 
+            primary: '#8B0000', 
+            secondary: '#A52A2A', 
+            accent: '#CD5C5C',
+            gradient: 'linear-gradient(135deg, #8B0000 0%, #A52A2A 100%)',
+            text: '#FFFFFF',
+            badgeBg: 'rgba(205, 92, 92, 0.2)',
+            border: 'rgba(205, 92, 92, 0.4)'
+        },
+        { 
+            primary: '#DAA520', 
+            secondary: '#FFD700', 
+            accent: '#FFEC8B',
+            gradient: 'linear-gradient(135deg, #DAA520 0%, #FFD700 100%)',
+            text: '#000000',
+            badgeBg: 'rgba(255, 215, 0, 0.2)',
+            border: 'rgba(255, 215, 0, 0.4)'
+        },
+        { 
+            primary: '#1E3A8A', 
+            secondary: '#2563EB', 
+            accent: '#3B82F6',
+            gradient: 'linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%)',
+            text: '#FFFFFF',
+            badgeBg: 'rgba(59, 130, 246, 0.2)',
+            border: 'rgba(59, 130, 246, 0.4)'
+        }
+    ];
+    
+    // Use planId to get consistent color (convert ObjectId to number)
+    const hash = parseInt(planId.toString().slice(-4), 16);
+    return colors[hash % colors.length];
 }
 
-
+console.log('✅ Enhanced Plans endpoint loaded with sophisticated data');
+console.log('   - GET /api/plans (with logical progression)');
+console.log('   - Each plan has unique hashrate, ROI, and upgrade value');
+console.log('   - EXISTING PERCENTAGE RETURNS ARE PRESERVED');
 
 
 
