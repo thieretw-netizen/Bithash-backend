@@ -42729,7 +42729,6 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 
 
 
-
 // =============================================
 // MINING STATISTICS - SINGLE SOURCE OF TRUTH (REDIS)
 // =============================================
@@ -42760,9 +42759,9 @@ const MINING_CONFIG = {
         min: 99.85,
         max: 99.99
     },
-    // Active contracts are tied to investor count (15%-30%)
+    // Active contracts are tied to investor count (5%-30%)
     contractsPercentage: {
-        min: 0.15,  // 15% of total investors
+        min: 0.05,  // 5% of total investors
         max: 0.30   // 30% of total investors
     },
     // Volatility percentage (for random fluctuations)
@@ -42787,6 +42786,13 @@ const getCurrentInvestorCount = async () => {
         console.error('Error getting investor count:', err);
         return INITIAL_INVESTOR_COUNT;
     }
+};
+
+/**
+ * Format number with commas (e.g., 1,000,000)
+ */
+const formatNumberWithCommas = (num) => {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 };
 
 /**
@@ -42826,7 +42832,7 @@ const generateInitialMiningStats = async () => {
     // Get current investor count
     const investorCount = await getCurrentInvestorCount();
     
-    // Calculate contracts based on investor count (15%-30%)
+    // Calculate contracts based on investor count (5%-30%)
     const contractPercentage = MINING_CONFIG.contractsPercentage.min + 
         (Math.random() * (MINING_CONFIG.contractsPercentage.max - MINING_CONFIG.contractsPercentage.min));
     const contracts = Math.floor(investorCount * contractPercentage);
@@ -42858,6 +42864,7 @@ const generateInitialMiningStats = async () => {
         contractsPercentage: parseFloat((contractPercentage * 100).toFixed(1)),
         investorCount: investorCount,
         lastUpdated: Date.now(),
+        // 7-day chart data - TIED TO THIS SYSTEM
         chartData: generateInitialChartData(hashrate),
         hashrateChange: parseFloat(((Math.random() - 0.5) * 6).toFixed(2)),
         rewardsChange: parseFloat(((Math.random() - 0.5) * 8).toFixed(2))
@@ -42866,6 +42873,7 @@ const generateInitialMiningStats = async () => {
 
 /**
  * Generate initial 7-day chart data
+ * Chart values are tied to the hashrate system
  */
 const generateInitialChartData = (baseHashrate) => {
     const data = [];
@@ -42876,6 +42884,7 @@ const generateInitialChartData = (baseHashrate) => {
     for (let i = 6; i >= 0; i--) {
         const date = new Date(now);
         date.setDate(date.getDate() - i);
+        // Random walk variation tied to the hashrate
         const variation = (Math.random() - 0.5) * 0.2;
         const value = hashrate * (1 + variation);
         data.push({
@@ -42901,7 +42910,7 @@ const updateMiningStats = async () => {
             await saveMiningStatsToRedis(currentStats);
             miningStatsCache = currentStats;
             miningStatsLastCacheTime = Date.now();
-            console.log(`📊 Mining stats initialized: ${currentStats.hashrate} PH/s, ${currentStats.contracts} contracts (${currentStats.contractsPercentage}% of ${investorCount.toLocaleString()} investors)`);
+            console.log(`📊 Mining stats initialized: ${formatNumberWithCommas(currentStats.hashrate)} PH/s, ${formatNumberWithCommas(currentStats.contracts)} contracts (${currentStats.contractsPercentage}% of ${formatNumberWithCommas(investorCount)} investors)`);
             return currentStats;
         }
         
@@ -42932,7 +42941,7 @@ const updateMiningStats = async () => {
         newUptime = Math.max(MINING_CONFIG.uptime.min, Math.min(MINING_CONFIG.uptime.max, newUptime));
         
         // =============================================
-        // CRITICAL: Contracts are ALWAYS 15%-30% of investor count
+        // CRITICAL: Contracts are ALWAYS 5%-30% of investor count
         // =============================================
         const contractPercentage = MINING_CONFIG.contractsPercentage.min + 
             (Math.random() * (MINING_CONFIG.contractsPercentage.max - MINING_CONFIG.contractsPercentage.min));
@@ -42943,19 +42952,24 @@ const updateMiningStats = async () => {
         const hashrateChangePercent = ((newHashrate - currentStats.hashrate) / currentStats.hashrate) * 100;
         const rewardsChangePercent = ((newBtcRewards - currentStats.btcRewards) / currentStats.btcRewards) * 100;
         
-        // Update chart data
+        // =============================================
+        // CHART DATA - TIED TO THE SYSTEM
+        // =============================================
         const chartData = currentStats.chartData || generateInitialChartData(newHashrate);
         const now = new Date();
         const todayStr = now.toISOString().split('T')[0];
         
         const lastPoint = chartData[chartData.length - 1];
         if (lastPoint && lastPoint.date === todayStr) {
+            // Update today's value with new hashrate
             lastPoint.value = parseFloat(newHashrate.toFixed(1));
         } else {
+            // Add new point
             chartData.push({
                 date: todayStr,
                 value: parseFloat(newHashrate.toFixed(1))
             });
+            // Keep only last 7 days
             while (chartData.length > 7) {
                 chartData.shift();
             }
@@ -42996,7 +43010,7 @@ const updateMiningStats = async () => {
             });
         }
         
-        console.log(`📊 Mining stats updated: ${updatedStats.hashrate} PH/s, ${updatedStats.contracts} contracts (${updatedStats.contractsPercentage}% of ${investorCount.toLocaleString()} investors)`);
+        console.log(`📊 Mining stats updated: ${formatNumberWithCommas(updatedStats.hashrate)} PH/s, ${formatNumberWithCommas(updatedStats.contracts)} contracts (${updatedStats.contractsPercentage}% of ${formatNumberWithCommas(investorCount)} investors)`);
         
         return updatedStats;
         
@@ -43017,11 +43031,11 @@ const startMiningStatsJob = async () => {
         await saveMiningStatsToRedis(stats);
         miningStatsCache = stats;
         miningStatsLastCacheTime = Date.now();
-        console.log(`📊 Mining stats initialized: ${stats.hashrate} PH/s`);
+        console.log(`📊 Mining stats initialized: ${formatNumberWithCommas(stats.hashrate)} PH/s`);
     } else {
         miningStatsCache = stats;
         miningStatsLastCacheTime = Date.now();
-        console.log(`📊 Mining stats loaded from Redis: ${stats.hashrate} PH/s`);
+        console.log(`📊 Mining stats loaded from Redis: ${formatNumberWithCommas(stats.hashrate)} PH/s`);
     }
     
     // Schedule the next update
@@ -43097,10 +43111,10 @@ app.get('/api/mining/stats', async (req, res) => {
         
         // Format response EXACTLY as frontend expects
         res.status(200).json({
-            hashrate: stats.hashrate,        // PH/s
-            capacity: stats.capacity,        // TH/s
-            rewards: stats.btcRewards,       // BTC (24h)
-            uptime: stats.uptime             // %
+            hashrate: stats.hashrate,        // PH/s (e.g., 45,231.7)
+            capacity: stats.capacity,        // TH/s (e.g., 34,200,000)
+            rewards: stats.btcRewards,       // BTC (24h) (e.g., 28.45)
+            uptime: stats.uptime             // % (e.g., 99.92)
         });
         
     } catch (err) {
@@ -43121,11 +43135,11 @@ app.get('/api/mining/dashboard', async (req, res) => {
         
         // Format response EXACTLY as frontend expects
         res.status(200).json({
-            hashrate: stats.hashrate,              // PH/s
-            rewards: stats.btcRewards,             // BTC (24h)
-            contracts: stats.contracts,            // Active contracts
-            hashrateChange: stats.hashrateChange || 0,
-            rewardsChange: stats.rewardsChange || 0,
+            hashrate: stats.hashrate,              // PH/s (e.g., 45,231.7)
+            rewards: stats.btcRewards,             // BTC (24h) (e.g., 28.45)
+            contracts: stats.contracts,            // Active contracts (e.g., 789,234)
+            hashrateChange: stats.hashrateChange || 0,  // Percentage
+            rewardsChange: stats.rewardsChange || 0,    // Percentage
             chartData: stats.chartData || generateInitialChartData(stats.hashrate)
         });
         
@@ -43141,16 +43155,7 @@ app.get('/api/mining/dashboard', async (req, res) => {
 console.log('✅ Mining Statistics endpoints loaded:');
 console.log('   - GET /api/mining/stats');
 console.log('   - GET /api/mining/dashboard');
-
-
-
-
-
-
-
-
-
-
+console.log(`   - Active contracts: 5%-30% of investor count (${MINING_CONFIG.contractsPercentage.min*100}%-${MINING_CONFIG.contractsPercentage.max*100}%)`);
 
 
 
