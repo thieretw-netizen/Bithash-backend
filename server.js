@@ -42730,8 +42730,6 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 
 
 
-
-
 // =============================================
 // MINING STATISTICS - SINGLE SOURCE OF TRUTH (REDIS)
 // =============================================
@@ -42860,9 +42858,7 @@ const generateInitialMiningStats = async () => {
         contractsPercentage: parseFloat((contractPercentage * 100).toFixed(1)),
         investorCount: investorCount,
         lastUpdated: Date.now(),
-        // 7-day chart data
         chartData: generateInitialChartData(hashrate),
-        // Daily change percentages
         hashrateChange: parseFloat(((Math.random() - 0.5) * 6).toFixed(2)),
         rewardsChange: parseFloat(((Math.random() - 0.5) * 8).toFixed(2))
     };
@@ -42985,18 +42981,20 @@ const updateMiningStats = async () => {
         miningStatsLastCacheTime = Date.now();
         
         // Broadcast update via WebSocket
-        io.emit('mining_stats_update', {
-            hashrate: updatedStats.hashrate,
-            btcRewards: updatedStats.btcRewards,
-            capacity: updatedStats.capacity,
-            uptime: updatedStats.uptime,
-            contracts: updatedStats.contracts,
-            contractsPercentage: updatedStats.contractsPercentage,
-            hashrateChange: updatedStats.hashrateChange,
-            rewardsChange: updatedStats.rewardsChange,
-            investorCount: investorCount,
-            timestamp: Date.now()
-        });
+        if (io) {
+            io.emit('mining_stats_update', {
+                hashrate: updatedStats.hashrate,
+                btcRewards: updatedStats.btcRewards,
+                capacity: updatedStats.capacity,
+                uptime: updatedStats.uptime,
+                contracts: updatedStats.contracts,
+                contractsPercentage: updatedStats.contractsPercentage,
+                hashrateChange: updatedStats.hashrateChange,
+                rewardsChange: updatedStats.rewardsChange,
+                investorCount: investorCount,
+                timestamp: Date.now()
+            });
+        }
         
         console.log(`📊 Mining stats updated: ${updatedStats.hashrate} PH/s, ${updatedStats.contracts} contracts (${updatedStats.contractsPercentage}% of ${investorCount.toLocaleString()} investors)`);
         
@@ -43045,6 +43043,17 @@ const startMiningStatsJob = async () => {
     
     scheduleNextUpdate();
     console.log(`🚀 Mining stats job started. Updates every ~${MINING_CONFIG.updateInterval/1000}s with jitter`);
+};
+
+/**
+ * Stop the mining stats update job
+ */
+const stopMiningStatsJob = () => {
+    if (miningStatsUpdateInterval) {
+        clearTimeout(miningStatsUpdateInterval);
+        miningStatsUpdateInterval = null;
+        console.log('🛑 Mining stats job stopped');
+    }
 };
 
 /**
@@ -43129,29 +43138,9 @@ app.get('/api/mining/dashboard', async (req, res) => {
     }
 });
 
-// =============================================
-// GRACEFUL SHUTDOWN - Clean up mining stats job
-// =============================================
-// Add this to your existing gracefulShutdown function
-const originalGracefulShutdown = gracefulShutdown;
-gracefulShutdown = () => {
-    if (miningStatsUpdateInterval) {
-        clearTimeout(miningStatsUpdateInterval);
-        miningStatsUpdateInterval = null;
-        console.log('🛑 Mining stats job stopped');
-    }
-    if (typeof originalGracefulShutdown === 'function') {
-        originalGracefulShutdown();
-    } else {
-        console.log('Shutting down...');
-        process.exit(0);
-    }
-};
-
 console.log('✅ Mining Statistics endpoints loaded:');
 console.log('   - GET /api/mining/stats');
 console.log('   - GET /api/mining/dashboard');
-
 
 
 
