@@ -17199,8 +17199,8 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 // =============================================
-// ENHANCED INVESTMENT PLANS - SOPHISTICATED WITH LOGICAL PROGRESSION
-// PRESERVES EXISTING PERCENTAGE RETURNS
+// ENHANCED INVESTMENT PLANS - PREMIUM LOOK & FEEL
+// PRESERVES EXACT EXISTING PERCENTAGES - NO CONTRADICTIONS
 // =============================================
 
 // Plan configuration - SINGLE SOURCE OF TRUTH
@@ -17232,6 +17232,33 @@ const PLAN_CONFIG = {
         gold: ['VIP Dashboard', 'Dedicated Support', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Weekly Consultation', 'Priority Queue'],
         enterprise: ['Enterprise Dashboard', '24/7 Dedicated Support', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Daily Consultation', 'Priority Queue', 'Custom Reports'],
         ultimate: ['Ultimate Dashboard', '24/7 Dedicated Manager', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Daily Consultation', 'Priority Queue', 'Custom Reports', 'Strategic Planning']
+    },
+    // Visual color schemes for each tier
+    colors: {
+        starter: { primary: '#6366F1', secondary: '#818CF8', accent: '#A5B4FC', gradient: 'linear-gradient(135deg, #6366F1 0%, #818CF8 100%)' },
+        basic: { primary: '#3B82F6', secondary: '#60A5FA', accent: '#93C5FD', gradient: 'linear-gradient(135deg, #3B82F6 0%, #60A5FA 100%)' },
+        standard: { primary: '#06B6D4', secondary: '#22D3EE', accent: '#67E8F9', gradient: 'linear-gradient(135deg, #06B6D4 0%, #22D3EE 100%)' },
+        gold: { primary: '#F59E0B', secondary: '#FBBF24', accent: '#FCD34D', gradient: 'linear-gradient(135deg, #F59E0B 0%, #FBBF24 100%)' },
+        enterprise: { primary: '#8B5CF6', secondary: '#A78BFA', accent: '#C4B5FD', gradient: 'linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%)' },
+        ultimate: { primary: '#EC4899', secondary: '#F472B6', accent: '#F9A8D4', gradient: 'linear-gradient(135deg, #EC4899 0%, #F472B6 100%)' }
+    },
+    // Plan badges
+    badges: {
+        starter: { label: 'Entry Level', icon: 'fa-seedling' },
+        basic: { label: 'Popular', icon: 'fa-fire' },
+        standard: { label: 'Best Value', icon: 'fa-star' },
+        gold: { label: 'Premium', icon: 'fa-crown' },
+        enterprise: { label: 'Elite', icon: 'fa-gem' },
+        ultimate: { label: 'Ultimate', icon: 'fa-rocket' }
+    },
+    // Support tiers
+    support: {
+        starter: 'Standard Support',
+        basic: 'Priority Support',
+        standard: 'Premium Support',
+        gold: 'VIP Support',
+        enterprise: 'Enterprise Support',
+        ultimate: 'Ultimate Support'
     }
 };
 
@@ -17263,7 +17290,7 @@ const getCurrentBTCPriceForPlans = async () => {
 
 /**
  * Generate sophisticated plan details with logical progression
- * PRESERVES EXISTING PERCENTAGE RETURNS
+ * PRESERVES EXACT EXISTING PERCENTAGE RETURNS
  */
 const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
     const planName = plan.name.toLowerCase();
@@ -17285,32 +17312,30 @@ const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
     const efficiency = PLAN_CONFIG.efficiency[tier] || 2.8;
     
     // Calculate hashrate based on investment amount (linear scaling within range)
-    // Uses the plan's actual minAmount to determine hashrate within its tier
     const amountRatio = Math.min(plan.minAmount / 30000, 0.8);
     const hashrateBase = hashrateMin + ((hashrateMax - hashrateMin) * amountRatio);
     const hashrate = Math.round(hashrateBase + (Math.random() - 0.5) * 6);
     
     // Calculate daily BTC yield based on hashrate
-    // Network hashrate ~ 600,000,000 TH/s, BTC per day ~ 450
     const networkHashrate = 600000000; // TH/s
     const dailyBTC = (hashrate / networkHashrate) * 450;
     const dailyUSD = dailyBTC * currentBTCPrice;
     
     // =============================================
-    // PRESERVE EXISTING PERCENTAGE RETURNS
-    // Use plan.percentage as the source of truth
+    // PRESERVE EXACT EXISTING PERCENTAGE RETURNS
+    // Use plan.percentage as the source of truth - NO CHANGES
     // =============================================
     const percentageReturn = plan.percentage || 0;
     
-    // Calculate returns using the EXISTING percentage
+    // Calculate returns using the EXACT existing percentage
     const profitAmount = plan.minAmount * (percentageReturn / 100);
     const totalReturn = plan.minAmount + profitAmount;
     
     // Daily profit (spread over duration)
     const dailyProfit = profitAmount / plan.duration;
     
-    // ROI metrics using the EXISTING percentage
-    const roiPerDuration = percentageReturn; // Already a percentage
+    // ROI metrics using the EXACT existing percentage
+    const roiPerDuration = percentageReturn;
     const roiDaily = percentageReturn / plan.duration;
     const roiMonthly = roiDaily * 30;
     const roiYearly = roiDaily * 365;
@@ -17318,8 +17343,8 @@ const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
     // Calculate payback period
     const paybackDays = dailyProfit > 0 ? plan.minAmount / (dailyProfit * 24) : 0;
     
-    // Profitability score (0-100)
-    const profitabilityScore = Math.min(100, Math.max(20, (roiYearly / 150) * 100));
+    // Profitability score (0-100) - based on ROI relative to other plans
+    const profitabilityScore = Math.min(100, Math.max(20, Math.ceil((roiYearly / 150) * 100)));
     
     // Calculate upgrade value (progressive improvement)
     const tierNames = ['starter', 'basic', 'standard', 'gold', 'enterprise', 'ultimate'];
@@ -17327,8 +17352,7 @@ const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
     const totalTiers = tierNames.length;
     const upgradeValue = ((currentIndex / (totalTiers - 1)) * 100).toFixed(1);
     
-    // Calculate relative value increase from previous tier
-    let upgradeBonus = 0;
+    // Calculate relative value increase from previous tier (NO DATABASE QUERY)
     let upgradeInfo = null;
     
     if (currentIndex > 0) {
@@ -17339,21 +17363,24 @@ const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
         const currentAvg = (currentHashrate.min + currentHashrate.max) / 2;
         const percentIncrease = ((currentAvg - prevAvg) / prevAvg) * 100;
         
-        upgradeBonus = parseFloat(percentIncrease.toFixed(1));
-        
-        // Calculate additional value for upgrading
+        // Calculate additional value for upgrading (using estimates, NOT database)
         const additionalHashrate = currentAvg - prevAvg;
         const additionalDailyBTC = (additionalHashrate / networkHashrate) * 450;
         const additionalDailyUSD = additionalDailyBTC * currentBTCPrice;
         
-        // Get the previous plan's percentage return
-        const prevPlan = await Plan.findOne({ name: { $regex: new RegExp(prevTier, 'i') } }).lean();
-        const prevPercentage = prevPlan?.percentage || 0;
+        // Estimate previous plan's min amount (based on tier)
+        const prevMinAmounts = {
+            starter: 30,
+            basic: 500,
+            standard: 2000,
+            gold: 10000,
+            enterprise: 50000
+        };
+        const prevMinAmount = prevMinAmounts[prevTier] || plan.minAmount * 0.6;
         
-        // Calculate additional profit from upgrading
-        const additionalInvestment = plan.minAmount - (prevPlan?.minAmount || plan.minAmount * 0.6);
-        const additionalProfit = (additionalInvestment * (percentageReturn / 100)) - 
-                                (additionalInvestment * (prevPercentage / 100));
+        // Calculate additional profit from upgrading (estimated)
+        const additionalInvestment = plan.minAmount - prevMinAmount;
+        const additionalProfit = (additionalInvestment * (percentageReturn / 100));
         
         upgradeInfo = {
             fromPlan: prevTier.charAt(0).toUpperCase() + prevTier.slice(1),
@@ -17364,15 +17391,17 @@ const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
             additionalDailyUSD: parseFloat(additionalDailyUSD.toFixed(2)),
             additionalMonthlyUSD: parseFloat((additionalDailyUSD * 30).toFixed(2)),
             additionalYearlyUSD: parseFloat((additionalDailyUSD * 365).toFixed(2)),
-            additionalProfitPerDuration: parseFloat(additionalProfit.toFixed(2)),
-            percentageIncrease: parseFloat((percentageReturn - prevPercentage).toFixed(2))
+            additionalProfit: parseFloat(additionalProfit.toFixed(2))
         };
     }
     
     // Get features for this tier
     const features = PLAN_CONFIG.features[tier] || PLAN_CONFIG.features.standard;
+    const colors = PLAN_CONFIG.colors[tier] || PLAN_CONFIG.colors.standard;
+    const badge = PLAN_CONFIG.badges[tier] || PLAN_CONFIG.badges.standard;
+    const supportTier = PLAN_CONFIG.support[tier] || PLAN_CONFIG.support.standard;
     
-    // Calculate total active contracts in this tier
+    // Calculate total active contracts in this tier (based on investor count)
     const tierMultiplier = (currentIndex + 1) / totalTiers;
     const baseContracts = Math.floor(investorCount * 0.002 * tierMultiplier);
     const contractsInTier = Math.max(50, baseContracts + Math.floor(Math.random() * 200));
@@ -17389,7 +17418,7 @@ const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
         dailyUSD: parseFloat(dailyUSD.toFixed(2)),
         monthlyUSD: parseFloat((dailyUSD * 30).toFixed(2)),
         yearlyUSD: parseFloat((dailyUSD * 365).toFixed(2)),
-        // Use EXISTING percentage returns
+        // EXACT EXISTING PERCENTAGE RETURNS - NO CHANGES
         percentageReturn: percentageReturn,
         profitAmount: parseFloat(profitAmount.toFixed(2)),
         totalReturn: parseFloat(totalReturn.toFixed(2)),
@@ -17407,23 +17436,27 @@ const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
         tier: tier,
         tierIndex: currentIndex,
         totalTiers: totalTiers,
-        // Additional value metrics
+        // Premium visual data
+        colors: colors,
+        badge: badge,
+        supportTier: supportTier,
+        // Value metrics
         valueMetrics: {
             efficiency: efficiency,
             reliability: parseFloat((99.5 - (currentIndex * 0.3)).toFixed(1)),
             maintenance: parseFloat((1.2 - (currentIndex * 0.15)).toFixed(2)),
-            support: ['Standard', 'Priority', 'Premium', 'VIP', 'Enterprise', 'Ultimate'][currentIndex] || 'Standard'
+            support: supportTier
         }
     };
 };
 
 // =============================================
-// ENHANCED PLANS ENDPOINT - WITH SOPHISTICATED DATA
-// PRESERVES EXISTING PERCENTAGE RETURNS
+// ENHANCED PLANS ENDPOINT - PREMIUM LOOK
+// PRESERVES EXACT EXISTING PERCENTAGE RETURNS
 // =============================================
 app.get('/api/plans', async (req, res) => {
     try {
-        // Get plans from database - THESE HAVE THE EXISTING PERCENTAGES
+        // Get plans from database - THESE HAVE THE EXACT EXISTING PERCENTAGES
         const plans = await Plan.find({ isActive: true }).lean();
         
         // Get real-time data from the mining system
@@ -17447,16 +17480,6 @@ app.get('/api/plans', async (req, res) => {
         
         // Sort plans by minAmount (cheapest to most expensive)
         const sortedPlans = [...plans].sort((a, b) => a.minAmount - b.minAmount);
-        
-        // Map plan names to tiers for consistent hashrate mapping
-        const tierMap = {
-            'starter': ['starter'],
-            'basic': ['basic'],
-            'standard': ['standard'],
-            'gold': ['gold'],
-            'enterprise': ['enterprise'],
-            'ultimate': ['ultimate']
-        };
         
         // Generate sophisticated plan data
         const formattedPlans = sortedPlans.map((plan, index) => {
@@ -17518,14 +17541,17 @@ app.get('/api/plans', async (req, res) => {
                 isHighestYield: index === sortedPlans.length - 1,
                 isEntryLevel: index === 0,
                 hasUpgrade: index < sortedPlans.length - 1,
-                isMostEfficient: planDetails.efficiency >= 4.0
+                isMostEfficient: planDetails.efficiency >= 4.0,
+                // Premium badge data
+                badgeLabel: planDetails.badge.label,
+                badgeIcon: planDetails.badge.icon
             };
             
             return {
                 id: plan._id,
                 name: plan.name,
                 description: plan.description,
-                // EXISTING FIELDS - PRESERVED
+                // EXACT EXISTING FIELDS - PRESERVED
                 percentage: plan.percentage,
                 duration: plan.duration,
                 minAmount: plan.minAmount,
@@ -17533,17 +17559,28 @@ app.get('/api/plans', async (req, res) => {
                 referralBonus: plan.referralBonus,
                 isActive: plan.isActive,
                 
+                // Premium visual data
+                premium: {
+                    tier: planDetails.tier,
+                    tierIndex: planDetails.tierIndex,
+                    totalTiers: planDetails.totalTiers,
+                    colors: planDetails.colors,
+                    badge: planDetails.badge,
+                    supportTier: planDetails.supportTier,
+                    features: planDetails.features,
+                    hashrateLabel: planDetails.hashrateLabel
+                },
+                
                 // Sophisticated plan data
                 planDetails: {
                     hashrate: planDetails.hashrate,
                     hashrateRange: planDetails.hashrateRange,
-                    hashrateLabel: planDetails.hashrateLabel,
                     efficiency: planDetails.efficiency,
                     dailyBTC: planDetails.dailyBTC,
                     dailyUSD: planDetails.dailyUSD,
                     monthlyUSD: planDetails.monthlyUSD,
                     yearlyUSD: planDetails.yearlyUSD,
-                    // EXISTING PERCENTAGE RETURNS
+                    // EXACT EXISTING PERCENTAGE RETURNS - NO CHANGES
                     percentageReturn: planDetails.percentageReturn,
                     profitAmount: planDetails.profitAmount,
                     totalReturn: planDetails.totalReturn,
@@ -17556,11 +17593,7 @@ app.get('/api/plans', async (req, res) => {
                     profitabilityScore: planDetails.profitabilityScore,
                     upgradeValue: planDetails.upgradeValue,
                     valueMetrics: planDetails.valueMetrics,
-                    features: planDetails.features,
-                    activeContracts: planDetails.activeContracts,
-                    tier: planDetails.tier,
-                    tierIndex: planDetails.tierIndex,
-                    totalTiers: planDetails.totalTiers
+                    activeContracts: planDetails.activeContracts
                 },
                 
                 // Upgrade recommendation
@@ -17593,7 +17626,7 @@ app.get('/api/plans', async (req, res) => {
                     label: plan.duration >= 24 ? `${(plan.duration / 24).toFixed(0)} Days` : `${plan.duration} Hours`
                 },
                 
-                // Return summary using EXISTING percentages
+                // Return summary using EXACT EXISTING percentages
                 returnSummary: {
                     investment: `$${plan.minAmount.toLocaleString()}`,
                     percentageReturn: `${plan.percentage}%`,
@@ -17603,9 +17636,6 @@ app.get('/api/plans', async (req, res) => {
                     monthlyReturn: `$${planDetails.monthlyUSD.toFixed(2)}`,
                     yearlyReturn: `$${planDetails.yearlyUSD.toFixed(2)}`
                 },
-                
-                // Color scheme
-                colorScheme: getPlanColorScheme(plan._id),
                 
                 // Button state
                 buttonState: isLoggedIn ? (canInvest ? 'Invest Now' : 'Insufficient Balance') : 'Login to Invest',
@@ -17658,77 +17688,11 @@ app.get('/api/plans', async (req, res) => {
     }
 });
 
-/**
- * Helper function to assign consistent color schemes to plans
- */
-function getPlanColorScheme(planId) {
-    const colors = [
-        { 
-            primary: '#003366', 
-            secondary: '#004488', 
-            accent: '#0066CC',
-            gradient: 'linear-gradient(135deg, #003366 0%, #004488 100%)',
-            text: '#FFFFFF',
-            badgeBg: 'rgba(0, 102, 204, 0.2)',
-            border: 'rgba(0, 102, 204, 0.4)'
-        },
-        { 
-            primary: '#4B0082', 
-            secondary: '#6A0DAD', 
-            accent: '#8A2BE2',
-            gradient: 'linear-gradient(135deg, #4B0082 0%, #6A0DAD 100%)',
-            text: '#FFFFFF',
-            badgeBg: 'rgba(138, 43, 226, 0.2)',
-            border: 'rgba(138, 43, 226, 0.4)'
-        },
-        { 
-            primary: '#006400', 
-            secondary: '#008000', 
-            accent: '#00AA00',
-            gradient: 'linear-gradient(135deg, #006400 0%, #008000 100%)',
-            text: '#FFFFFF',
-            badgeBg: 'rgba(0, 170, 0, 0.2)',
-            border: 'rgba(0, 170, 0, 0.4)'
-        },
-        { 
-            primary: '#8B0000', 
-            secondary: '#A52A2A', 
-            accent: '#CD5C5C',
-            gradient: 'linear-gradient(135deg, #8B0000 0%, #A52A2A 100%)',
-            text: '#FFFFFF',
-            badgeBg: 'rgba(205, 92, 92, 0.2)',
-            border: 'rgba(205, 92, 92, 0.4)'
-        },
-        { 
-            primary: '#DAA520', 
-            secondary: '#FFD700', 
-            accent: '#FFEC8B',
-            gradient: 'linear-gradient(135deg, #DAA520 0%, #FFD700 100%)',
-            text: '#000000',
-            badgeBg: 'rgba(255, 215, 0, 0.2)',
-            border: 'rgba(255, 215, 0, 0.4)'
-        },
-        { 
-            primary: '#1E3A8A', 
-            secondary: '#2563EB', 
-            accent: '#3B82F6',
-            gradient: 'linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%)',
-            text: '#FFFFFF',
-            badgeBg: 'rgba(59, 130, 246, 0.2)',
-            border: 'rgba(59, 130, 246, 0.4)'
-        }
-    ];
-    
-    // Use planId to get consistent color (convert ObjectId to number)
-    const hash = parseInt(planId.toString().slice(-4), 16);
-    return colors[hash % colors.length];
-}
-
-console.log('✅ Enhanced Plans endpoint loaded with sophisticated data');
-console.log('   - GET /api/plans (with logical progression)');
-console.log('   - Each plan has unique hashrate, ROI, and upgrade value');
-console.log('   - EXISTING PERCENTAGE RETURNS ARE PRESERVED');
-
+console.log('✅ Enhanced Plans endpoint loaded with premium look');
+console.log('   - GET /api/plans');
+console.log('   - EXACT EXISTING PERCENTAGES PRESERVED');
+console.log('   - Premium visual data added');
+console.log('   - Logical hashrate progression (cheaper = LESS hashrate)');
 
 
 
