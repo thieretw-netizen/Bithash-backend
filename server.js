@@ -17227,404 +17227,179 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-// Enhanced GET /api/plans endpoint with tier badges and progressive features
+
+
+
+
 
 // =============================================
-// PLAN TIER CONFIGURATION - PROGRESSIVE FEATURES & BENEFITS
+// ENHANCED PLANS RENDERER - Uses new /api/plans endpoint
 // =============================================
+async function loadPremiumPlans() {
+    const container = document.getElementById('plansContainer');
+    if (!container) return;
 
-const PLAN_TIER_CONFIG = {
-  // Tier 0: Starter
-  'Starter Plan': {
-    tierBadge: 'Starter',
-    tierLevel: 1,
-    tierIcon: 'fa-seedling',
-    colorScheme: {
-      primary: '#003366',
-      secondary: '#004488',
-      accent: '#0066CC',
-      gradient: 'linear-gradient(135deg, #003366 0%, #004488 100%)',
-      border: 'rgba(0, 51, 102, 0.4)',
-      glow: 'rgba(0, 51, 102, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#66B5FF'
-    },
-    features: [
-      'SHA-256 ASIC mining access',
-      'Basic monitoring dashboard',
-      '24/7 support via email'
-    ],
-    benefits: [
-      'Entry-level mining operations',
-      'Perfect for beginners',
-      'Low minimum investment'
-    ]
-  },
-  
-  // Tier 1: Basic
-  'Standard Plan': {
-    tierBadge: 'Basic',
-    tierLevel: 2,
-    tierIcon: 'fa-chart-simple',
-    colorScheme: {
-      primary: '#4B0082',
-      secondary: '#6A0DAD',
-      accent: '#8A2BE2',
-      gradient: 'linear-gradient(135deg, #4B0082 0%, #6A0DAD 100%)',
-      border: 'rgba(75, 0, 130, 0.4)',
-      glow: 'rgba(75, 0, 130, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#B266FF'
-    },
-    features: [
-      'SHA-256 ASIC mining access',
-      'Advanced monitoring dashboard',
-      '24/7 priority support via email',
-      'Weekly mining reports'
-    ],
-    benefits: [
-      'Optimized mining efficiency',
-      'Higher hashrate allocation',
-      'Priority support included',
-      'Detailed performance tracking'
-    ]
-  },
-  
-  // Tier 2: Standard (Gold in original)
-  'Gold Plan': {
-    tierBadge: 'Standard',
-    tierLevel: 3,
-    tierIcon: 'fa-bolt',
-    colorScheme: {
-      primary: '#006400',
-      secondary: '#008000',
-      accent: '#00AA00',
-      gradient: 'linear-gradient(135deg, #006400 0%, #008000 100%)',
-      border: 'rgba(0, 100, 0, 0.4)',
-      glow: 'rgba(0, 100, 0, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#66FF66'
-    },
-    features: [
-      'SHA-256 ASIC mining access',
-      'Premium monitoring dashboard',
-      '24/7 priority support via email & chat',
-      'Weekly mining reports',
-      'Advanced cooling systems'
-    ],
-    benefits: [
-      'High-performance mining',
-      'Priority hashrate allocation',
-      'Dedicated support team',
-      'Monthly performance reviews',
-      'Early access to new features'
-    ]
-  },
-  
-  // Tier 3: Gold
-  'Enterprise Plan': {
-    tierBadge: 'Gold',
-    tierLevel: 4,
-    tierIcon: 'fa-rocket',
-    colorScheme: {
-      primary: '#8B0000',
-      secondary: '#A52A2A',
-      accent: '#CD5C5C',
-      gradient: 'linear-gradient(135deg, #8B0000 0%, #A52A2A 100%)',
-      border: 'rgba(139, 0, 0, 0.4)',
-      glow: 'rgba(139, 0, 0, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#FF9999'
-    },
-    features: [
-      'SHA-256 ASIC mining access',
-      'Premium monitoring dashboard',
-      '24/7 priority support via email, chat & phone',
-      'Weekly mining reports',
-      'Advanced cooling systems',
-      'Premium infrastructure access'
-    ],
-    benefits: [
-      'Gold-tier hashrate allocation',
-      'Premium infrastructure access',
-      'Dedicated account manager',
-      'Exclusive mining pool access',
-      'Custom mining optimization',
-      'Priority maintenance'
-    ]
-  },
-  
-  // Tier 4: Enterprise
-  'Ultimate Plan': {
-    tierBadge: 'Enterprise',
-    tierLevel: 5,
-    tierIcon: 'fa-crown',
-    colorScheme: {
-      primary: '#DAA520',
-      secondary: '#FFD700',
-      accent: '#FFEC8B',
-      gradient: 'linear-gradient(135deg, #DAA520 0%, #FFD700 100%)',
-      border: 'rgba(218, 165, 32, 0.4)',
-      glow: 'rgba(218, 165, 32, 0.3)',
-      text: '#000000',
-      accentText: '#000000'
-    },
-    features: [
-      'SHA-256 ASIC mining access',
-      'Enterprise monitoring dashboard',
-      '24/7 VIP support via all channels',
-      'Daily mining reports',
-      'Advanced cooling systems',
-      'Enterprise infrastructure access',
-      'Priority hashrate allocation'
-    ],
-    benefits: [
-      'Enterprise-grade infrastructure',
-      'Highest hashrate priority',
-      '24/7 VIP support team',
-      'Custom mining solutions',
-      'Exclusive mining pool access',
-      'Early access to new hardware',
-      'Monthly strategy meetings'
-    ]
-  }
-};
+    // Show loading state
+    container.innerHTML = `
+        <div style="text-align: center; padding: 60px 20px; grid-column: 1 / -1;">
+            <div style="display: inline-block; width: 40px; height: 40px; border: 4px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <p style="color: var(--text-secondary); margin-top: 16px;">Loading cloud mining plans...</p>
+        </div>
+    `;
 
-// Enhanced GET /api/plans endpoint
-app.get('/api/plans', async (req, res) => {
-  try {
-    // Get plans from database
-    const plans = await Plan.find({ isActive: true }).lean();
-    
-    // Get user balance if logged in
-    let userMainBalance = 0;
-    let userMaturedBalance = 0;
-    let userMainBTCBalance = 0;
-    let userMaturedBTCBalance = 0;
-    let isLoggedIn = false;
-    let userFiatCurrency = 'USD';
-    let userCurrencySymbol = '$';
-    
-    if (req.user) {
-      const user = await User.findById(req.user.id).select('balances preferences');
-      isLoggedIn = true;
-      if (user.preferences && user.preferences.fiatCurrency) {
-        userFiatCurrency = user.preferences.fiatCurrency;
-      }
-      
-      // Get fiat exchange rate if available
-      try {
-        const fiatRates = await getFiatExchangeRates();
-        if (fiatRates && fiatRates[userFiatCurrency]) {
-          const rate = fiatRates[userFiatCurrency];
-          // Convert USD balances to user's preferred currency
-          if (user.balances && user.balances.main) {
-            const mainUSD = user.balances.main.get('usd') || 0;
-            userMainBalance = mainUSD * rate;
-          }
-          if (user.balances && user.balances.matured) {
-            const maturedUSD = user.balances.matured.get('usd') || 0;
-            userMaturedBalance = maturedUSD * rate;
-          }
+    try {
+        const token = localStorage.getItem('jwtToken');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+        const response = await fetch('https://bithash-backend-ycuf.onrender.com/api/plans', {
+            headers: headers
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to load plans: ${response.status}`);
         }
-      } catch (rateError) {
-        // Fallback to USD
-        userMainBalance = user.balances?.main?.get('usd') || 0;
-        userMaturedBalance = user.balances?.matured?.get('usd') || 0;
-      }
-      
-      // Get BTC balances
-      userMainBTCBalance = user.balances?.main?.get('btc') || 0;
-      userMaturedBTCBalance = user.balances?.matured?.get('btc') || 0;
+
+        const result = await response.json();
+        const plans = result.data?.plans || [];
+        const userContext = result.data?.userContext || { isLoggedIn: false };
+
+        if (plans.length === 0) {
+            container.innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; grid-column: 1 / -1; color: var(--text-secondary);">
+                    <p>No cloud mining plans available at the moment.</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Render each plan card
+        container.innerHTML = plans.map((plan, index) => {
+            const isPopular = plan.isPopular || false;
+            const purchaseState = plan.purchaseState || {};
+            const isLoggedIn = purchaseState.isLoggedIn || false;
+            const needsKYC = purchaseState.needsKYC || false;
+            const needsBalance = purchaseState.needsBalance || false;
+            const canAfford = purchaseState.canAfford || false;
+
+            let buttonText = purchaseState.buttonText || 'Buy Hash Power';
+            let buttonDisabled = purchaseState.buttonDisabled || false;
+            let buttonClass = 'plan-button-premium';
+
+            // Custom button styling based on state
+            if (buttonText.includes('Login')) {
+                buttonClass += ' outline';
+            } else if (buttonText.includes('KYC')) {
+                buttonClass += ' outline';
+            } else if (buttonText.includes('Insufficient')) {
+                buttonClass += ' outline';
+            }
+
+            // Determine the icon (using text instead of emojis)
+            let buttonIcon = '';
+            if (buttonText.includes('Login')) buttonIcon = '🔒';
+            else if (buttonText.includes('KYC')) buttonIcon = '📋';
+            else if (buttonText.includes('Insufficient')) buttonIcon = '⚠️';
+            else buttonIcon = '⛏️';
+
+            return `
+                <div class="plan-card-premium ${isPopular ? 'popular' : ''}" data-plan-id="${plan.id}" data-aos="fade-up" data-aos-delay="${(index + 1) * 80}">
+                    ${isPopular ? '' : ''}
+                    <div class="tier-badge">${plan.tierBadge || plan.name}</div>
+                    <h3 class="plan-name-premium">
+                        <span class="highlight">${plan.name}</span>
+                    </h3>
+
+                    <div class="plan-key-info-premium">
+                        <div class="info-item-premium">
+                            <span class="info-label-premium">Investment</span>
+                            <span class="info-value-premium">$${plan.minAmountUSD.toLocaleString()} - $${plan.maxAmountUSD.toLocaleString()}</span>
+                        </div>
+                        <div class="info-item-premium">
+                            <span class="info-label-premium">Return</span>
+                            <span class="info-value-premium"><span class="gain">+${plan.percentage}%</span></span>
+                        </div>
+                        <div class="info-item-premium">
+                            <span class="info-label-premium">Duration</span>
+                            <span class="info-value-premium">${plan.durationHours}h</span>
+                        </div>
+                        <div class="info-item-premium">
+                            <span class="info-label-premium">Hashrate</span>
+                            <span class="info-value-premium">${plan.minerDetails?.hashrate || 'N/A'}</span>
+                        </div>
+                    </div>
+
+                    <ul class="plan-features-premium">
+                        ${(plan.features || ['SHA-256 ASIC mining']).slice(0, 4).map(f => `<li>${f}</li>`).join('')}
+                    </ul>
+
+                    <button class="${buttonClass}" 
+                        onclick="handlePlanPurchase('${plan.id}')" 
+                        ${buttonDisabled ? 'disabled' : ''}
+                        title="${buttonText}">
+                        ${buttonIcon} ${buttonText}
+                    </button>
+
+                    <div class="plan-status-premium">
+                        <span class="status-dot-premium"></span>
+                        <span>Active Mining</span>
+                        ${plan.estimatedReturns?.daily ? `· <span style="color: var(--positive);">~${plan.estimatedReturns.daily.btc} BTC/day</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Re-initialize AOS for new elements
+        if (typeof AOS !== 'undefined') {
+            AOS.refresh();
+        }
+
+    } catch (error) {
+        console.error('Error loading premium plans:', error);
+        container.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px; grid-column: 1 / -1; color: var(--text-secondary);">
+                <p style="color: var(--error);">Unable to load cloud mining plans.</p>
+                <button class="btn btn-outline" onclick="loadPremiumPlans()" style="margin-top: 16px;">Retry</button>
+            </div>
+        `;
+    }
+}
+
+// =============================================
+// HANDLE PLAN PURCHASE - Redirect to Cloud Mining Page
+// =============================================
+function handlePlanPurchase(planId) {
+    const token = localStorage.getItem('jwtToken');
+    if (!token) {
+        window.location.href = 'login';
+        return;
     }
 
-    // Get current BTC price for reference
-    let btcPrice = 0;
-    try {
-      const priceResponse = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-      if (priceResponse.ok) {
-        const priceData = await priceResponse.json();
-        btcPrice = priceData.bitcoin?.usd || 0;
-      }
-    } catch (e) {
-      // Silent fallback - keep btcPrice as 0
+    // Redirect to cloudmining.html with plan ID
+    const sessionToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    window.location.href = `cloudmining.html?plan=${planId}&session=${sessionToken}&t=${Date.now()}`;
+}
+
+// =============================================
+// VIEW PLANS BUTTON - Scroll to plans with animation
+// =============================================
+document.addEventListener('DOMContentLoaded', function() {
+    const viewPlansBtn = document.getElementById('viewPlansBtn');
+    if (viewPlansBtn) {
+        viewPlansBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const plansSection = document.getElementById('plans');
+            if (plansSection) {
+                plansSection.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+            }
+        });
     }
 
-    // Get fiat currencies for symbol
-    let fiatSymbols = {};
-    try {
-      const fiatResponse = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-      if (fiatResponse.ok) {
-        const fiatData = await fiatResponse.json();
-        // We'll use a simple mapping for symbols
-        fiatSymbols = {
-          'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CNY': '¥',
-          'INR': '₹', 'CAD': 'C$', 'AUD': 'A$', 'CHF': 'Fr', 'KRW': '₩',
-          'MXN': '$', 'BRL': 'R$', 'ZAR': 'R', 'SGD': 'S$', 'HKD': 'HK$'
-        };
-      }
-    } catch (e) {
-      // Silent fallback
-    }
-    
-    const currencySymbol = fiatSymbols[userFiatCurrency] || '$';
-
-    // Sort plans by minAmount to assign tiers correctly
-    const sortedPlans = plans.sort((a, b) => a.minAmount - b.minAmount);
-    
-    // Format plans data with enhanced premium presentation
-    const formattedPlans = sortedPlans.map((plan, index) => {
-      // Get tier config based on plan name or index
-      const tierConfig = PLAN_TIER_CONFIG[plan.name] || PLAN_TIER_CONFIG['Starter Plan'];
-      
-      // Determine if this is the most popular plan (middle tier)
-      const isPopular = index === Math.floor(sortedPlans.length / 2);
-      
-      // Calculate hashrate based on plan tier level
-      const tierLevel = tierConfig.tierLevel || (index + 1);
-      const baseHashrate = [68, 110, 150, 234, 255][index] || 68 + (index * 45);
-      
-      // Calculate estimated daily earnings (approximate based on percentage and duration)
-      const estimatedDailyReturn = plan.percentage / plan.duration;
-      const estimatedMonthlyReturn = estimatedDailyReturn * 30;
-      
-      // Get features and benefits for this tier
-      const features = tierConfig.features || [];
-      const benefits = tierConfig.benefits || [];
-      
-      // Determine if user can invest
-      const canInvest = isLoggedIn && (userMainBalance >= plan.minAmount || userMaturedBalance >= plan.minAmount);
-      
-      // Get currency formatted amounts
-      const formatCurrency = (amount) => {
-        return `${currencySymbol}${parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-      };
-      
-      // Build tier-specific metrics
-      const metrics = {
-        hashrate: baseHashrate,
-        hashrateUnit: 'TH/s',
-        dailyReturn: estimatedDailyReturn.toFixed(2),
-        monthlyReturn: estimatedMonthlyReturn.toFixed(2),
-        minInvestment: plan.minAmount,
-        maxInvestment: plan.maxAmount,
-        durationHours: plan.duration,
-        durationDays: Math.round(plan.duration / 24),
-        referralBonus: plan.referralBonus || 5,
-        tierLevel: tierLevel
-      };
-
-      return {
-        id: plan._id,
-        name: plan.name,
-        displayName: plan.name,
-        tierBadge: tierConfig.tierBadge || `Tier ${tierLevel}`,
-        tierLevel: tierLevel,
-        tierIcon: tierConfig.tierIcon || 'fa-circle',
-        description: plan.description || generateEnhancedDescription(tierConfig.tierBadge, plan.percentage, plan.duration),
-        shortDescription: generateEnhancedShortDescription(tierConfig.tierBadge),
-        percentage: plan.percentage,
-        duration: plan.duration,
-        minAmount: plan.minAmount,
-        maxAmount: plan.maxAmount,
-        referralBonus: plan.referralBonus || 5,
-        // Enhanced visual properties
-        colorScheme: tierConfig.colorScheme || getDefaultColorScheme(index),
-        isPopular: isPopular,
-        isPremium: index >= sortedPlans.length - 2,
-        // Enhanced metrics
-        metrics: metrics,
-        // Features and benefits arrays (progressive)
-        features: features,
-        benefits: benefits,
-        // Button state
-        buttonState: isLoggedIn ? (canInvest ? 'Buy Hash Power' : 'Insufficient Balance') : 'Login to Buy',
-        buttonDisabled: !isLoggedIn || !canInvest,
-        buttonIcon: isLoggedIn ? (canInvest ? 'fa-cloud' : 'fa-exclamation-circle') : 'fa-lock',
-        canInvest: canInvest,
-        isLoggedIn: isLoggedIn,
-        // Additional display fields
-        minAmountFormatted: formatCurrency(plan.minAmount),
-        maxAmountFormatted: formatCurrency(plan.maxAmount),
-        percentageFormatted: plan.percentage.toFixed(2),
-        durationFormatted: `${plan.duration}h`,
-        hashrateFormatted: `${baseHashrate.toLocaleString()} TH/s`,
-        currencySymbol: currencySymbol,
-        currencyCode: userFiatCurrency
-      };
-    });
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        plans: formattedPlans,
-        userBalances: isLoggedIn ? {
-          main: userMainBalance,
-          matured: userMaturedBalance,
-          mainBTC: userMainBTCBalance,
-          maturedBTC: userMaturedBTCBalance,
-          mainFormatted: `${currencySymbol}${userMainBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-          maturedFormatted: `${currencySymbol}${userMaturedBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        } : null,
-        isLoggedIn: isLoggedIn,
-        btcPrice: btcPrice,
-        fiatCurrency: userFiatCurrency,
-        currencySymbol: currencySymbol
-      }
-    });
-  } catch (err) {
-    console.error('Get plans error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while fetching investment plans'
-    });
-  }
+    // Load plans on page load
+    loadPremiumPlans();
 });
-
-// Helper functions for enhanced descriptions
-function generateEnhancedDescription(tierBadge, percentage, duration) {
-  const descriptions = {
-    'Starter': `Begin your cloud mining journey with ${percentage}% return over ${duration} hours. Perfect for newcomers to Bitcoin mining.`,
-    'Basic': `Enhanced mining power with ${percentage}% return over ${duration} hours. Optimized for steady growth.`,
-    'Standard': `High-performance mining with ${percentage}% return over ${duration} hours. Advanced cooling and efficiency.`,
-    'Gold': `Premium mining infrastructure with ${percentage}% return over ${duration} hours. Gold-tier hashrate allocation.`,
-    'Enterprise': `Enterprise-grade mining with ${percentage}% return over ${duration} hours. Maximum efficiency and dedicated support.`,
-    'Ultimate': `Ultimate mining power with ${percentage}% return over ${duration} hours. Institutional-grade infrastructure.`,
-    'Platinum': `Platinum-tier mining with exclusive access to next-generation ASIC miners and VIP support.`,
-    'Diamond': `Diamond-tier elite mining with the highest hashrate allocation and premium support.`
-  };
-  return descriptions[tierBadge] || `Cloud mining plan with ${percentage}% return over ${duration} hours.`;
-}
-
-function generateEnhancedShortDescription(tierBadge) {
-  const descriptions = {
-    'Starter': 'Entry-level SHA-256 ASIC mining',
-    'Basic': 'Optimized efficiency mining',
-    'Standard': 'High-performance mining',
-    'Gold': 'Premium mining infrastructure',
-    'Enterprise': 'Enterprise-grade mining',
-    'Ultimate': 'Ultimate mining power',
-    'Platinum': 'Exclusive platinum mining',
-    'Diamond': 'Elite diamond mining'
-  };
-  return descriptions[tierBadge] || 'Premium cloud mining contract';
-}
-
-function getDefaultColorScheme(index) {
-  const schemes = [
-    { primary: '#003366', secondary: '#004488', accent: '#0066CC', gradient: 'linear-gradient(135deg, #003366 0%, #004488 100%)', border: 'rgba(0, 51, 102, 0.4)', glow: 'rgba(0, 51, 102, 0.3)', text: '#FFFFFF', accentText: '#66B5FF' },
-    { primary: '#4B0082', secondary: '#6A0DAD', accent: '#8A2BE2', gradient: 'linear-gradient(135deg, #4B0082 0%, #6A0DAD 100%)', border: 'rgba(75, 0, 130, 0.4)', glow: 'rgba(75, 0, 130, 0.3)', text: '#FFFFFF', accentText: '#B266FF' },
-    { primary: '#006400', secondary: '#008000', accent: '#00AA00', gradient: 'linear-gradient(135deg, #006400 0%, #008000 100%)', border: 'rgba(0, 100, 0, 0.4)', glow: 'rgba(0, 100, 0, 0.3)', text: '#FFFFFF', accentText: '#66FF66' },
-    { primary: '#8B0000', secondary: '#A52A2A', accent: '#CD5C5C', gradient: 'linear-gradient(135deg, #8B0000 0%, #A52A2A 100%)', border: 'rgba(139, 0, 0, 0.4)', glow: 'rgba(139, 0, 0, 0.3)', text: '#FFFFFF', accentText: '#FF9999' },
-    { primary: '#DAA520', secondary: '#FFD700', accent: '#FFEC8B', gradient: 'linear-gradient(135deg, #DAA520 0%, #FFD700 100%)', border: 'rgba(218, 165, 32, 0.4)', glow: 'rgba(218, 165, 32, 0.3)', text: '#000000', accentText: '#000000' }
-  ];
-  return schemes[index % schemes.length];
-}
-
-
-
-
-
 
 
 
