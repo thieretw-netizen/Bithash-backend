@@ -17218,7 +17218,179 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-// Plans Endpoint with login state detection and enhanced premium plan data
+
+
+
+
+
+
+
+
+
+// Enhanced GET /api/plans endpoint with tier badges and progressive features
+
+// =============================================
+// PLAN TIER CONFIGURATION - PROGRESSIVE FEATURES & BENEFITS
+// =============================================
+
+const PLAN_TIER_CONFIG = {
+  // Tier 0: Starter
+  'Starter Plan': {
+    tierBadge: 'Starter',
+    tierLevel: 1,
+    tierIcon: 'fa-seedling',
+    colorScheme: {
+      primary: '#003366',
+      secondary: '#004488',
+      accent: '#0066CC',
+      gradient: 'linear-gradient(135deg, #003366 0%, #004488 100%)',
+      border: 'rgba(0, 51, 102, 0.4)',
+      glow: 'rgba(0, 51, 102, 0.3)',
+      text: '#FFFFFF',
+      accentText: '#66B5FF'
+    },
+    features: [
+      'SHA-256 ASIC mining access',
+      'Basic monitoring dashboard',
+      '24/7 support via email'
+    ],
+    benefits: [
+      'Entry-level mining operations',
+      'Perfect for beginners',
+      'Low minimum investment'
+    ]
+  },
+  
+  // Tier 1: Basic
+  'Standard Plan': {
+    tierBadge: 'Basic',
+    tierLevel: 2,
+    tierIcon: 'fa-chart-simple',
+    colorScheme: {
+      primary: '#4B0082',
+      secondary: '#6A0DAD',
+      accent: '#8A2BE2',
+      gradient: 'linear-gradient(135deg, #4B0082 0%, #6A0DAD 100%)',
+      border: 'rgba(75, 0, 130, 0.4)',
+      glow: 'rgba(75, 0, 130, 0.3)',
+      text: '#FFFFFF',
+      accentText: '#B266FF'
+    },
+    features: [
+      'SHA-256 ASIC mining access',
+      'Advanced monitoring dashboard',
+      '24/7 priority support via email',
+      'Weekly mining reports'
+    ],
+    benefits: [
+      'Optimized mining efficiency',
+      'Higher hashrate allocation',
+      'Priority support included',
+      'Detailed performance tracking'
+    ]
+  },
+  
+  // Tier 2: Standard (Gold in original)
+  'Gold Plan': {
+    tierBadge: 'Standard',
+    tierLevel: 3,
+    tierIcon: 'fa-bolt',
+    colorScheme: {
+      primary: '#006400',
+      secondary: '#008000',
+      accent: '#00AA00',
+      gradient: 'linear-gradient(135deg, #006400 0%, #008000 100%)',
+      border: 'rgba(0, 100, 0, 0.4)',
+      glow: 'rgba(0, 100, 0, 0.3)',
+      text: '#FFFFFF',
+      accentText: '#66FF66'
+    },
+    features: [
+      'SHA-256 ASIC mining access',
+      'Premium monitoring dashboard',
+      '24/7 priority support via email & chat',
+      'Weekly mining reports',
+      'Advanced cooling systems'
+    ],
+    benefits: [
+      'High-performance mining',
+      'Priority hashrate allocation',
+      'Dedicated support team',
+      'Monthly performance reviews',
+      'Early access to new features'
+    ]
+  },
+  
+  // Tier 3: Gold
+  'Enterprise Plan': {
+    tierBadge: 'Gold',
+    tierLevel: 4,
+    tierIcon: 'fa-rocket',
+    colorScheme: {
+      primary: '#8B0000',
+      secondary: '#A52A2A',
+      accent: '#CD5C5C',
+      gradient: 'linear-gradient(135deg, #8B0000 0%, #A52A2A 100%)',
+      border: 'rgba(139, 0, 0, 0.4)',
+      glow: 'rgba(139, 0, 0, 0.3)',
+      text: '#FFFFFF',
+      accentText: '#FF9999'
+    },
+    features: [
+      'SHA-256 ASIC mining access',
+      'Premium monitoring dashboard',
+      '24/7 priority support via email, chat & phone',
+      'Weekly mining reports',
+      'Advanced cooling systems',
+      'Premium infrastructure access'
+    ],
+    benefits: [
+      'Gold-tier hashrate allocation',
+      'Premium infrastructure access',
+      'Dedicated account manager',
+      'Exclusive mining pool access',
+      'Custom mining optimization',
+      'Priority maintenance'
+    ]
+  },
+  
+  // Tier 4: Enterprise
+  'Ultimate Plan': {
+    tierBadge: 'Enterprise',
+    tierLevel: 5,
+    tierIcon: 'fa-crown',
+    colorScheme: {
+      primary: '#DAA520',
+      secondary: '#FFD700',
+      accent: '#FFEC8B',
+      gradient: 'linear-gradient(135deg, #DAA520 0%, #FFD700 100%)',
+      border: 'rgba(218, 165, 32, 0.4)',
+      glow: 'rgba(218, 165, 32, 0.3)',
+      text: '#000000',
+      accentText: '#000000'
+    },
+    features: [
+      'SHA-256 ASIC mining access',
+      'Enterprise monitoring dashboard',
+      '24/7 VIP support via all channels',
+      'Daily mining reports',
+      'Advanced cooling systems',
+      'Enterprise infrastructure access',
+      'Priority hashrate allocation'
+    ],
+    benefits: [
+      'Enterprise-grade infrastructure',
+      'Highest hashrate priority',
+      '24/7 VIP support team',
+      'Custom mining solutions',
+      'Exclusive mining pool access',
+      'Early access to new hardware',
+      'Monthly strategy meetings'
+    ]
+  }
+};
+
+// Enhanced GET /api/plans endpoint
 app.get('/api/plans', async (req, res) => {
   try {
     // Get plans from database
@@ -17227,16 +17399,43 @@ app.get('/api/plans', async (req, res) => {
     // Get user balance if logged in
     let userMainBalance = 0;
     let userMaturedBalance = 0;
+    let userMainBTCBalance = 0;
+    let userMaturedBTCBalance = 0;
     let isLoggedIn = false;
     let userFiatCurrency = 'USD';
+    let userCurrencySymbol = '$';
+    
     if (req.user) {
       const user = await User.findById(req.user.id).select('balances preferences');
-      userMainBalance = user.balances.main || 0;
-      userMaturedBalance = user.balances.matured || 0;
       isLoggedIn = true;
       if (user.preferences && user.preferences.fiatCurrency) {
         userFiatCurrency = user.preferences.fiatCurrency;
       }
+      
+      // Get fiat exchange rate if available
+      try {
+        const fiatRates = await getFiatExchangeRates();
+        if (fiatRates && fiatRates[userFiatCurrency]) {
+          const rate = fiatRates[userFiatCurrency];
+          // Convert USD balances to user's preferred currency
+          if (user.balances && user.balances.main) {
+            const mainUSD = user.balances.main.get('usd') || 0;
+            userMainBalance = mainUSD * rate;
+          }
+          if (user.balances && user.balances.matured) {
+            const maturedUSD = user.balances.matured.get('usd') || 0;
+            userMaturedBalance = maturedUSD * rate;
+          }
+        }
+      } catch (rateError) {
+        // Fallback to USD
+        userMainBalance = user.balances?.main?.get('usd') || 0;
+        userMaturedBalance = user.balances?.matured?.get('usd') || 0;
+      }
+      
+      // Get BTC balances
+      userMainBTCBalance = user.balances?.main?.get('btc') || 0;
+      userMaturedBTCBalance = user.balances?.matured?.get('btc') || 0;
     }
 
     // Get current BTC price for reference
@@ -17251,28 +17450,59 @@ app.get('/api/plans', async (req, res) => {
       // Silent fallback - keep btcPrice as 0
     }
 
+    // Get fiat currencies for symbol
+    let fiatSymbols = {};
+    try {
+      const fiatResponse = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+      if (fiatResponse.ok) {
+        const fiatData = await fiatResponse.json();
+        // We'll use a simple mapping for symbols
+        fiatSymbols = {
+          'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CNY': '¥',
+          'INR': '₹', 'CAD': 'C$', 'AUD': 'A$', 'CHF': 'Fr', 'KRW': '₩',
+          'MXN': '$', 'BRL': 'R$', 'ZAR': 'R', 'SGD': 'S$', 'HKD': 'HK$'
+        };
+      }
+    } catch (e) {
+      // Silent fallback
+    }
+    
+    const currencySymbol = fiatSymbols[userFiatCurrency] || '$';
+
+    // Sort plans by minAmount to assign tiers correctly
+    const sortedPlans = plans.sort((a, b) => a.minAmount - b.minAmount);
+    
     // Format plans data with enhanced premium presentation
-    const formattedPlans = plans.map((plan, index) => {
-      const colorScheme = getPlanColorScheme(plan._id, index);
-      const canInvest = isLoggedIn && (userMainBalance >= plan.minAmount || userMaturedBalance >= plan.minAmount);
-      const isPopular = index === Math.floor(plans.length / 2);
+    const formattedPlans = sortedPlans.map((plan, index) => {
+      // Get tier config based on plan name or index
+      const tierConfig = PLAN_TIER_CONFIG[plan.name] || PLAN_TIER_CONFIG['Starter Plan'];
       
-      // Calculate hashrate based on plan tier
-      const hashrate = calculateHashrate(index, plans.length);
+      // Determine if this is the most popular plan (middle tier)
+      const isPopular = index === Math.floor(sortedPlans.length / 2);
+      
+      // Calculate hashrate based on plan tier level
+      const tierLevel = tierConfig.tierLevel || (index + 1);
+      const baseHashrate = [68, 110, 150, 234, 255][index] || 68 + (index * 45);
       
       // Calculate estimated daily earnings (approximate based on percentage and duration)
       const estimatedDailyReturn = plan.percentage / plan.duration;
       const estimatedMonthlyReturn = estimatedDailyReturn * 30;
       
-      // Determine tier badge
-      const tierBadge = getTierBadge(index, plans.length);
+      // Get features and benefits for this tier
+      const features = tierConfig.features || [];
+      const benefits = tierConfig.benefits || [];
       
-      // Build benefit list with tier-specific features
-      const benefits = buildTierBenefits(index, plans.length, plan.percentage, plan.duration);
+      // Determine if user can invest
+      const canInvest = isLoggedIn && (userMainBalance >= plan.minAmount || userMaturedBalance >= plan.minAmount);
       
-      // Generate plan metrics for display
+      // Get currency formatted amounts
+      const formatCurrency = (amount) => {
+        return `${currencySymbol}${parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+      };
+      
+      // Build tier-specific metrics
       const metrics = {
-        hashrate: hashrate,
+        hashrate: baseHashrate,
         hashrateUnit: 'TH/s',
         dailyReturn: estimatedDailyReturn.toFixed(2),
         monthlyReturn: estimatedMonthlyReturn.toFixed(2),
@@ -17281,30 +17511,31 @@ app.get('/api/plans', async (req, res) => {
         durationHours: plan.duration,
         durationDays: Math.round(plan.duration / 24),
         referralBonus: plan.referralBonus || 5,
-        totalCapacity: calculateTotalCapacity(index, plans.length)
+        tierLevel: tierLevel
       };
 
       return {
         id: plan._id,
         name: plan.name,
-        displayName: getDisplayName(index, plans.length),
-        description: plan.description || generateDescription(index, plans.length),
-        shortDescription: generateShortDescription(index, plans.length),
+        displayName: plan.name,
+        tierBadge: tierConfig.tierBadge || `Tier ${tierLevel}`,
+        tierLevel: tierLevel,
+        tierIcon: tierConfig.tierIcon || 'fa-circle',
+        description: plan.description || generateEnhancedDescription(tierConfig.tierBadge, plan.percentage, plan.duration),
+        shortDescription: generateEnhancedShortDescription(tierConfig.tierBadge),
         percentage: plan.percentage,
         duration: plan.duration,
         minAmount: plan.minAmount,
         maxAmount: plan.maxAmount,
         referralBonus: plan.referralBonus || 5,
         // Enhanced visual properties
-        colorScheme: colorScheme,
-        tierBadge: tierBadge,
-        tierLevel: getTierLevel(index, plans.length),
-        tierIcon: getTierIcon(index, plans.length),
+        colorScheme: tierConfig.colorScheme || getDefaultColorScheme(index),
         isPopular: isPopular,
-        isPremium: index >= plans.length - 2,
+        isPremium: index >= sortedPlans.length - 2,
         // Enhanced metrics
         metrics: metrics,
-        // Benefits list
+        // Features and benefits arrays (progressive)
+        features: features,
         benefits: benefits,
         // Button state
         buttonState: isLoggedIn ? (canInvest ? 'Buy Hash Power' : 'Insufficient Balance') : 'Login to Buy',
@@ -17313,11 +17544,13 @@ app.get('/api/plans', async (req, res) => {
         canInvest: canInvest,
         isLoggedIn: isLoggedIn,
         // Additional display fields
-        minAmountFormatted: formatCurrency(plan.minAmount, userFiatCurrency),
-        maxAmountFormatted: formatCurrency(plan.maxAmount, userFiatCurrency),
+        minAmountFormatted: formatCurrency(plan.minAmount),
+        maxAmountFormatted: formatCurrency(plan.maxAmount),
         percentageFormatted: plan.percentage.toFixed(2),
         durationFormatted: `${plan.duration}h`,
-        hashrateFormatted: `${hashrate.toLocaleString()} TH/s`
+        hashrateFormatted: `${baseHashrate.toLocaleString()} TH/s`,
+        currencySymbol: currencySymbol,
+        currencyCode: userFiatCurrency
       };
     });
 
@@ -17328,12 +17561,15 @@ app.get('/api/plans', async (req, res) => {
         userBalances: isLoggedIn ? {
           main: userMainBalance,
           matured: userMaturedBalance,
-          mainFormatted: formatCurrency(userMainBalance, userFiatCurrency),
-          maturedFormatted: formatCurrency(userMaturedBalance, userFiatCurrency)
+          mainBTC: userMainBTCBalance,
+          maturedBTC: userMaturedBTCBalance,
+          mainFormatted: `${currencySymbol}${userMainBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          maturedFormatted: `${currencySymbol}${userMaturedBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
         } : null,
         isLoggedIn: isLoggedIn,
         btcPrice: btcPrice,
-        fiatCurrency: userFiatCurrency
+        fiatCurrency: userFiatCurrency,
+        currencySymbol: currencySymbol
       }
     });
   } catch (err) {
@@ -17345,287 +17581,61 @@ app.get('/api/plans', async (req, res) => {
   }
 });
 
-// Helper function to assign consistent color schemes to plans with premium gradients
-function getPlanColorScheme(planId, index) {
-  const colorSchemes = [
-    { 
-      primary: '#003366', 
-      secondary: '#004488', 
-      accent: '#0066CC',
-      gradient: 'linear-gradient(135deg, #003366 0%, #004488 100%)',
-      border: 'rgba(0, 51, 102, 0.4)',
-      glow: 'rgba(0, 51, 102, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#66B5FF'
-    },
-    { 
-      primary: '#4B0082', 
-      secondary: '#6A0DAD', 
-      accent: '#8A2BE2',
-      gradient: 'linear-gradient(135deg, #4B0082 0%, #6A0DAD 100%)',
-      border: 'rgba(75, 0, 130, 0.4)',
-      glow: 'rgba(75, 0, 130, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#B266FF'
-    },
-    { 
-      primary: '#006400', 
-      secondary: '#008000', 
-      accent: '#00AA00',
-      gradient: 'linear-gradient(135deg, #006400 0%, #008000 100%)',
-      border: 'rgba(0, 100, 0, 0.4)',
-      glow: 'rgba(0, 100, 0, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#66FF66'
-    },
-    { 
-      primary: '#8B0000', 
-      secondary: '#A52A2A', 
-      accent: '#CD5C5C',
-      gradient: 'linear-gradient(135deg, #8B0000 0%, #A52A2A 100%)',
-      border: 'rgba(139, 0, 0, 0.4)',
-      glow: 'rgba(139, 0, 0, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#FF9999'
-    },
-    { 
-      primary: '#DAA520', 
-      secondary: '#FFD700', 
-      accent: '#FFEC8B',
-      gradient: 'linear-gradient(135deg, #DAA520 0%, #FFD700 100%)',
-      border: 'rgba(218, 165, 32, 0.4)',
-      glow: 'rgba(218, 165, 32, 0.3)',
-      text: '#000000',
-      accentText: '#000000'
-    },
-    { 
-      primary: '#2F4F4F', 
-      secondary: '#4A7C7C', 
-      accent: '#6B8E8E',
-      gradient: 'linear-gradient(135deg, #2F4F4F 0%, #4A7C7C 100%)',
-      border: 'rgba(47, 79, 79, 0.4)',
-      glow: 'rgba(47, 79, 79, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#A8D5D5'
-    },
-    { 
-      primary: '#8B4513', 
-      secondary: '#A0522D', 
-      accent: '#CD853F',
-      gradient: 'linear-gradient(135deg, #8B4513 0%, #A0522D 100%)',
-      border: 'rgba(139, 69, 19, 0.4)',
-      glow: 'rgba(139, 69, 19, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#FFDAB9'
-    },
-    { 
-      primary: '#1A237E', 
-      secondary: '#283593', 
-      accent: '#5C6BC0',
-      gradient: 'linear-gradient(135deg, #1A237E 0%, #283593 100%)',
-      border: 'rgba(26, 35, 126, 0.4)',
-      glow: 'rgba(26, 35, 126, 0.3)',
-      text: '#FFFFFF',
-      accentText: '#9FA8DA'
-    }
+// Helper functions for enhanced descriptions
+function generateEnhancedDescription(tierBadge, percentage, duration) {
+  const descriptions = {
+    'Starter': `Begin your cloud mining journey with ${percentage}% return over ${duration} hours. Perfect for newcomers to Bitcoin mining.`,
+    'Basic': `Enhanced mining power with ${percentage}% return over ${duration} hours. Optimized for steady growth.`,
+    'Standard': `High-performance mining with ${percentage}% return over ${duration} hours. Advanced cooling and efficiency.`,
+    'Gold': `Premium mining infrastructure with ${percentage}% return over ${duration} hours. Gold-tier hashrate allocation.`,
+    'Enterprise': `Enterprise-grade mining with ${percentage}% return over ${duration} hours. Maximum efficiency and dedicated support.`,
+    'Ultimate': `Ultimate mining power with ${percentage}% return over ${duration} hours. Institutional-grade infrastructure.`,
+    'Platinum': `Platinum-tier mining with exclusive access to next-generation ASIC miners and VIP support.`,
+    'Diamond': `Diamond-tier elite mining with the highest hashrate allocation and premium support.`
+  };
+  return descriptions[tierBadge] || `Cloud mining plan with ${percentage}% return over ${duration} hours.`;
+}
+
+function generateEnhancedShortDescription(tierBadge) {
+  const descriptions = {
+    'Starter': 'Entry-level SHA-256 ASIC mining',
+    'Basic': 'Optimized efficiency mining',
+    'Standard': 'High-performance mining',
+    'Gold': 'Premium mining infrastructure',
+    'Enterprise': 'Enterprise-grade mining',
+    'Ultimate': 'Ultimate mining power',
+    'Platinum': 'Exclusive platinum mining',
+    'Diamond': 'Elite diamond mining'
+  };
+  return descriptions[tierBadge] || 'Premium cloud mining contract';
+}
+
+function getDefaultColorScheme(index) {
+  const schemes = [
+    { primary: '#003366', secondary: '#004488', accent: '#0066CC', gradient: 'linear-gradient(135deg, #003366 0%, #004488 100%)', border: 'rgba(0, 51, 102, 0.4)', glow: 'rgba(0, 51, 102, 0.3)', text: '#FFFFFF', accentText: '#66B5FF' },
+    { primary: '#4B0082', secondary: '#6A0DAD', accent: '#8A2BE2', gradient: 'linear-gradient(135deg, #4B0082 0%, #6A0DAD 100%)', border: 'rgba(75, 0, 130, 0.4)', glow: 'rgba(75, 0, 130, 0.3)', text: '#FFFFFF', accentText: '#B266FF' },
+    { primary: '#006400', secondary: '#008000', accent: '#00AA00', gradient: 'linear-gradient(135deg, #006400 0%, #008000 100%)', border: 'rgba(0, 100, 0, 0.4)', glow: 'rgba(0, 100, 0, 0.3)', text: '#FFFFFF', accentText: '#66FF66' },
+    { primary: '#8B0000', secondary: '#A52A2A', accent: '#CD5C5C', gradient: 'linear-gradient(135deg, #8B0000 0%, #A52A2A 100%)', border: 'rgba(139, 0, 0, 0.4)', glow: 'rgba(139, 0, 0, 0.3)', text: '#FFFFFF', accentText: '#FF9999' },
+    { primary: '#DAA520', secondary: '#FFD700', accent: '#FFEC8B', gradient: 'linear-gradient(135deg, #DAA520 0%, #FFD700 100%)', border: 'rgba(218, 165, 32, 0.4)', glow: 'rgba(218, 165, 32, 0.3)', text: '#000000', accentText: '#000000' }
   ];
-  
-  // Use planId to get consistent color (convert ObjectId to number)
-  let hash = 0;
-  if (planId) {
-    const idStr = planId.toString();
-    for (let i = 0; i < idStr.length; i++) {
-      hash = ((hash << 5) - hash) + idStr.charCodeAt(i);
-      hash = hash & hash;
-    }
-  } else {
-    hash = index * 7 + 13;
-  }
-  const schemeIndex = Math.abs(hash) % colorSchemes.length;
-  return colorSchemes[schemeIndex];
+  return schemes[index % schemes.length];
 }
 
-// Helper function to calculate hashrate based on plan tier
-function calculateHashrate(index, totalPlans) {
-  const baseRates = [68, 110, 150, 234, 255, 335, 450, 600];
-  if (index < baseRates.length) {
-    return baseRates[index];
-  }
-  // For additional plans beyond the predefined list
-  return 68 + (index * 45);
-}
 
-// Helper function to get tier badge
-function getTierBadge(index, totalPlans) {
-  const badges = ['Starter', 'Basic', 'Standard', 'Gold', 'Enterprise', 'Ultimate', 'Platinum', 'Diamond'];
-  if (index < badges.length) {
-    return badges[index];
-  }
-  return `Tier ${index + 1}`;
-}
 
-// Helper function to get display name
-function getDisplayName(index, totalPlans) {
-  const names = ['Starter', 'Basic', 'Standard', 'Gold', 'Enterprise', 'Ultimate', 'Platinum', 'Diamond'];
-  if (index < names.length) {
-    return names[index];
-  }
-  return `Plan ${index + 1}`;
-}
 
-// Helper function to get tier level
-function getTierLevel(index, totalPlans) {
-  const levels = [1, 2, 3, 4, 5, 6, 7, 8];
-  if (index < levels.length) {
-    return levels[index];
-  }
-  return index + 1;
-}
 
-// Helper function to get tier icon
-function getTierIcon(index, totalPlans) {
-  const icons = [
-    'fa-seedling',
-    'fa-chart-simple', 
-    'fa-bolt',
-    'fa-rocket',
-    'fa-crown',
-    'fa-building',
-    'fa-gem',
-    'fa-star'
-  ];
-  if (index < icons.length) {
-    return icons[index];
-  }
-  return 'fa-circle';
-}
 
-// Helper function to calculate total capacity
-function calculateTotalCapacity(index, totalPlans) {
-  const baseCapacity = [1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000];
-  if (index < baseCapacity.length) {
-    return baseCapacity[index];
-  }
-  return 1000 * Math.pow(2, index);
-}
 
-// Helper function to generate description based on tier
-function generateDescription(index, totalPlans) {
-  const descriptions = [
-    'Perfect entry-level cloud mining contract with SHA-256 ASIC miners. Ideal for beginners starting their mining journey.',
-    'Enhanced mining power with optimized efficiency. Balanced returns for steady growth.',
-    'High-performance mining with advanced cooling systems. Maximize your mining potential.',
-    'Premium mining infrastructure with priority hashrate allocation. Exclusive Gold tier benefits.',
-    'Enterprise-grade mining operations with dedicated support. Maximum efficiency and returns.',
-    'Ultimate mining power with institutional-grade infrastructure. Elite performance for serious miners.',
-    'Platinum-tier mining with exclusive access to next-generation ASIC miners. Premium support and priority maintenance.',
-    'Diamond-tier elite mining with the highest hashrate allocation. VIP support and early access to new hardware.'
-  ];
-  if (index < descriptions.length) {
-    return descriptions[index];
-  }
-  return `Premium cloud mining plan with advanced SHA-256 ASIC infrastructure and optimized returns.`;
-}
 
-// Helper function to generate short description
-function generateShortDescription(index, totalPlans) {
-  const shortDescriptions = [
-    'Entry-level SHA-256 ASIC mining',
-    'Optimized efficiency mining',
-    'High-performance mining',
-    'Premium mining infrastructure',
-    'Enterprise-grade mining',
-    'Ultimate mining power',
-    'Exclusive platinum mining',
-    'Elite diamond mining'
-  ];
-  if (index < shortDescriptions.length) {
-    return shortDescriptions[index];
-  }
-  return 'Premium cloud mining contract';
-}
 
-// Helper function to build tier-specific benefits
-function buildTierBenefits(index, totalPlans, percentage, duration) {
-  const dailyReturn = (percentage / duration).toFixed(2);
-  const monthlyReturn = (dailyReturn * 30).toFixed(2);
-  
-  // Base benefits for all plans
-  const baseBenefits = [
-    { text: `SHA-256 ASIC mining`, premium: false },
-    { text: `Daily returns credited`, premium: false },
-    { text: `24/7 monitoring & support`, premium: false }
-  ];
-  
-  // Tier-specific benefits
-  const tierBenefits = [
-    // Starter (index 0)
-    [
-      { text: `${percentage}% total return over ${duration}h`, premium: false },
-      { text: `Low entry investment`, premium: false },
-      { text: `Perfect for beginners`, premium: false }
-    ],
-    // Basic (index 1)
-    [
-      { text: `${percentage}% total return over ${duration}h`, premium: false },
-      { text: `Optimized mining efficiency`, premium: false },
-      { text: `Priority support included`, premium: false }
-    ],
-    // Standard (index 2)
-    [
-      { text: `${percentage}% total return over ${duration}h`, premium: false },
-      { text: `High-performance mining`, premium: false },
-      { text: `Advanced cooling systems`, premium: false },
-      { text: `Priority support`, premium: false }
-    ],
-    // Gold (index 3)
-    [
-      { text: `${percentage}% total return over ${duration}h`, premium: true },
-      { text: `Gold-tier hashrate allocation`, premium: true },
-      { text: `Premium infrastructure access`, premium: true },
-      { text: `Dedicated account manager`, premium: true }
-    ],
-    // Enterprise (index 4)
-    [
-      { text: `${percentage}% total return over ${duration}h`, premium: true },
-      { text: `Enterprise-grade infrastructure`, premium: true },
-      { text: `Highest hashrate priority`, premium: true },
-      { text: `24/7 priority support`, premium: true },
-      { text: `Custom mining solutions`, premium: true }
-    ],
-    // Ultimate (index 5)
-    [
-      { text: `${percentage}% total return over ${duration}h`, premium: true },
-      { text: `Ultimate mining power`, premium: true },
-      { text: `Institutional-grade infrastructure`, premium: true },
-      { text: `VIP support & management`, premium: true },
-      { text: `Early access to new hardware`, premium: true },
-      { text: `Custom contract terms`, premium: true }
-    ]
-  ];
-  
-  // For plans beyond index 5, generate tier-specific benefits
-  if (index >= tierBenefits.length) {
-    const customBenefits = [
-      { text: `${percentage}% total return over ${duration}h`, premium: true },
-      { text: `Premium tier hashrate allocation`, premium: true },
-      { text: `Advanced infrastructure access`, premium: true },
-      { text: `Priority support & management`, premium: true },
-      { text: `Exclusive tier benefits`, premium: true }
-    ];
-    return [...baseBenefits, ...customBenefits];
-  }
-  
-  return [...baseBenefits, ...tierBenefits[index]];
-}
 
-// Helper function to format currency
-function formatCurrency(amount, currency = 'USD') {
-  const symbol = currency === 'USD' ? '$' : 
-                 currency === 'EUR' ? '€' : 
-                 currency === 'GBP' ? '£' : '$';
-  return `${symbol}${parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-}
+
+
+
+
+
+
 
 
 
