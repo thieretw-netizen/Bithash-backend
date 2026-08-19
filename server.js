@@ -17389,6 +17389,101 @@ function renderEnhancedPlans(plans, mainWalletBTC = 0, maturedWalletBTC = 0, mai
 
 
 
+
+
+
+
+
+
+
+
+// Plans Endpoint with login state detection
+app.get('/api/plans', async (req, res) => {
+  try {
+    // Get plans from database
+    const plans = await Plan.find({ isActive: true }).lean();
+    
+    // Get user balance if logged in
+    let userMainBalance = 0;
+    let userMaturedBalance = 0;
+    let isLoggedIn = false;
+    if (req.user) {
+      const user = await User.findById(req.user.id).select('balances');
+      userMainBalance = user.balances.main;
+      userMaturedBalance = user.balances.matured;
+      isLoggedIn = true;
+    }
+
+    // Format plans data
+    const formattedPlans = plans.map(plan => ({
+      id: plan._id,
+      name: plan.name,
+      description: plan.description,
+      percentage: plan.percentage,
+      duration: plan.duration,
+      minAmount: plan.minAmount,
+      maxAmount: plan.maxAmount,
+      referralBonus: plan.referralBonus,
+      colorScheme: getPlanColorScheme(plan._id),
+      buttonState: isLoggedIn ? 'Invest' : 'Login to Invest',
+      canInvest: isLoggedIn && (userMainBalance >= plan.minAmount || userMaturedBalance >= plan.minAmount)
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        plans: formattedPlans,
+        userBalances: isLoggedIn ? {
+          main: userMainBalance,
+          matured: userMaturedBalance
+        } : null,
+        isLoggedIn
+      }
+    });
+  } catch (err) {
+    console.error('Get plans error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while fetching investment plans'
+    });
+  }
+});
+
+// Helper function to assign consistent color schemes to plans
+function getPlanColorScheme(planId) {
+  const colors = [
+    { primary: '#003366', secondary: '#004488', accent: '#0066CC' }, // Blue
+    { primary: '#4B0082', secondary: '#6A0DAD', accent: '#8A2BE2' }, // Indigo
+    { primary: '#006400', secondary: '#008000', accent: '#00AA00' }, // Green
+    { primary: '#8B0000', secondary: '#A52A2A', accent: '#CD5C5C' }, // Red
+    { primary: '#DAA520', secondary: '#FFD700', accent: '#FFEC8B' }  // Gold
+  ];
+  
+  // Use planId to get consistent color (convert ObjectId to number)
+  const hash = parseInt(planId.toString().slice(-4), 16);
+  return colors[hash % colors.length];
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 app.post('/api/transactions/transfer', protect, [
   body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than 0'),
   body('from').isIn(['main', 'active', 'matured', 'savings']).withMessage('Invalid source account'),
