@@ -17197,257 +17197,184 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-// =============================================
-// ENHANCED PLANS ENDPOINT - PREMIUM VALUE PROGRESSION
-// TIERS BUILD UPON EACH OTHER LOGICALLY
-// =============================================
-
-// =============================================
-// TIER CONFIGURATION - SINGLE SOURCE OF TRUTH
-// Each tier inherits ALL benefits from previous tiers + adds new ones
-// =============================================
-
-const TIER_BENEFITS = {
-    // TIER 1: STARTER - Entry level benefits
-    starter: {
-        tier: 1,
-        label: 'Starter',
-        icon: 'fa-seedling',
-        color: '#818CF8',
-        badge: 'Entry',
-        benefits: [
-            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
-            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
-            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
-            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false }
-        ]
-    },
-    
-    // TIER 2: BASIC - Inherits STARTER + adds new benefits
-    basic: {
-        tier: 2,
-        label: 'Basic',
-        icon: 'fa-chart-simple',
-        color: '#60A5FA',
-        badge: 'Popular',
-        benefits: [
-            // Inherited from starter
-            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
-            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
-            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
-            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
-            // NEW: Added for Basic tier
-            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
-            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
-            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false }
-        ]
-    },
-    
-    // TIER 3: STANDARD - Inherits BASIC + adds new benefits
-    standard: {
-        tier: 3,
-        label: 'Standard',
-        icon: 'fa-bolt',
-        color: '#22D3EE',
-        badge: 'Best Value',
-        benefits: [
-            // Inherited from basic
-            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
-            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
-            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
-            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
-            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
-            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
-            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false },
-            // NEW: Added for Standard tier
-            { id: 'dashboard_pro', text: 'Pro Dashboard with Live Charts', icon: 'fa-chart-bar', premium: false },
-            { id: 'premium_support', text: 'Premium Support (12h Response)', icon: 'fa-user-tie', premium: false },
-            { id: 'real_time_monitoring', text: 'Real-time Hashrate Monitoring', icon: 'fa-sync', premium: false },
-            { id: 'weekly_analytics', text: 'Weekly Performance Analytics', icon: 'fa-calendar-week', premium: false }
-        ]
-    },
-    
-    // TIER 4: GOLD - Inherits STANDARD + adds new benefits
-    gold: {
-        tier: 4,
-        label: 'Gold',
-        icon: 'fa-crown',
-        color: '#FCD34D',
-        badge: 'Premium',
-        benefits: [
-            // Inherited from standard
-            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
-            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
-            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
-            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
-            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
-            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
-            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false },
-            { id: 'dashboard_pro', text: 'Pro Dashboard with Live Charts', icon: 'fa-chart-bar', premium: false },
-            { id: 'premium_support', text: 'Premium Support (12h Response)', icon: 'fa-user-tie', premium: false },
-            { id: 'real_time_monitoring', text: 'Real-time Hashrate Monitoring', icon: 'fa-sync', premium: false },
-            { id: 'weekly_analytics', text: 'Weekly Performance Analytics', icon: 'fa-calendar-week', premium: false },
-            // NEW: Added for Gold tier
-            { id: 'dashboard_vip', text: 'VIP Dashboard with Custom Widgets', icon: 'fa-star', premium: true },
-            { id: 'dedicated_support', text: 'Dedicated Support Agent', icon: 'fa-user-circle', premium: true },
-            { id: 'weekly_consultation', text: 'Weekly Strategy Consultation', icon: 'fa-handshake', premium: true },
-            { id: 'priority_queue', text: 'Priority Processing Queue', icon: 'fa-fast-forward', premium: true },
-            { id: 'personal_financial_manager', text: 'Personal Financial Manager', icon: 'fa-wallet', premium: true }
-        ]
-    },
-    
-    // TIER 5: ENTERPRISE - Inherits GOLD + adds new benefits
-    enterprise: {
-        tier: 5,
-        label: 'Enterprise',
-        icon: 'fa-building',
-        color: '#A78BFA',
-        badge: 'Elite',
-        benefits: [
-            // Inherited from gold
-            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
-            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
-            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
-            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
-            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
-            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
-            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false },
-            { id: 'dashboard_pro', text: 'Pro Dashboard with Live Charts', icon: 'fa-chart-bar', premium: false },
-            { id: 'premium_support', text: 'Premium Support (12h Response)', icon: 'fa-user-tie', premium: false },
-            { id: 'real_time_monitoring', text: 'Real-time Hashrate Monitoring', icon: 'fa-sync', premium: false },
-            { id: 'weekly_analytics', text: 'Weekly Performance Analytics', icon: 'fa-calendar-week', premium: false },
-            { id: 'dashboard_vip', text: 'VIP Dashboard with Custom Widgets', icon: 'fa-star', premium: true },
-            { id: 'dedicated_support', text: 'Dedicated Support Agent', icon: 'fa-user-circle', premium: true },
-            { id: 'weekly_consultation', text: 'Weekly Strategy Consultation', icon: 'fa-handshake', premium: true },
-            { id: 'priority_queue', text: 'Priority Processing Queue', icon: 'fa-fast-forward', premium: true },
-            { id: 'personal_financial_manager', text: 'Personal Financial Manager', icon: 'fa-wallet', premium: true },
-            // NEW: Added for Enterprise tier
-            { id: 'dashboard_enterprise', text: 'Enterprise Dashboard with API Access', icon: 'fa-server', premium: true },
-            { id: 'support_24_7_dedicated', text: '24/7 Dedicated Support Team', icon: 'fa-phone-alt', premium: true },
-            { id: 'daily_consultation', text: 'Daily Strategy Consultation', icon: 'fa-calendar-day', premium: true },
-            { id: 'custom_reports', text: 'Custom Report Builder', icon: 'fa-file-pdf', premium: true },
-            { id: 'dedicated_account_manager', text: 'Dedicated Account Manager', icon: 'fa-user-shield', premium: true },
-            { id: 'multi_user_access', text: 'Multi-User Access (Up to 5 Users)', icon: 'fa-users', premium: true }
-        ]
-    },
-    
-    // TIER 6: ULTIMATE - Inherits ENTERPRISE + adds new benefits
-    ultimate: {
-        tier: 6,
-        label: 'Ultimate',
-        icon: 'fa-rocket',
-        color: '#F472B6',
-        badge: 'Ultimate',
-        benefits: [
-            // Inherited from enterprise
-            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
-            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
-            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
-            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
-            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
-            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
-            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false },
-            { id: 'dashboard_pro', text: 'Pro Dashboard with Live Charts', icon: 'fa-chart-bar', premium: false },
-            { id: 'premium_support', text: 'Premium Support (12h Response)', icon: 'fa-user-tie', premium: false },
-            { id: 'real_time_monitoring', text: 'Real-time Hashrate Monitoring', icon: 'fa-sync', premium: false },
-            { id: 'weekly_analytics', text: 'Weekly Performance Analytics', icon: 'fa-calendar-week', premium: false },
-            { id: 'dashboard_vip', text: 'VIP Dashboard with Custom Widgets', icon: 'fa-star', premium: true },
-            { id: 'dedicated_support', text: 'Dedicated Support Agent', icon: 'fa-user-circle', premium: true },
-            { id: 'weekly_consultation', text: 'Weekly Strategy Consultation', icon: 'fa-handshake', premium: true },
-            { id: 'priority_queue', text: 'Priority Processing Queue', icon: 'fa-fast-forward', premium: true },
-            { id: 'personal_financial_manager', text: 'Personal Financial Manager', icon: 'fa-wallet', premium: true },
-            { id: 'dashboard_enterprise', text: 'Enterprise Dashboard with API Access', icon: 'fa-server', premium: true },
-            { id: 'support_24_7_dedicated', text: '24/7 Dedicated Support Team', icon: 'fa-phone-alt', premium: true },
-            { id: 'daily_consultation', text: 'Daily Strategy Consultation', icon: 'fa-calendar-day', premium: true },
-            { id: 'custom_reports', text: 'Custom Report Builder', icon: 'fa-file-pdf', premium: true },
-            { id: 'dedicated_account_manager', text: 'Dedicated Account Manager', icon: 'fa-user-shield', premium: true },
-            { id: 'multi_user_access', text: 'Multi-User Access (Up to 5 Users)', icon: 'fa-users', premium: true },
-            // NEW: Added for Ultimate tier
-            { id: 'dashboard_ultimate', text: 'Ultimate Dashboard with AI Insights', icon: 'fa-brain', premium: true },
-            { id: 'manager_24_7', text: '24/7 Dedicated Account Manager', icon: 'fa-user-cog', premium: true },
-            { id: 'custom_mining_strategy', text: 'Custom Mining Strategy Development', icon: 'fa-chess-queen', premium: true },
-            { id: 'strategic_planning', text: 'Strategic Portfolio Planning', icon: 'fa-flag', premium: true },
-            { id: 'unlimited_users', text: 'Unlimited Multi-User Access', icon: 'fa-user-plus', premium: true },
-            { id: 'priority_withdrawals', text: 'Priority Withdrawal Processing', icon: 'fa-rocket', premium: true },
-            { id: 'exclusive_events', text: 'Exclusive VIP Events & Webinars', icon: 'fa-ticket-alt', premium: true }
-        ]
-    }
-};
-
 /**
- * Get ALL benefits for a tier (inherits from all lower tiers)
+ * Render enhanced premium plans with value progression
+ * Each plan shows progressive benefits: 4, 5, 6, 7, 8, 8
  */
-function getTierBenefits(tierKey) {
-    const tierKeys = ['starter', 'basic', 'standard', 'gold', 'enterprise', 'ultimate'];
-    const currentIndex = tierKeys.indexOf(tierKey);
-    if (currentIndex === -1) return [];
+function renderEnhancedPlans(plans, mainWalletBTC = 0, maturedWalletBTC = 0, mainWalletUSD = 0) {
+    const plansContainer = document.getElementById('plans-container');
+    if (!plansContainer) return;
     
-    const allBenefits = [];
-    for (let i = 0; i <= currentIndex; i++) {
-        const config = TIER_BENEFITS[tierKeys[i]];
-        if (config && config.benefits) {
-            allBenefits.push(...config.benefits);
+    plansContainer.innerHTML = '';
+    
+    if (!plans || plans.length === 0) {
+        plansContainer.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 20px; color: var(--text-muted);"></i>
+                <p style="font-size: 1.1rem;">No cloud mining plans available at the moment.</p>
+                <p style="font-size: 0.9rem; margin-top: 8px;">Please check back later.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const sortedPlans = [...plans].sort((a, b) => a.minAmount - b.minAmount);
+    const isLoggedIn = localStorage.getItem('jwtToken') !== null;
+    const maturedWalletUSD = 0;
+    
+    // Tier display counts: Starter=4, Basic=5, Standard=6, Gold=7, Enterprise=8, Ultimate=8
+    const tierDisplayCounts = {
+        starter: 4,
+        basic: 5,
+        standard: 6,
+        gold: 7,
+        enterprise: 8,
+        ultimate: 8
+    };
+    
+    sortedPlans.forEach((plan, index) => {
+        const tierKey = getTierKey(plan.name);
+        const tierConfig = getFullTierConfig(tierKey);
+        if (!tierConfig) return;
+        
+        const animationDelay = (index + 1) * 100;
+        const isPopular = index === Math.floor(sortedPlans.length / 2);
+        
+        // Check if user can invest
+        const hasSufficientMainBalance = mainWalletUSD >= plan.minAmount;
+        const hasSufficientMaturedBalance = maturedWalletUSD >= plan.minAmount;
+        const canInvest = hasSufficientMainBalance || hasSufficientMaturedBalance;
+        
+        // Button state
+        let buttonText, buttonIcon, buttonTitle, buttonDisabled = false;
+        if (!isLoggedIn) {
+            buttonText = 'Login to Buy';
+            buttonIcon = 'fa-lock';
+            buttonTitle = 'Please login to purchase hashpower';
+            buttonDisabled = true;
+        } else if (!canInvest) {
+            buttonText = 'Insufficient Balance';
+            buttonIcon = 'fa-exclamation-circle';
+            buttonTitle = `Minimum $${plan.minAmount.toLocaleString()} required. Your balance: $${mainWalletUSD.toLocaleString()}`;
+            buttonDisabled = true;
+        } else {
+            buttonText = 'Buy Hash Power';
+            buttonIcon = 'fa-cloud';
+            buttonTitle = `Click to purchase ${tierConfig.label} hashpower`;
+            buttonDisabled = false;
         }
-    }
-    
-    // Remove duplicates by id
-    const seen = new Set();
-    return allBenefits.filter(b => {
-        if (seen.has(b.id)) return false;
-        seen.add(b.id);
-        return true;
+        
+        // Get display benefits (progressive: 4, 5, 6, 7, 8, 8)
+        const displayCount = tierDisplayCounts[tierKey] || 8;
+        const allBenefits = getTierBenefits(tierKey);
+        
+        // Sort: premium first, then standard
+        const sortedBenefits = [...allBenefits].sort((a, b) => {
+            if (a.premium && !b.premium) return -1;
+            if (!a.premium && b.premium) return 1;
+            return 0;
+        });
+        
+        const displayBenefits = sortedBenefits.slice(0, displayCount);
+        
+        // Build benefits HTML
+        let benefitsHtml = '';
+        displayBenefits.forEach(benefit => {
+            const iconClass = benefit.premium ? 'premium' : 'included';
+            const iconHtml = benefit.premium ? '<i class="fas fa-star"></i>' : '<i class="fas fa-check"></i>';
+            const tagHtml = benefit.premium ? `<span class="benefit-tag exclusive">PREMIUM</span>` : '';
+            benefitsHtml += `
+                <div class="plan-benefit-item">
+                    <span class="benefit-icon ${iconClass}">${iconHtml}</span>
+                    <span class="benefit-text">${benefit.text}</span>
+                    ${tagHtml}
+                </div>
+            `;
+        });
+        
+        // Format numbers
+        const minAmountFormatted = plan.minAmount.toLocaleString('en-US');
+        const maxAmountFormatted = plan.maxAmount.toLocaleString('en-US');
+        const hashrate = index === 0 ? '68' : index === 1 ? '110' : index === 2 ? '150' : index === 3 ? '234' : index === 4 ? '255' : '335';
+        const percentageFormatted = plan.percentage.toFixed(2);
+        
+        // Build the premium card
+        const card = document.createElement('div');
+        card.className = `premium-plan-card tier-${tierKey}${isPopular ? ' popular' : ''}`;
+        card.setAttribute('data-aos', 'fade-up');
+        card.setAttribute('data-aos-delay', animationDelay);
+        
+        card.innerHTML = `
+            ${isPopular ? '<div class="popular-badge-premium">🌟 Most Popular</div>' : ''}
+            <div class="plan-tier-badge ${tierKey}">${tierConfig.badge}</div>
+            
+            <div class="plan-premium-header">
+                <div class="plan-premium-icon-wrapper ${tierKey}">
+                    <div class="icon-bg"></div>
+                    <i class="fas ${tierConfig.icon}"></i>
+                </div>
+                <div class="plan-premium-name-section">
+                    <div class="plan-premium-name">${tierConfig.label}</div>
+                    <div class="plan-premium-subtitle">${plan.description || 'Cloud Mining Contract'}</div>
+                </div>
+            </div>
+            
+            <div class="plan-price-display">
+                <div class="plan-price-amount">
+                    <span class="currency-symbol">$</span>${minAmountFormatted}
+                    <span style="font-size: 1rem; font-weight: 400; color: var(--text-secondary);"> - $${maxAmountFormatted}</span>
+                </div>
+                <div class="plan-price-range">
+                    <span>${plan.duration}h</span> · <span>${percentageFormatted}%</span> return
+                </div>
+            </div>
+            
+            <div class="plan-metrics-grid">
+                <div class="plan-metric-item">
+                    <span class="plan-metric-label">Hashrate</span>
+                    <span class="plan-metric-value">${hashrate} <span class="unit">TH/s</span></span>
+                </div>
+                <div class="plan-metric-item">
+                    <span class="plan-metric-label">Return</span>
+                    <span class="plan-metric-value positive">+${percentageFormatted}%</span>
+                </div>
+                <div class="plan-metric-item">
+                    <span class="plan-metric-label">Duration</span>
+                    <span class="plan-metric-value">${plan.duration} <span class="unit">hours</span></span>
+                </div>
+                <div class="plan-metric-item">
+                    <span class="plan-metric-label">Referral</span>
+                    <span class="plan-metric-value">${plan.referralBonus || 5}%</span>
+                </div>
+            </div>
+            
+            <div class="plan-benefits">
+                <div class="plan-benefits-title">${displayCount} Benefits Included</div>
+                ${benefitsHtml}
+            </div>
+            
+            <div class="plan-premium-footer">
+                <button class="plan-premium-btn ${tierKey}" 
+                    onclick="redirectToCloudMining('${plan.id}', '${tierConfig.label}', ${plan.minAmount}, ${plan.maxAmount}, ${plan.percentage}, ${plan.duration})" 
+                    ${buttonDisabled ? 'disabled' : ''}
+                    title="${buttonTitle}">
+                    <i class="fas ${buttonIcon}"></i>
+                    ${buttonText}
+                    <i class="fas fa-arrow-right btn-arrow"></i>
+                </button>
+            </div>
+        `;
+        
+        plansContainer.appendChild(card);
     });
-}
-
-/**
- * Get tier config with all inherited benefits
- */
-function getFullTierConfig(tierKey) {
-    const baseConfig = TIER_BENEFITS[tierKey];
-    if (!baseConfig) return null;
     
-    return {
-        ...baseConfig,
-        benefits: getTierBenefits(tierKey)
-    };
-}
-
-/**
- * Generate premium plan details with benefits
- */
-function generatePremiumPlanDetails(plan, tierKey) {
-    const tierConfig = getFullTierConfig(tierKey);
-    if (!tierConfig) {
-        return {
-            tier: 1,
-            tierLabel: 'Starter',
-            tierIcon: 'fa-seedling',
-            tierColor: '#818CF8',
-            tierBadge: 'Entry',
-            benefits: []
-        };
+    // Update progression bar
+    updateProgressionBar(sortedPlans.length);
+    
+    // Refresh AOS for new elements
+    if (typeof AOS !== 'undefined') {
+        AOS.refresh();
     }
-    
-    // Count premium vs standard benefits
-    const premiumCount = tierConfig.benefits.filter(b => b.premium).length;
-    const standardCount = tierConfig.benefits.filter(b => !b.premium).length;
-    
-    return {
-        tier: tierConfig.tier,
-        tierLabel: tierConfig.label,
-        tierIcon: tierConfig.icon,
-        tierColor: tierConfig.color,
-        tierBadge: tierConfig.badge,
-        benefits: tierConfig.benefits,
-        benefitStats: {
-            total: tierConfig.benefits.length,
-            premium: premiumCount,
-            standard: standardCount
-        },
-        // Previous tier for upgrade info
-        previousTier: tierConfig.tier > 1 ? Object.keys(TIER_BENEFITS)[tierConfig.tier - 2] : null,
-        isTopTier: tierConfig.tier === 6
-    };
 }
 
 
