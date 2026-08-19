@@ -17197,502 +17197,258 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
+// =============================================
+// ENHANCED PLANS ENDPOINT - PREMIUM VALUE PROGRESSION
+// TIERS BUILD UPON EACH OTHER LOGICALLY
+// =============================================
 
 // =============================================
-// ENHANCED INVESTMENT PLANS - PREMIUM LOOK & FEEL
-// PRESERVES EXACT EXISTING PERCENTAGES - NO CONTRADICTIONS
+// TIER CONFIGURATION - SINGLE SOURCE OF TRUTH
+// Each tier inherits ALL benefits from previous tiers + adds new ones
 // =============================================
 
-// Plan configuration - SINGLE SOURCE OF TRUTH
-const PLAN_CONFIG = {
-    // Hashpower tiers (TH/s) - each plan has a specific range
-    // Cheaper plan = LESS hashpower (logical progression)
-    hashrate: {
-        starter: { min: 65, max: 72 },
-        basic: { min: 85, max: 95 },
-        standard: { min: 110, max: 125 },
-        gold: { min: 145, max: 165 },
-        enterprise: { min: 195, max: 215 },
-        ultimate: { min: 255, max: 285 }
+const TIER_BENEFITS = {
+    // TIER 1: STARTER - Entry level benefits
+    starter: {
+        tier: 1,
+        label: 'Starter',
+        icon: 'fa-seedling',
+        color: '#818CF8',
+        badge: 'Entry',
+        benefits: [
+            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
+            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
+            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
+            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false }
+        ]
     },
-    // Efficiency (TH/s per $1000 invested) - improves with higher plans
-    efficiency: {
-        starter: 2.1,
-        basic: 2.4,
-        standard: 2.8,
-        gold: 3.2,
-        enterprise: 3.7,
-        ultimate: 4.3
+    
+    // TIER 2: BASIC - Inherits STARTER + adds new benefits
+    basic: {
+        tier: 2,
+        label: 'Basic',
+        icon: 'fa-chart-simple',
+        color: '#60A5FA',
+        badge: 'Popular',
+        benefits: [
+            // Inherited from starter
+            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
+            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
+            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
+            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
+            // NEW: Added for Basic tier
+            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
+            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
+            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false }
+        ]
     },
-    // Feature tiers
-    features: {
-        starter: ['Basic Dashboard', 'Email Support', '24/7 Monitoring', 'Daily Reports'],
-        basic: ['Advanced Dashboard', 'Priority Support', '24/7 Monitoring', 'Daily Reports', 'Mobile Alerts'],
-        standard: ['Pro Dashboard', 'Premium Support', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Weekly Analytics'],
-        gold: ['VIP Dashboard', 'Dedicated Support', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Weekly Consultation', 'Priority Queue'],
-        enterprise: ['Enterprise Dashboard', '24/7 Dedicated Support', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Daily Consultation', 'Priority Queue', 'Custom Reports'],
-        ultimate: ['Ultimate Dashboard', '24/7 Dedicated Manager', 'Real-time Monitoring', 'Daily Reports', 'Mobile Alerts', 'Daily Consultation', 'Priority Queue', 'Custom Reports', 'Strategic Planning']
+    
+    // TIER 3: STANDARD - Inherits BASIC + adds new benefits
+    standard: {
+        tier: 3,
+        label: 'Standard',
+        icon: 'fa-bolt',
+        color: '#22D3EE',
+        badge: 'Best Value',
+        benefits: [
+            // Inherited from basic
+            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
+            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
+            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
+            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
+            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
+            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
+            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false },
+            // NEW: Added for Standard tier
+            { id: 'dashboard_pro', text: 'Pro Dashboard with Live Charts', icon: 'fa-chart-bar', premium: false },
+            { id: 'premium_support', text: 'Premium Support (12h Response)', icon: 'fa-user-tie', premium: false },
+            { id: 'real_time_monitoring', text: 'Real-time Hashrate Monitoring', icon: 'fa-sync', premium: false },
+            { id: 'weekly_analytics', text: 'Weekly Performance Analytics', icon: 'fa-calendar-week', premium: false }
+        ]
     },
-    // Visual color schemes for each tier
-    colors: {
-        starter: { primary: '#6366F1', secondary: '#818CF8', accent: '#A5B4FC', gradient: 'linear-gradient(135deg, #6366F1 0%, #818CF8 100%)' },
-        basic: { primary: '#3B82F6', secondary: '#60A5FA', accent: '#93C5FD', gradient: 'linear-gradient(135deg, #3B82F6 0%, #60A5FA 100%)' },
-        standard: { primary: '#06B6D4', secondary: '#22D3EE', accent: '#67E8F9', gradient: 'linear-gradient(135deg, #06B6D4 0%, #22D3EE 100%)' },
-        gold: { primary: '#F59E0B', secondary: '#FBBF24', accent: '#FCD34D', gradient: 'linear-gradient(135deg, #F59E0B 0%, #FBBF24 100%)' },
-        enterprise: { primary: '#8B5CF6', secondary: '#A78BFA', accent: '#C4B5FD', gradient: 'linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%)' },
-        ultimate: { primary: '#EC4899', secondary: '#F472B6', accent: '#F9A8D4', gradient: 'linear-gradient(135deg, #EC4899 0%, #F472B6 100%)' }
+    
+    // TIER 4: GOLD - Inherits STANDARD + adds new benefits
+    gold: {
+        tier: 4,
+        label: 'Gold',
+        icon: 'fa-crown',
+        color: '#FCD34D',
+        badge: 'Premium',
+        benefits: [
+            // Inherited from standard
+            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
+            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
+            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
+            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
+            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
+            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
+            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false },
+            { id: 'dashboard_pro', text: 'Pro Dashboard with Live Charts', icon: 'fa-chart-bar', premium: false },
+            { id: 'premium_support', text: 'Premium Support (12h Response)', icon: 'fa-user-tie', premium: false },
+            { id: 'real_time_monitoring', text: 'Real-time Hashrate Monitoring', icon: 'fa-sync', premium: false },
+            { id: 'weekly_analytics', text: 'Weekly Performance Analytics', icon: 'fa-calendar-week', premium: false },
+            // NEW: Added for Gold tier
+            { id: 'dashboard_vip', text: 'VIP Dashboard with Custom Widgets', icon: 'fa-star', premium: true },
+            { id: 'dedicated_support', text: 'Dedicated Support Agent', icon: 'fa-user-circle', premium: true },
+            { id: 'weekly_consultation', text: 'Weekly Strategy Consultation', icon: 'fa-handshake', premium: true },
+            { id: 'priority_queue', text: 'Priority Processing Queue', icon: 'fa-fast-forward', premium: true },
+            { id: 'personal_financial_manager', text: 'Personal Financial Manager', icon: 'fa-wallet', premium: true }
+        ]
     },
-    // Plan badges
-    badges: {
-        starter: { label: 'Entry Level', icon: 'fa-seedling' },
-        basic: { label: 'Popular', icon: 'fa-fire' },
-        standard: { label: 'Best Value', icon: 'fa-star' },
-        gold: { label: 'Premium', icon: 'fa-crown' },
-        enterprise: { label: 'Elite', icon: 'fa-gem' },
-        ultimate: { label: 'Ultimate', icon: 'fa-rocket' }
+    
+    // TIER 5: ENTERPRISE - Inherits GOLD + adds new benefits
+    enterprise: {
+        tier: 5,
+        label: 'Enterprise',
+        icon: 'fa-building',
+        color: '#A78BFA',
+        badge: 'Elite',
+        benefits: [
+            // Inherited from gold
+            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
+            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
+            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
+            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
+            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
+            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
+            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false },
+            { id: 'dashboard_pro', text: 'Pro Dashboard with Live Charts', icon: 'fa-chart-bar', premium: false },
+            { id: 'premium_support', text: 'Premium Support (12h Response)', icon: 'fa-user-tie', premium: false },
+            { id: 'real_time_monitoring', text: 'Real-time Hashrate Monitoring', icon: 'fa-sync', premium: false },
+            { id: 'weekly_analytics', text: 'Weekly Performance Analytics', icon: 'fa-calendar-week', premium: false },
+            { id: 'dashboard_vip', text: 'VIP Dashboard with Custom Widgets', icon: 'fa-star', premium: true },
+            { id: 'dedicated_support', text: 'Dedicated Support Agent', icon: 'fa-user-circle', premium: true },
+            { id: 'weekly_consultation', text: 'Weekly Strategy Consultation', icon: 'fa-handshake', premium: true },
+            { id: 'priority_queue', text: 'Priority Processing Queue', icon: 'fa-fast-forward', premium: true },
+            { id: 'personal_financial_manager', text: 'Personal Financial Manager', icon: 'fa-wallet', premium: true },
+            // NEW: Added for Enterprise tier
+            { id: 'dashboard_enterprise', text: 'Enterprise Dashboard with API Access', icon: 'fa-server', premium: true },
+            { id: 'support_24_7_dedicated', text: '24/7 Dedicated Support Team', icon: 'fa-phone-alt', premium: true },
+            { id: 'daily_consultation', text: 'Daily Strategy Consultation', icon: 'fa-calendar-day', premium: true },
+            { id: 'custom_reports', text: 'Custom Report Builder', icon: 'fa-file-pdf', premium: true },
+            { id: 'dedicated_account_manager', text: 'Dedicated Account Manager', icon: 'fa-user-shield', premium: true },
+            { id: 'multi_user_access', text: 'Multi-User Access (Up to 5 Users)', icon: 'fa-users', premium: true }
+        ]
     },
-    // Support tiers
-    support: {
-        starter: 'Standard Support',
-        basic: 'Priority Support',
-        standard: 'Premium Support',
-        gold: 'VIP Support',
-        enterprise: 'Enterprise Support',
-        ultimate: 'Ultimate Support'
+    
+    // TIER 6: ULTIMATE - Inherits ENTERPRISE + adds new benefits
+    ultimate: {
+        tier: 6,
+        label: 'Ultimate',
+        icon: 'fa-rocket',
+        color: '#F472B6',
+        badge: 'Ultimate',
+        benefits: [
+            // Inherited from enterprise
+            { id: 'dashboard_basic', text: 'Basic Dashboard', icon: 'fa-chart-pie', premium: false },
+            { id: 'email_support', text: 'Email Support', icon: 'fa-envelope', premium: false },
+            { id: 'monitoring_24_7', text: '24/7 System Monitoring', icon: 'fa-shield-alt', premium: false },
+            { id: 'daily_reports', text: 'Daily Mining Reports', icon: 'fa-file-alt', premium: false },
+            { id: 'dashboard_advanced', text: 'Advanced Dashboard Analytics', icon: 'fa-chart-line', premium: false },
+            { id: 'priority_support', text: 'Priority Support (24h Response)', icon: 'fa-headset', premium: false },
+            { id: 'mobile_alerts', text: 'Mobile Push Alerts', icon: 'fa-bell', premium: false },
+            { id: 'dashboard_pro', text: 'Pro Dashboard with Live Charts', icon: 'fa-chart-bar', premium: false },
+            { id: 'premium_support', text: 'Premium Support (12h Response)', icon: 'fa-user-tie', premium: false },
+            { id: 'real_time_monitoring', text: 'Real-time Hashrate Monitoring', icon: 'fa-sync', premium: false },
+            { id: 'weekly_analytics', text: 'Weekly Performance Analytics', icon: 'fa-calendar-week', premium: false },
+            { id: 'dashboard_vip', text: 'VIP Dashboard with Custom Widgets', icon: 'fa-star', premium: true },
+            { id: 'dedicated_support', text: 'Dedicated Support Agent', icon: 'fa-user-circle', premium: true },
+            { id: 'weekly_consultation', text: 'Weekly Strategy Consultation', icon: 'fa-handshake', premium: true },
+            { id: 'priority_queue', text: 'Priority Processing Queue', icon: 'fa-fast-forward', premium: true },
+            { id: 'personal_financial_manager', text: 'Personal Financial Manager', icon: 'fa-wallet', premium: true },
+            { id: 'dashboard_enterprise', text: 'Enterprise Dashboard with API Access', icon: 'fa-server', premium: true },
+            { id: 'support_24_7_dedicated', text: '24/7 Dedicated Support Team', icon: 'fa-phone-alt', premium: true },
+            { id: 'daily_consultation', text: 'Daily Strategy Consultation', icon: 'fa-calendar-day', premium: true },
+            { id: 'custom_reports', text: 'Custom Report Builder', icon: 'fa-file-pdf', premium: true },
+            { id: 'dedicated_account_manager', text: 'Dedicated Account Manager', icon: 'fa-user-shield', premium: true },
+            { id: 'multi_user_access', text: 'Multi-User Access (Up to 5 Users)', icon: 'fa-users', premium: true },
+            // NEW: Added for Ultimate tier
+            { id: 'dashboard_ultimate', text: 'Ultimate Dashboard with AI Insights', icon: 'fa-brain', premium: true },
+            { id: 'manager_24_7', text: '24/7 Dedicated Account Manager', icon: 'fa-user-cog', premium: true },
+            { id: 'custom_mining_strategy', text: 'Custom Mining Strategy Development', icon: 'fa-chess-queen', premium: true },
+            { id: 'strategic_planning', text: 'Strategic Portfolio Planning', icon: 'fa-flag', premium: true },
+            { id: 'unlimited_users', text: 'Unlimited Multi-User Access', icon: 'fa-user-plus', premium: true },
+            { id: 'priority_withdrawals', text: 'Priority Withdrawal Processing', icon: 'fa-rocket', premium: true },
+            { id: 'exclusive_events', text: 'Exclusive VIP Events & Webinars', icon: 'fa-ticket-alt', premium: true }
+        ]
     }
 };
 
 /**
- * Get current mining stats for plan calculations
+ * Get ALL benefits for a tier (inherits from all lower tiers)
  */
-const getMiningStatsForPlans = async () => {
-    try {
-        const stats = await getCurrentMiningStats();
-        return stats;
-    } catch (err) {
-        console.error('Error getting mining stats for plans:', err);
-        return null;
+function getTierBenefits(tierKey) {
+    const tierKeys = ['starter', 'basic', 'standard', 'gold', 'enterprise', 'ultimate'];
+    const currentIndex = tierKeys.indexOf(tierKey);
+    if (currentIndex === -1) return [];
+    
+    const allBenefits = [];
+    for (let i = 0; i <= currentIndex; i++) {
+        const config = TIER_BENEFITS[tierKeys[i]];
+        if (config && config.benefits) {
+            allBenefits.push(...config.benefits);
+        }
     }
-};
+    
+    // Remove duplicates by id
+    const seen = new Set();
+    return allBenefits.filter(b => {
+        if (seen.has(b.id)) return false;
+        seen.add(b.id);
+        return true;
+    });
+}
 
 /**
- * Get current BTC price
+ * Get tier config with all inherited benefits
  */
-const getCurrentBTCPriceForPlans = async () => {
-    try {
-        const price = await getCryptoPrice('BTC');
-        return price || 43000;
-    } catch (err) {
-        console.error('Error getting BTC price for plans:', err);
-        return 43000;
-    }
-};
-
-/**
- * Generate sophisticated plan details with logical progression
- * PRESERVES EXACT EXISTING PERCENTAGE RETURNS
- */
-const generatePlanDetails = (plan, investorCount, currentBTCPrice) => {
-    const planName = plan.name.toLowerCase();
-    let tier = 'standard';
-    
-    if (planName.includes('starter')) tier = 'starter';
-    else if (planName.includes('basic')) tier = 'basic';
-    else if (planName.includes('standard')) tier = 'standard';
-    else if (planName.includes('gold')) tier = 'gold';
-    else if (planName.includes('enterprise')) tier = 'enterprise';
-    else if (planName.includes('ultimate')) tier = 'ultimate';
-    
-    // Get hashrate range for this tier (cheaper plan = LESS hashrate)
-    const hashrateRange = PLAN_CONFIG.hashrate[tier] || { min: 100, max: 120 };
-    const hashrateMin = hashrateRange.min;
-    const hashrateMax = hashrateRange.max;
-    
-    // Get efficiency (TH/s per $1000) - improves with higher plans
-    const efficiency = PLAN_CONFIG.efficiency[tier] || 2.8;
-    
-    // Calculate hashrate based on investment amount (linear scaling within range)
-    const amountRatio = Math.min(plan.minAmount / 30000, 0.8);
-    const hashrateBase = hashrateMin + ((hashrateMax - hashrateMin) * amountRatio);
-    const hashrate = Math.round(hashrateBase + (Math.random() - 0.5) * 6);
-    
-    // Calculate daily BTC yield based on hashrate
-    const networkHashrate = 600000000; // TH/s
-    const dailyBTC = (hashrate / networkHashrate) * 450;
-    const dailyUSD = dailyBTC * currentBTCPrice;
-    
-    // =============================================
-    // PRESERVE EXACT EXISTING PERCENTAGE RETURNS
-    // Use plan.percentage as the source of truth - NO CHANGES
-    // =============================================
-    const percentageReturn = plan.percentage || 0;
-    
-    // Calculate returns using the EXACT existing percentage
-    const profitAmount = plan.minAmount * (percentageReturn / 100);
-    const totalReturn = plan.minAmount + profitAmount;
-    
-    // Daily profit (spread over duration)
-    const dailyProfit = profitAmount / plan.duration;
-    
-    // ROI metrics using the EXACT existing percentage
-    const roiPerDuration = percentageReturn;
-    const roiDaily = percentageReturn / plan.duration;
-    const roiMonthly = roiDaily * 30;
-    const roiYearly = roiDaily * 365;
-    
-    // Calculate payback period
-    const paybackDays = dailyProfit > 0 ? plan.minAmount / (dailyProfit * 24) : 0;
-    
-    // Profitability score (0-100) - based on ROI relative to other plans
-    const profitabilityScore = Math.min(100, Math.max(20, Math.ceil((roiYearly / 150) * 100)));
-    
-    // Calculate upgrade value (progressive improvement)
-    const tierNames = ['starter', 'basic', 'standard', 'gold', 'enterprise', 'ultimate'];
-    const currentIndex = tierNames.indexOf(tier);
-    const totalTiers = tierNames.length;
-    const upgradeValue = ((currentIndex / (totalTiers - 1)) * 100).toFixed(1);
-    
-    // Calculate relative value increase from previous tier (NO DATABASE QUERY)
-    let upgradeInfo = null;
-    
-    if (currentIndex > 0) {
-        const prevTier = tierNames[currentIndex - 1];
-        const prevHashrate = PLAN_CONFIG.hashrate[prevTier] || { min: 50, max: 60 };
-        const currentHashrate = PLAN_CONFIG.hashrate[tier] || { min: 100, max: 120 };
-        const prevAvg = (prevHashrate.min + prevHashrate.max) / 2;
-        const currentAvg = (currentHashrate.min + currentHashrate.max) / 2;
-        const percentIncrease = ((currentAvg - prevAvg) / prevAvg) * 100;
-        
-        // Calculate additional value for upgrading (using estimates, NOT database)
-        const additionalHashrate = currentAvg - prevAvg;
-        const additionalDailyBTC = (additionalHashrate / networkHashrate) * 450;
-        const additionalDailyUSD = additionalDailyBTC * currentBTCPrice;
-        
-        // Estimate previous plan's min amount (based on tier)
-        const prevMinAmounts = {
-            starter: 30,
-            basic: 500,
-            standard: 2000,
-            gold: 10000,
-            enterprise: 50000
-        };
-        const prevMinAmount = prevMinAmounts[prevTier] || plan.minAmount * 0.6;
-        
-        // Calculate additional profit from upgrading (estimated)
-        const additionalInvestment = plan.minAmount - prevMinAmount;
-        const additionalProfit = (additionalInvestment * (percentageReturn / 100));
-        
-        upgradeInfo = {
-            fromPlan: prevTier.charAt(0).toUpperCase() + prevTier.slice(1),
-            toPlan: tier.charAt(0).toUpperCase() + tier.slice(1),
-            hashrateIncrease: parseFloat(additionalHashrate.toFixed(1)),
-            hashrateIncreasePercent: parseFloat(percentIncrease.toFixed(1)),
-            additionalDailyBTC: parseFloat(additionalDailyBTC.toFixed(6)),
-            additionalDailyUSD: parseFloat(additionalDailyUSD.toFixed(2)),
-            additionalMonthlyUSD: parseFloat((additionalDailyUSD * 30).toFixed(2)),
-            additionalYearlyUSD: parseFloat((additionalDailyUSD * 365).toFixed(2)),
-            additionalProfit: parseFloat(additionalProfit.toFixed(2))
-        };
-    }
-    
-    // Get features for this tier
-    const features = PLAN_CONFIG.features[tier] || PLAN_CONFIG.features.standard;
-    const colors = PLAN_CONFIG.colors[tier] || PLAN_CONFIG.colors.standard;
-    const badge = PLAN_CONFIG.badges[tier] || PLAN_CONFIG.badges.standard;
-    const supportTier = PLAN_CONFIG.support[tier] || PLAN_CONFIG.support.standard;
-    
-    // Calculate total active contracts in this tier (based on investor count)
-    const tierMultiplier = (currentIndex + 1) / totalTiers;
-    const baseContracts = Math.floor(investorCount * 0.002 * tierMultiplier);
-    const contractsInTier = Math.max(50, baseContracts + Math.floor(Math.random() * 200));
+function getFullTierConfig(tierKey) {
+    const baseConfig = TIER_BENEFITS[tierKey];
+    if (!baseConfig) return null;
     
     return {
-        hashrate: hashrate,
-        hashrateRange: {
-            min: hashrateMin,
-            max: hashrateMax
-        },
-        hashrateLabel: `${hashrate.toLocaleString()} TH/s`,
-        efficiency: efficiency,
-        dailyBTC: parseFloat(dailyBTC.toFixed(6)),
-        dailyUSD: parseFloat(dailyUSD.toFixed(2)),
-        monthlyUSD: parseFloat((dailyUSD * 30).toFixed(2)),
-        yearlyUSD: parseFloat((dailyUSD * 365).toFixed(2)),
-        // EXACT EXISTING PERCENTAGE RETURNS - NO CHANGES
-        percentageReturn: percentageReturn,
-        profitAmount: parseFloat(profitAmount.toFixed(2)),
-        totalReturn: parseFloat(totalReturn.toFixed(2)),
-        dailyProfit: parseFloat(dailyProfit.toFixed(4)),
-        roiPerDuration: parseFloat(roiPerDuration.toFixed(2)),
-        roiDaily: parseFloat(roiDaily.toFixed(4)),
-        roiMonthly: parseFloat(roiMonthly.toFixed(2)),
-        roiYearly: parseFloat(roiYearly.toFixed(2)),
-        paybackDays: Math.ceil(paybackDays),
-        profitabilityScore: Math.min(100, Math.max(20, Math.ceil(profitabilityScore))),
-        upgradeValue: parseFloat(upgradeValue),
-        upgradeInfo: upgradeInfo,
-        features: features,
-        activeContracts: contractsInTier,
-        tier: tier,
-        tierIndex: currentIndex,
-        totalTiers: totalTiers,
-        // Premium visual data
-        colors: colors,
-        badge: badge,
-        supportTier: supportTier,
-        // Value metrics
-        valueMetrics: {
-            efficiency: efficiency,
-            reliability: parseFloat((99.5 - (currentIndex * 0.3)).toFixed(1)),
-            maintenance: parseFloat((1.2 - (currentIndex * 0.15)).toFixed(2)),
-            support: supportTier
-        }
+        ...baseConfig,
+        benefits: getTierBenefits(tierKey)
     };
-};
+}
 
-// =============================================
-// ENHANCED PLANS ENDPOINT - PREMIUM LOOK
-// PRESERVES EXACT EXISTING PERCENTAGE RETURNS
-// =============================================
-app.get('/api/plans', async (req, res) => {
-    try {
-        // Get plans from database - THESE HAVE THE EXACT EXISTING PERCENTAGES
-        const plans = await Plan.find({ isActive: true }).lean();
-        
-        // Get real-time data from the mining system
-        const miningStats = await getMiningStatsForPlans();
-        const investorCount = await getCurrentInvestorCount();
-        const currentBTCPrice = await getCurrentBTCPriceForPlans();
-        
-        // Get user balance if logged in
-        let userMainBalance = 0;
-        let userMaturedBalance = 0;
-        let isLoggedIn = false;
-        
-        if (req.user) {
-            const user = await User.findById(req.user.id).select('balances');
-            if (user && user.balances) {
-                userMainBalance = user.balances.main?.get('usd') || 0;
-                userMaturedBalance = user.balances.matured?.get('usd') || 0;
-                isLoggedIn = true;
-            }
-        }
-        
-        // Sort plans by minAmount (cheapest to most expensive)
-        const sortedPlans = [...plans].sort((a, b) => a.minAmount - b.minAmount);
-        
-        // Generate sophisticated plan data
-        const formattedPlans = sortedPlans.map((plan, index) => {
-            const planDetails = generatePlanDetails(plan, investorCount, currentBTCPrice);
-            
-            // Determine if user can invest in this plan
-            const canInvest = isLoggedIn && 
-                (userMainBalance >= plan.minAmount || userMaturedBalance >= plan.minAmount);
-            
-            // Determine if user should upgrade (recommended plan)
-            let recommendation = null;
-            if (index < sortedPlans.length - 1) {
-                const nextPlan = sortedPlans[index + 1];
-                const nextPlanDetails = generatePlanDetails(nextPlan, investorCount, currentBTCPrice);
-                
-                const additionalInvestment = nextPlan.minAmount - plan.minAmount;
-                const additionalReturn = nextPlanDetails.totalReturn - planDetails.totalReturn;
-                const extraROI = additionalInvestment > 0 ? (additionalReturn / additionalInvestment) * 100 : 0;
-                const extraDailyReturn = nextPlanDetails.dailyProfit - planDetails.dailyProfit;
-                
-                if (additionalInvestment > 0 && extraROI > 0) {
-                    recommendation = {
-                        upgradeTo: nextPlan.name,
-                        additionalInvestment: additionalInvestment,
-                        additionalReturn: parseFloat(additionalReturn.toFixed(2)),
-                        additionalProfit: parseFloat((nextPlanDetails.profitAmount - planDetails.profitAmount).toFixed(2)),
-                        additionalDailyReturn: parseFloat(extraDailyReturn.toFixed(4)),
-                        extraMonthlyReturn: parseFloat((extraDailyReturn * 30).toFixed(2)),
-                        extraYearlyReturn: parseFloat((extraDailyReturn * 365).toFixed(2)),
-                        roiOnAdditional: parseFloat(extraROI.toFixed(2)),
-                        hashrateIncrease: nextPlanDetails.hashrate - planDetails.hashrate
-                    };
-                }
-            }
-            
-            // Calculate user's potential position in this plan
-            let userPotential = null;
-            if (isLoggedIn) {
-                const totalUserBalance = userMainBalance + userMaturedBalance;
-                if (totalUserBalance >= plan.minAmount) {
-                    const maxAffordable = Math.floor(totalUserBalance / plan.minAmount);
-                    userPotential = {
-                        canAfford: true,
-                        maxContracts: maxAffordable,
-                        affordableAmount: maxAffordable * plan.minAmount
-                    };
-                } else {
-                    userPotential = {
-                        canAfford: false,
-                        shortfall: parseFloat((plan.minAmount - totalUserBalance).toFixed(2))
-                    };
-                }
-            }
-            
-            // Determine badges
-            const badges = {
-                isPopular: index === Math.floor(sortedPlans.length / 2),
-                isBestValue: planDetails.roiYearly > 100,
-                isHighestYield: index === sortedPlans.length - 1,
-                isEntryLevel: index === 0,
-                hasUpgrade: index < sortedPlans.length - 1,
-                isMostEfficient: planDetails.efficiency >= 4.0,
-                // Premium badge data
-                badgeLabel: planDetails.badge.label,
-                badgeIcon: planDetails.badge.icon
-            };
-            
-            return {
-                id: plan._id,
-                name: plan.name,
-                description: plan.description,
-                // EXACT EXISTING FIELDS - PRESERVED
-                percentage: plan.percentage,
-                duration: plan.duration,
-                minAmount: plan.minAmount,
-                maxAmount: plan.maxAmount,
-                referralBonus: plan.referralBonus,
-                isActive: plan.isActive,
-                
-                // Premium visual data
-                premium: {
-                    tier: planDetails.tier,
-                    tierIndex: planDetails.tierIndex,
-                    totalTiers: planDetails.totalTiers,
-                    colors: planDetails.colors,
-                    badge: planDetails.badge,
-                    supportTier: planDetails.supportTier,
-                    features: planDetails.features,
-                    hashrateLabel: planDetails.hashrateLabel
-                },
-                
-                // Sophisticated plan data
-                planDetails: {
-                    hashrate: planDetails.hashrate,
-                    hashrateRange: planDetails.hashrateRange,
-                    efficiency: planDetails.efficiency,
-                    dailyBTC: planDetails.dailyBTC,
-                    dailyUSD: planDetails.dailyUSD,
-                    monthlyUSD: planDetails.monthlyUSD,
-                    yearlyUSD: planDetails.yearlyUSD,
-                    // EXACT EXISTING PERCENTAGE RETURNS - NO CHANGES
-                    percentageReturn: planDetails.percentageReturn,
-                    profitAmount: planDetails.profitAmount,
-                    totalReturn: planDetails.totalReturn,
-                    dailyProfit: planDetails.dailyProfit,
-                    roiPerDuration: planDetails.roiPerDuration,
-                    roiDaily: planDetails.roiDaily,
-                    roiMonthly: planDetails.roiMonthly,
-                    roiYearly: planDetails.roiYearly,
-                    paybackDays: planDetails.paybackDays,
-                    profitabilityScore: planDetails.profitabilityScore,
-                    upgradeValue: planDetails.upgradeValue,
-                    valueMetrics: planDetails.valueMetrics,
-                    activeContracts: planDetails.activeContracts
-                },
-                
-                // Upgrade recommendation
-                upgradeRecommendation: recommendation,
-                
-                // User-specific data
-                userSpecific: {
-                    isLoggedIn: isLoggedIn,
-                    canInvest: canInvest,
-                    userPotential: userPotential,
-                    mainBalance: userMainBalance,
-                    maturedBalance: userMaturedBalance,
-                    totalBalance: userMainBalance + userMaturedBalance
-                },
-                
-                // Badges
-                badges: badges,
-                
-                // Pricing display
-                pricing: {
-                    formattedMin: `$${plan.minAmount.toLocaleString()}`,
-                    formattedMax: `$${plan.maxAmount.toLocaleString()}`,
-                    formattedRange: `$${plan.minAmount.toLocaleString()} - $${plan.maxAmount.toLocaleString()}`
-                },
-                
-                // Duration display
-                durationDisplay: {
-                    hours: plan.duration,
-                    days: (plan.duration / 24).toFixed(1),
-                    label: plan.duration >= 24 ? `${(plan.duration / 24).toFixed(0)} Days` : `${plan.duration} Hours`
-                },
-                
-                // Return summary using EXACT EXISTING percentages
-                returnSummary: {
-                    investment: `$${plan.minAmount.toLocaleString()}`,
-                    percentageReturn: `${plan.percentage}%`,
-                    profitAmount: `$${planDetails.profitAmount.toFixed(2)}`,
-                    totalReturn: `$${planDetails.totalReturn.toFixed(2)}`,
-                    dailyProfit: `$${planDetails.dailyProfit.toFixed(4)}`,
-                    monthlyReturn: `$${planDetails.monthlyUSD.toFixed(2)}`,
-                    yearlyReturn: `$${planDetails.yearlyUSD.toFixed(2)}`
-                },
-                
-                // Button state
-                buttonState: isLoggedIn ? (canInvest ? 'Invest Now' : 'Insufficient Balance') : 'Login to Invest',
-                buttonDisabled: !isLoggedIn || !canInvest
-            };
-        });
-        
-        // Calculate overall market summary
-        const totalDailyBTC = formattedPlans.reduce((sum, p) => sum + p.planDetails.dailyBTC, 0);
-        const totalDailyUSD = formattedPlans.reduce((sum, p) => sum + p.planDetails.dailyUSD, 0);
-        const avgROI = formattedPlans.reduce((sum, p) => sum + p.planDetails.roiYearly, 0) / formattedPlans.length;
-        const avgPercentage = formattedPlans.reduce((sum, p) => sum + p.percentage, 0) / formattedPlans.length;
-        
-        res.status(200).json({
-            status: 'success',
-            data: {
-                plans: formattedPlans,
-                marketSummary: {
-                    totalDailyBTC: parseFloat(totalDailyBTC.toFixed(6)),
-                    totalDailyUSD: parseFloat(totalDailyUSD.toFixed(2)),
-                    averageROI: parseFloat(avgROI.toFixed(1)),
-                    averagePercentageReturn: parseFloat(avgPercentage.toFixed(2)),
-                    totalPlans: formattedPlans.length,
-                    highestROI: Math.max(...formattedPlans.map(p => p.planDetails.roiYearly)),
-                    lowestInvestment: Math.min(...formattedPlans.map(p => p.minAmount)),
-                    highestHashrate: Math.max(...formattedPlans.map(p => p.planDetails.hashrate))
-                },
-                userBalances: isLoggedIn ? {
-                    main: userMainBalance,
-                    matured: userMaturedBalance,
-                    total: userMainBalance + userMaturedBalance,
-                    formattedMain: `$${userMainBalance.toLocaleString()}`,
-                    formattedMatured: `$${userMaturedBalance.toLocaleString()}`,
-                    formattedTotal: `$${(userMainBalance + userMaturedBalance).toLocaleString()}`
-                } : null,
-                isLoggedIn: isLoggedIn,
-                btcPrice: currentBTCPrice,
-                investorCount: investorCount,
-                formattedInvestorCount: investorCount.toLocaleString(),
-                timestamp: new Date().toISOString()
-            }
-        });
-        
-    } catch (err) {
-        console.error('Get plans error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'An error occurred while fetching investment plans'
-        });
+/**
+ * Generate premium plan details with benefits
+ */
+function generatePremiumPlanDetails(plan, tierKey) {
+    const tierConfig = getFullTierConfig(tierKey);
+    if (!tierConfig) {
+        return {
+            tier: 1,
+            tierLabel: 'Starter',
+            tierIcon: 'fa-seedling',
+            tierColor: '#818CF8',
+            tierBadge: 'Entry',
+            benefits: []
+        };
     }
-});
-
-console.log('✅ Enhanced Plans endpoint loaded with premium look');
-console.log('   - GET /api/plans');
-console.log('   - EXACT EXISTING PERCENTAGES PRESERVED');
-console.log('   - Premium visual data added');
-console.log('   - Logical hashrate progression (cheaper = LESS hashrate)');
+    
+    // Count premium vs standard benefits
+    const premiumCount = tierConfig.benefits.filter(b => b.premium).length;
+    const standardCount = tierConfig.benefits.filter(b => !b.premium).length;
+    
+    return {
+        tier: tierConfig.tier,
+        tierLabel: tierConfig.label,
+        tierIcon: tierConfig.icon,
+        tierColor: tierConfig.color,
+        tierBadge: tierConfig.badge,
+        benefits: tierConfig.benefits,
+        benefitStats: {
+            total: tierConfig.benefits.length,
+            premium: premiumCount,
+            standard: standardCount
+        },
+        // Previous tier for upgrade info
+        previousTier: tierConfig.tier > 1 ? Object.keys(TIER_BENEFITS)[tierConfig.tier - 2] : null,
+        isTopTier: tierConfig.tier === 6
+    };
+}
 
 
 
