@@ -17230,7 +17230,6 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-
 // =============================================
 // ENHANCED PLANS ENDPOINT - PREMIUM VERSION
 // =============================================
@@ -17393,7 +17392,7 @@ app.get('/api/plans', async (req, res) => {
                         },
                         walletBreakdown: walletBreakdown.slice(0, 20),
                         hasRecentTransaction: hasRecentTransaction,
-                        canPurchase: true
+                        canPurchase: true // Changed from canInvest
                     };
                 }
             } catch (authErr) {
@@ -17406,7 +17405,7 @@ app.get('/api/plans', async (req, res) => {
         if (!userContext) {
             userContext = {
                 isLoggedIn: false,
-                canPurchase: false,
+                canPurchase: false, // Changed from canInvest
                 kycVerified: false,
                 hasRecentTransaction: false,
                 mainBalance: { btc: 0, usd: 0 },
@@ -17551,17 +17550,17 @@ app.get('/api/plans', async (req, res) => {
             // Return in BTC
             const dailyReturnBTC = btcPrice > 0 ? dailyReturnMin / btcPrice : 0;
             
-            // Check if user can purchase hashpower
+            // Check if user can purchase this mining contract
             let canPurchase = false;
             let buttonState = 'login';
-            let buttonText = 'Login to Purchase';
-            let buttonTooltip = 'Please login to purchase hashrate';
+            let buttonText = 'Login to Purchase'; // Changed from 'Login to Invest'
+            let buttonTooltip = 'Please login to purchase hashrate'; // Changed from 'Please login to purchase hashrate'
             
             if (isLoggedIn && userContext) {
                 if (!kycVerified) {
                     buttonState = 'kyc_required';
                     buttonText = 'Complete KYC';
-                    buttonTooltip = 'KYC verification required to purchase hashrate';
+                    buttonTooltip = 'KYC verification required to purchase hashrate'; // Changed from 'KYC verification required to invest'
                 } else if (!hasRecentTransaction) {
                     buttonState = 'transaction_required';
                     buttonText = 'Make a Deposit';
@@ -17570,9 +17569,9 @@ app.get('/api/plans', async (req, res) => {
                     const totalUserBalance = userContext.mainBalance.usd + userContext.maturedBalance.usd;
                     if (totalUserBalance >= plan.minAmount) {
                         canPurchase = true;
-                        buttonState = 'purchase';
-                        buttonText = 'Buy Hash Power';
-                        buttonTooltip = `Purchase ${plan.name} mining contract`;
+                        buttonState = 'purchase'; // Changed from 'invest'
+                        buttonText = 'Buy Hash Power'; // Changed from 'Buy Hash Power'
+                        buttonTooltip = `Purchase ${plan.name} mining contract`; // Changed from 'Invest in ${plan.name} plan'
                     } else {
                         buttonState = 'insufficient';
                         buttonText = 'Insufficient Balance';
@@ -17581,69 +17580,53 @@ app.get('/api/plans', async (req, res) => {
                 }
             }
             
-            // Format numbers with commas
-            const formatUSD = (value) => {
-                return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            };
-            
             return {
                 id: plan._id,
-                name: plan.name || `${tier.badge} Mining Contract`,
+                name: plan.name || `${tier.badge} Mining Contract`, // Changed from 'Plan'
                 tier: tierKey,
                 badge: tier.badge,
                 color: tier.color,
                 lightColor: tier.lightColor,
                 bgColor: tier.bgColor,
                 borderColor: tier.borderColor,
-                description: plan.description || `${tier.badge} cloud mining contract with SHA-256 ASIC optimization`,
-                contractType: 'SHA-256 ASIC Mining',
-                miningAlgorithm: 'SHA-256',
-                contractDuration: {
-                    hours: plan.duration || 12,
-                    days: durationDays,
-                    display: `${durationDays} days`
-                },
-                hashrate: {
-                    ths: hashrate,
-                    display: `${hashrate.toLocaleString()} TH/s`
-                },
-                minPurchase: {
+                description: plan.description || `${tier.badge} SHA-256 ASIC mining contract`, // Changed from 'cloud mining contract'
+                minAmount: {
                     usd: minAmountUSD,
-                    btc: minAmountBTC,
-                    display: formatUSD(minAmountUSD)
+                    btc: minAmountBTC
                 },
-                maxPurchase: {
+                maxAmount: {
                     usd: maxAmountUSD,
-                    btc: maxAmountBTC,
-                    display: formatUSD(maxAmountUSD)
+                    btc: maxAmountBTC
                 },
-                roi: {
-                    percentage: percentage,
-                    display: `<span style="color: #2ECC71;">${percentage}%</span>`
+                percentage: percentage,
+                duration: {
+                    hours: plan.duration || 12,
+                    days: durationDays
                 },
+                hashrate: hashrate,
                 features: tier.features,
                 estimatedReturns: {
                     daily: {
                         min: dailyReturnMin,
                         max: dailyReturnMax,
                         minBTC: dailyReturnBTC,
-                        display: `<span style="color: #2ECC71;">${formatUSD(dailyReturnMin)} - ${formatUSD(dailyReturnMax)}</span>`
+                        display: `<span style="color: #2ECC71;">$${dailyReturnMin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${dailyReturnMax.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
                     },
                     monthly: {
                         min: monthlyReturnMin,
                         max: monthlyReturnMax,
-                        display: `<span style="color: #2ECC71;">${formatUSD(monthlyReturnMin)} - ${formatUSD(monthlyReturnMax)}</span>`
+                        display: `<span style="color: #2ECC71;">$${monthlyReturnMin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${monthlyReturnMax.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
                     },
                     annual: {
                         min: annualReturnMin,
                         max: annualReturnMax,
-                        display: `<span style="color: #2ECC71;">${formatUSD(annualReturnMin)} - ${formatUSD(annualReturnMax)}</span>`
+                        display: `<span style="color: #2ECC71;">$${annualReturnMin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${annualReturnMax.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
                     }
                 },
                 buttonState: buttonState,
                 buttonText: buttonText,
                 buttonTooltip: buttonTooltip,
-                canPurchase: canPurchase,
+                canPurchase: canPurchase, // Changed from canInvest
                 isPopular: tierKey === 'gold',
                 isBestValue: tierKey === 'standard'
             };
@@ -17657,25 +17640,21 @@ app.get('/api/plans', async (req, res) => {
             const allMinReturns = enhancedPlans.map(p => p.estimatedReturns.daily.min);
             const allMaxReturns = enhancedPlans.map(p => p.estimatedReturns.daily.max);
             
-            const formatUSD = (value) => {
-                return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            };
-            
             estimatedReturns = {
                 daily: {
                     min: Math.min(...allMinReturns),
                     max: Math.max(...allMaxReturns),
-                    display: `<span style="color: #2ECC71;">${formatUSD(Math.min(...allMinReturns))} - ${formatUSD(Math.max(...allMaxReturns))}</span>`
+                    display: `<span style="color: #2ECC71;">$${Math.min(...allMinReturns).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${Math.max(...allMaxReturns).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
                 },
                 monthly: {
                     min: Math.min(...allMinReturns) * 30,
                     max: Math.max(...allMaxReturns) * 30,
-                    display: `<span style="color: #2ECC71;">${formatUSD(Math.min(...allMinReturns) * 30)} - ${formatUSD(Math.max(...allMaxReturns) * 30)}</span>`
+                    display: `<span style="color: #2ECC71;">$${(Math.min(...allMinReturns) * 30).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${(Math.max(...allMaxReturns) * 30).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
                 },
                 annual: {
                     min: Math.min(...allMinReturns) * 365,
                     max: Math.max(...allMaxReturns) * 365,
-                    display: `<span style="color: #2ECC71;">${formatUSD(Math.min(...allMinReturns) * 365)} - ${formatUSD(Math.max(...allMaxReturns) * 365)}</span>`
+                    display: `<span style="color: #2ECC71;">$${(Math.min(...allMinReturns) * 365).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${(Math.max(...allMaxReturns) * 365).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
                 }
             };
         }
@@ -17707,7 +17686,7 @@ app.get('/api/plans', async (req, res) => {
         console.error('Enhanced plans endpoint error:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to load mining contracts',
+            message: 'Failed to load mining contracts', // Changed from 'Failed to load investment plans'
             error: process.env.NODE_ENV === 'development' ? err.message : undefined
         });
     }
