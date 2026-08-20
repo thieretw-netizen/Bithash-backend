@@ -17532,29 +17532,26 @@ app.get('/api/plans', async (req, res) => {
             const maxAmountUSD = plan.maxAmount || 0;
             const percentage = plan.percentage || 0;
             
-            // BTC equivalents with comma formatting
+            // BTC equivalents
             const minAmountBTC = btcPrice > 0 ? minAmountUSD / btcPrice : 0;
             const maxAmountBTC = btcPrice > 0 ? maxAmountUSD / btcPrice : 0;
             
-            // Contract duration
+            // Daily return (percentage / duration_in_days)
             const durationDays = (plan.duration || 12) / 24;
             const dailyReturnPercentage = durationDays > 0 ? percentage / durationDays : percentage;
             
-            // Estimated mining yields (using min and max amounts)
-            const dailyYieldMin = minAmountUSD * (dailyReturnPercentage / 100);
-            const dailyYieldMax = maxAmountUSD * (dailyReturnPercentage / 100);
-            const monthlyYieldMin = dailyYieldMin * 30;
-            const monthlyYieldMax = dailyYieldMax * 30;
-            const annualYieldMin = dailyYieldMin * 365;
-            const annualYieldMax = dailyYieldMax * 365;
+            // Estimated returns (using min and max amounts)
+            const dailyReturnMin = minAmountUSD * (dailyReturnPercentage / 100);
+            const dailyReturnMax = maxAmountUSD * (dailyReturnPercentage / 100);
+            const monthlyReturnMin = dailyReturnMin * 30;
+            const monthlyReturnMax = dailyReturnMax * 30;
+            const annualReturnMin = dailyReturnMin * 365;
+            const annualReturnMax = dailyReturnMax * 365;
             
-            // Yield in BTC
-            const dailyYieldBTC = btcPrice > 0 ? dailyYieldMin / btcPrice : 0;
+            // Return in BTC
+            const dailyReturnBTC = btcPrice > 0 ? dailyReturnMin / btcPrice : 0;
             
-            // Calculate total hashrate capacity
-            const totalHashrateCapacity = hashrate * (maxAmountUSD / 1000);
-            
-            // Check if user can purchase this contract
+            // Check if user can purchase hashpower
             let canPurchase = false;
             let buttonState = 'login';
             let buttonText = 'Login to Purchase';
@@ -17574,8 +17571,8 @@ app.get('/api/plans', async (req, res) => {
                     if (totalUserBalance >= plan.minAmount) {
                         canPurchase = true;
                         buttonState = 'purchase';
-                        buttonText = 'Purchase Hash Power';
-                        buttonTooltip = `Acquire ${hashrate} TH/s mining capacity`;
+                        buttonText = 'Buy Hash Power';
+                        buttonTooltip = `Purchase ${plan.name} mining contract`;
                     } else {
                         buttonState = 'insufficient';
                         buttonText = 'Insufficient Balance';
@@ -17584,9 +17581,10 @@ app.get('/api/plans', async (req, res) => {
                 }
             }
             
-            // Format numbers with commas and color for returns
-            const formatUSD = (value) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            const formatBTC = (value) => `${value.toFixed(8)} BTC`;
+            // Format numbers with commas
+            const formatUSD = (value) => {
+                return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            };
             
             return {
                 id: plan._id,
@@ -17607,9 +17605,7 @@ app.get('/api/plans', async (req, res) => {
                 },
                 hashrate: {
                     ths: hashrate,
-                    display: `${hashrate} TH/s`,
-                    totalCapacity: totalHashrateCapacity,
-                    efficiency: tierKey === 'ultimate' ? '98.7%' : tierKey === 'enterprise' ? '97.2%' : tierKey === 'gold' ? '95.8%' : tierKey === 'standard' ? '93.4%' : '89.2%'
+                    display: `${hashrate.toLocaleString()} TH/s`
                 },
                 minPurchase: {
                     usd: minAmountUSD,
@@ -17623,26 +17619,25 @@ app.get('/api/plans', async (req, res) => {
                 },
                 roi: {
                     percentage: percentage,
-                    display: `${percentage}%`,
-                    color: '#2ECC71' // Green color for ROI
+                    display: `<span style="color: #2ECC71;">${percentage}%</span>`
                 },
                 features: tier.features,
-                estimatedYields: {
+                estimatedReturns: {
                     daily: {
-                        min: dailyYieldMin,
-                        max: dailyYieldMax,
-                        minBTC: dailyYieldBTC,
-                        display: `<span style="color: #2ECC71;">${formatUSD(dailyYieldMin)} - ${formatUSD(dailyYieldMax)}</span>`
+                        min: dailyReturnMin,
+                        max: dailyReturnMax,
+                        minBTC: dailyReturnBTC,
+                        display: `<span style="color: #2ECC71;">${formatUSD(dailyReturnMin)} - ${formatUSD(dailyReturnMax)}</span>`
                     },
                     monthly: {
-                        min: monthlyYieldMin,
-                        max: monthlyYieldMax,
-                        display: `<span style="color: #2ECC71;">${formatUSD(monthlyYieldMin)} - ${formatUSD(monthlyYieldMax)}</span>`
+                        min: monthlyReturnMin,
+                        max: monthlyReturnMax,
+                        display: `<span style="color: #2ECC71;">${formatUSD(monthlyReturnMin)} - ${formatUSD(monthlyReturnMax)}</span>`
                     },
                     annual: {
-                        min: annualYieldMin,
-                        max: annualYieldMax,
-                        display: `<span style="color: #2ECC71;">${formatUSD(annualYieldMin)} - ${formatUSD(annualYieldMax)}</span>`
+                        min: annualReturnMin,
+                        max: annualReturnMax,
+                        display: `<span style="color: #2ECC71;">${formatUSD(annualReturnMin)} - ${formatUSD(annualReturnMax)}</span>`
                     }
                 },
                 buttonState: buttonState,
@@ -17650,22 +17645,21 @@ app.get('/api/plans', async (req, res) => {
                 buttonTooltip: buttonTooltip,
                 canPurchase: canPurchase,
                 isPopular: tierKey === 'gold',
-                isBestValue: tierKey === 'standard',
-                maintenanceFee: tierKey === 'ultimate' ? '0.5%' : tierKey === 'enterprise' ? '0.7%' : tierKey === 'gold' ? '1.0%' : tierKey === 'standard' ? '1.5%' : '2.0%',
-                poolFee: '0.5%',
-                payoutFrequency: 'Daily'
+                isBestValue: tierKey === 'standard'
             };
         });
 
         // =============================================
-        // 6. CALCULATE OVERALL ESTIMATED YIELDS
+        // 6. CALCULATE OVERALL ESTIMATED RETURNS
         // =============================================
         let estimatedReturns = null;
         if (enhancedPlans.length > 0 && btcPrice > 0) {
-            const allMinReturns = enhancedPlans.map(p => p.estimatedYields.daily.min);
-            const allMaxReturns = enhancedPlans.map(p => p.estimatedYields.daily.max);
+            const allMinReturns = enhancedPlans.map(p => p.estimatedReturns.daily.min);
+            const allMaxReturns = enhancedPlans.map(p => p.estimatedReturns.daily.max);
             
-            const formatUSD = (value) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            const formatUSD = (value) => {
+                return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            };
             
             estimatedReturns = {
                 daily: {
@@ -17697,19 +17691,11 @@ app.get('/api/plans', async (req, res) => {
                     btcPrice: btcPrice,
                     btcPriceChange24h: btcPriceChange24h,
                     blockReward: blockReward,
-                    networkDifficulty: '48.6T',
-                    currentBlockHeight: 800000,
                     timestamp: new Date().toISOString()
                 },
                 userContext: userContext,
                 estimatedReturns: estimatedReturns,
-                totalPlans: enhancedPlans.length,
-                miningPools: ['AntPool', 'F2Pool', 'ViaBTC'],
-                networkStats: {
-                    hashrate: '425 EH/s',
-                    difficulty: '48.6T',
-                    nextDifficultyAdjustment: '+2.3%'
-                }
+                totalPlans: enhancedPlans.length
             }
         };
 
