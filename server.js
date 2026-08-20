@@ -17395,7 +17395,7 @@ app.get('/api/plans', async (req, res) => {
                         },
                         walletBreakdown: walletBreakdown.slice(0, 20),
                         hasRecentTransaction: hasRecentTransaction,
-                        canInvest: true
+                        canPurchase: true
                     };
                 }
             } catch (authErr) {
@@ -17408,7 +17408,7 @@ app.get('/api/plans', async (req, res) => {
         if (!userContext) {
             userContext = {
                 isLoggedIn: false,
-                canInvest: false,
+                canPurchase: false,
                 kycVerified: false,
                 hasRecentTransaction: false,
                 mainBalance: { btc: 0, usd: 0 },
@@ -17430,11 +17430,11 @@ app.get('/api/plans', async (req, res) => {
                 bgColor: 'rgba(74, 144, 217, 0.12)',
                 borderColor: 'rgba(74, 144, 217, 0.3)',
                 features: [
-                    'SHA-256 ASIC mining',
-                    '24/7 performance monitoring',
-                    'Automated daily payouts',
-                    'Low entry point',
-                    'Email support'
+                    '⚡ SHA-256 ASIC Mining',
+                    '📊 Real-time Hashrate Monitoring',
+                    '🔄 Automated Daily Payouts',
+                    '🚀 Low Entry Threshold',
+                    '📧 Email Support'
                 ]
             },
             standard: {
@@ -17444,11 +17444,11 @@ app.get('/api/plans', async (req, res) => {
                 bgColor: 'rgba(46, 204, 113, 0.12)',
                 borderColor: 'rgba(46, 204, 113, 0.3)',
                 features: [
-                    'SHA-256 ASIC mining',
-                    'Priority mining queue',
-                    '24/7 performance monitoring',
-                    'Automated daily payouts',
-                    'Priority email support'
+                    '⚡ SHA-256 ASIC Mining',
+                    '⏫ Priority Mining Queue',
+                    '📊 Real-time Hashrate Monitoring',
+                    '🔄 Automated Daily Payouts',
+                    '📧 Priority Email Support'
                 ]
             },
             gold: {
@@ -17458,12 +17458,12 @@ app.get('/api/plans', async (req, res) => {
                 bgColor: 'rgba(241, 196, 15, 0.12)',
                 borderColor: 'rgba(241, 196, 15, 0.3)',
                 features: [
-                    'SHA-256 ASIC mining',
-                    'Premium mining queue',
-                    '24/7 premium monitoring',
-                    'Automated daily payouts',
-                    'Priority 24/7 support',
-                    'Higher hashrate efficiency'
+                    '⚡ SHA-256 ASIC Mining',
+                    '👑 Premium Mining Queue',
+                    '📊 24/7 Premium Monitoring',
+                    '🔄 Automated Daily Payouts',
+                    '🎯 Priority 24/7 Support',
+                    '⚡ Enhanced Hashrate Efficiency'
                 ]
             },
             enterprise: {
@@ -17473,13 +17473,13 @@ app.get('/api/plans', async (req, res) => {
                 bgColor: 'rgba(155, 89, 182, 0.12)',
                 borderColor: 'rgba(155, 89, 182, 0.3)',
                 features: [
-                    'SHA-256 ASIC mining',
-                    'VIP mining queue',
-                    '24/7 dedicated monitoring',
-                    'Automated daily payouts',
-                    'VIP 24/7 support',
-                    'Dedicated mining capacity',
-                    'Customizable settings'
+                    '⚡ SHA-256 ASIC Mining',
+                    '💎 VIP Mining Queue',
+                    '📊 24/7 Dedicated Monitoring',
+                    '🔄 Automated Daily Payouts',
+                    '🎯 VIP 24/7 Support',
+                    '🏭 Dedicated Mining Capacity',
+                    '⚙️ Customizable Settings'
                 ]
             },
             ultimate: {
@@ -17489,14 +17489,14 @@ app.get('/api/plans', async (req, res) => {
                 bgColor: 'rgba(231, 76, 60, 0.12)',
                 borderColor: 'rgba(231, 76, 60, 0.3)',
                 features: [
-                    'SHA-256 ASIC mining',
-                    'Elite mining queue',
-                    '24/7 elite monitoring',
-                    'Automated daily payouts',
-                    'Elite 24/7 support',
-                    'Maximum mining capacity',
-                    'Premium hashrate efficiency',
-                    'Exclusive bonuses'
+                    '⚡ SHA-256 ASIC Mining',
+                    '👑 Elite Mining Queue',
+                    '📊 24/7 Elite Monitoring',
+                    '🔄 Automated Daily Payouts',
+                    '🎯 Elite 24/7 Support',
+                    '🏭 Maximum Mining Capacity',
+                    '⚡ Premium Hashrate Efficiency',
+                    '🎁 Exclusive Bonuses'
                 ]
             }
         };
@@ -17553,17 +17553,17 @@ app.get('/api/plans', async (req, res) => {
             // Return in BTC
             const dailyReturnBTC = btcPrice > 0 ? dailyReturnMin / btcPrice : 0;
             
-            // Check if user can invest in this plan
-            let canInvest = false;
+            // Check if user can purchase this mining contract
+            let canPurchase = false;
             let buttonState = 'login';
-            let buttonText = 'Login to Invest';
+            let buttonText = 'Connect Wallet';
             let buttonTooltip = 'Please login to purchase hashrate';
             
             if (isLoggedIn && userContext) {
                 if (!kycVerified) {
                     buttonState = 'kyc_required';
-                    buttonText = 'Complete KYC';
-                    buttonTooltip = 'KYC verification required to invest';
+                    buttonText = 'Verify Identity';
+                    buttonTooltip = 'KYC verification required to purchase hashrate';
                 } else if (!hasRecentTransaction) {
                     buttonState = 'transaction_required';
                     buttonText = 'Make a Deposit';
@@ -17571,10 +17571,10 @@ app.get('/api/plans', async (req, res) => {
                 } else {
                     const totalUserBalance = userContext.mainBalance.usd + userContext.maturedBalance.usd;
                     if (totalUserBalance >= plan.minAmount) {
-                        canInvest = true;
-                        buttonState = 'invest';
-                        buttonText = 'Buy Hash Power';
-                        buttonTooltip = `Invest in ${plan.name} plan`;
+                        canPurchase = true;
+                        buttonState = 'purchase';
+                        buttonText = 'Purchase Hashpower';
+                        buttonTooltip = `Acquire ${plan.name} mining contract`;
                     } else {
                         buttonState = 'insufficient';
                         buttonText = 'Insufficient Balance';
@@ -17583,53 +17583,76 @@ app.get('/api/plans', async (req, res) => {
                 }
             }
             
+            // Format numbers with commas and green color for percentages
+            const formatCurrency = (value) => {
+                return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            };
+            
+            const formatPercentage = (value) => {
+                return `<span style="color: #2ECC71; font-weight: 600;">${value.toFixed(2)}%</span>`;
+            };
+            
             return {
                 id: plan._id,
-                name: plan.name || `${tier.badge} Plan`,
+                name: plan.name || `${tier.badge} Mining Contract`,
                 tier: tierKey,
                 badge: tier.badge,
                 color: tier.color,
                 lightColor: tier.lightColor,
                 bgColor: tier.bgColor,
                 borderColor: tier.borderColor,
-                description: plan.description || `${tier.badge} cloud mining contract`,
+                description: plan.description || `${tier.badge} cloud mining contract powered by SHA-256 ASIC technology`,
                 minAmount: {
                     usd: minAmountUSD,
-                    btc: minAmountBTC
+                    btc: minAmountBTC,
+                    formatted: formatCurrency(minAmountUSD)
                 },
                 maxAmount: {
                     usd: maxAmountUSD,
-                    btc: maxAmountBTC
+                    btc: maxAmountBTC,
+                    formatted: formatCurrency(maxAmountUSD)
                 },
-                percentage: percentage,
+                percentage: {
+                    value: percentage,
+                    formatted: formatPercentage(percentage),
+                    raw: percentage
+                },
                 duration: {
                     hours: plan.duration || 12,
-                    days: durationDays
+                    days: durationDays,
+                    formatted: `${durationDays} days`
                 },
-                hashrate: hashrate,
+                hashrate: {
+                    value: hashrate,
+                    formatted: `${hashrate.toLocaleString()} TH/s`,
+                    display: `${hashrate.toLocaleString()} TH/s`
+                },
                 features: tier.features,
                 estimatedReturns: {
                     daily: {
                         min: dailyReturnMin,
                         max: dailyReturnMax,
                         minBTC: dailyReturnBTC,
-                        display: `$${dailyReturnMin.toFixed(2)} - $${dailyReturnMax.toFixed(2)}`
+                        display: `${formatCurrency(dailyReturnMin)} - ${formatCurrency(dailyReturnMax)}`,
+                        formatted: `<span style="color: #2ECC71;">${formatCurrency(dailyReturnMin)}</span> - <span style="color: #2ECC71;">${formatCurrency(dailyReturnMax)}</span>`
                     },
                     monthly: {
                         min: monthlyReturnMin,
                         max: monthlyReturnMax,
-                        display: `$${monthlyReturnMin.toFixed(2)} - $${monthlyReturnMax.toFixed(2)}`
+                        display: `${formatCurrency(monthlyReturnMin)} - ${formatCurrency(monthlyReturnMax)}`,
+                        formatted: `<span style="color: #2ECC71;">${formatCurrency(monthlyReturnMin)}</span> - <span style="color: #2ECC71;">${formatCurrency(monthlyReturnMax)}</span>`
                     },
                     annual: {
                         min: annualReturnMin,
                         max: annualReturnMax,
-                        display: `$${annualReturnMin.toFixed(2)} - $${annualReturnMax.toFixed(2)}`
+                        display: `${formatCurrency(annualReturnMin)} - ${formatCurrency(annualReturnMax)}`,
+                        formatted: `<span style="color: #2ECC71;">${formatCurrency(annualReturnMin)}</span> - <span style="color: #2ECC71;">${formatCurrency(annualReturnMax)}</span>`
                     }
                 },
                 buttonState: buttonState,
                 buttonText: buttonText,
                 buttonTooltip: buttonTooltip,
-                canInvest: canInvest,
+                canPurchase: canPurchase,
                 isPopular: tierKey === 'gold',
                 isBestValue: tierKey === 'standard'
             };
@@ -17643,21 +17666,28 @@ app.get('/api/plans', async (req, res) => {
             const allMinReturns = enhancedPlans.map(p => p.estimatedReturns.daily.min);
             const allMaxReturns = enhancedPlans.map(p => p.estimatedReturns.daily.max);
             
+            const formatCurrency = (value) => {
+                return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            };
+            
             estimatedReturns = {
                 daily: {
                     min: Math.min(...allMinReturns),
                     max: Math.max(...allMaxReturns),
-                    display: `$${Math.min(...allMinReturns).toFixed(2)} - $${Math.max(...allMaxReturns).toFixed(2)}`
+                    display: `${formatCurrency(Math.min(...allMinReturns))} - ${formatCurrency(Math.max(...allMaxReturns))}`,
+                    formatted: `<span style="color: #2ECC71;">${formatCurrency(Math.min(...allMinReturns))}</span> - <span style="color: #2ECC71;">${formatCurrency(Math.max(...allMaxReturns))}</span>`
                 },
                 monthly: {
                     min: Math.min(...allMinReturns) * 30,
                     max: Math.max(...allMaxReturns) * 30,
-                    display: `$${(Math.min(...allMinReturns) * 30).toFixed(2)} - $${(Math.max(...allMaxReturns) * 30).toFixed(2)}`
+                    display: `${formatCurrency(Math.min(...allMinReturns) * 30)} - ${formatCurrency(Math.max(...allMaxReturns) * 30)}`,
+                    formatted: `<span style="color: #2ECC71;">${formatCurrency(Math.min(...allMinReturns) * 30)}</span> - <span style="color: #2ECC71;">${formatCurrency(Math.max(...allMaxReturns) * 30)}</span>`
                 },
                 annual: {
                     min: Math.min(...allMinReturns) * 365,
                     max: Math.max(...allMaxReturns) * 365,
-                    display: `$${(Math.min(...allMinReturns) * 365).toFixed(2)} - $${(Math.max(...allMaxReturns) * 365).toFixed(2)}`
+                    display: `${formatCurrency(Math.min(...allMinReturns) * 365)} - ${formatCurrency(Math.max(...allMaxReturns) * 365)}`,
+                    formatted: `<span style="color: #2ECC71;">${formatCurrency(Math.min(...allMinReturns) * 365)}</span> - <span style="color: #2ECC71;">${formatCurrency(Math.max(...allMaxReturns) * 365)}</span>`
                 }
             };
         }
@@ -17670,9 +17700,18 @@ app.get('/api/plans', async (req, res) => {
             data: {
                 plans: enhancedPlans,
                 marketContext: {
-                    btcPrice: btcPrice,
-                    btcPriceChange24h: btcPriceChange24h,
-                    blockReward: blockReward,
+                    btcPrice: {
+                        value: btcPrice,
+                        formatted: `$${btcPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    },
+                    btcPriceChange24h: {
+                        value: btcPriceChange24h,
+                        formatted: `<span style="color: ${btcPriceChange24h >= 0 ? '#2ECC71' : '#E74C3C'};">${btcPriceChange24h >= 0 ? '+' : ''}${btcPriceChange24h.toFixed(2)}%</span>`
+                    },
+                    blockReward: {
+                        value: blockReward,
+                        formatted: `${blockReward.toFixed(3)} BTC`
+                    },
                     timestamp: new Date().toISOString()
                 },
                 userContext: userContext,
@@ -17689,7 +17728,7 @@ app.get('/api/plans', async (req, res) => {
         console.error('Enhanced plans endpoint error:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to load investment plans',
+            message: 'Failed to load mining contracts',
             error: process.env.NODE_ENV === 'development' ? err.message : undefined
         });
     }
