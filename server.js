@@ -17231,415 +17231,469 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-// =============================================
-// ENHANCED /api/plans ENDPOINT - PREMIUM TIER SYSTEM
-// =============================================
 
-const PLAN_TIERS = {
-  'Basic': {
-    tier: 'Starter',
-    badge: 'Starter',
-    color: '#6C7480',
-    bgColor: 'rgba(108, 116, 128, 0.15)',
-    borderColor: 'rgba(108, 116, 128, 0.3)',
-    badgeColor: '#6C7480',
-    hashrateMin: 45,
-    hashrateMax: 68,
-    hardware: 'Antminer S19 Pro',
-    facility: 'North America (Texas)',
-    pool: 'ViaBTC',
-    features: [
-      'SHA-256 ASIC mining',
-      '24/7 monitoring',
-      'Daily payouts',
-      'Basic support'
-    ]
-  },
-  'Standard': {
-    tier: 'Standard',
-    badge: 'Standard',
-    color: '#3B82F6',
-    bgColor: 'rgba(59, 130, 246, 0.15)',
-    borderColor: 'rgba(59, 130, 246, 0.3)',
-    badgeColor: '#3B82F6',
-    hashrateMin: 85,
-    hashrateMax: 110,
-    hardware: 'Whatsminer M50S',
-    facility: 'Europe (Iceland)',
-    pool: 'F2Pool',
-    features: [
-      'SHA-256 ASIC mining',
-      '24/7 monitoring',
-      'Daily payouts',
-      'Priority support',
-      'Energy efficient cooling'
-    ]
-  },
-  'Gold': {
-    tier: 'Gold',
-    badge: 'Gold',
-    color: '#F7A600',
-    bgColor: 'rgba(247, 166, 0, 0.15)',
-    borderColor: 'rgba(247, 166, 0, 0.4)',
-    badgeColor: '#F7A600',
-    hashrateMin: 120,
-    hashrateMax: 150,
-    hardware: 'Antminer S19 XP',
-    facility: 'Asia (Georgia)',
-    pool: 'Antpool',
-    features: [
-      'SHA-256 ASIC mining',
-      '24/7 monitoring',
-      'Daily payouts',
-      'Priority support',
-      'Energy efficient cooling',
-      'Advanced analytics',
-      'Premium pool selection'
-    ]
-  },
-  'Enterprise': {
-    tier: 'Enterprise',
-    badge: 'Enterprise',
-    color: '#8B5CF6',
-    bgColor: 'rgba(139, 92, 246, 0.15)',
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-    badgeColor: '#8B5CF6',
-    hashrateMin: 180,
-    hashrateMax: 234,
-    hardware: 'Whatsminer M60S',
-    facility: 'North America (Texas)',
-    pool: 'Binance Pool',
-    features: [
-      'SHA-256 ASIC mining',
-      '24/7 monitoring',
-      'Daily payouts',
-      'Priority support',
-      'Energy efficient cooling',
-      'Advanced analytics',
-      'Premium pool selection',
-      'Dedicated account manager',
-      'Custom mining strategy'
-    ]
-  },
-  'Ultimate': {
-    tier: 'Ultimate',
-    badge: 'Ultimate',
-    color: '#EC4899',
-    bgColor: 'rgba(236, 72, 153, 0.15)',
-    borderColor: 'rgba(236, 72, 153, 0.3)',
-    badgeColor: '#EC4899',
-    hashrateMin: 220,
-    hashrateMax: 255,
-    hardware: 'Antminer S21 Hyd.',
-    facility: 'Multi-region (Global)',
-    pool: 'Multiple Pools',
-    features: [
-      'SHA-256 ASIC mining',
-      '24/7 monitoring',
-      'Daily payouts',
-      'Priority support',
-      'Energy efficient cooling',
-      'Advanced analytics',
-      'Premium pool selection',
-      'Dedicated account manager',
-      'Custom mining strategy',
-      'Multi-pool optimization',
-      'White-glove service'
-    ]
-  }
-};
+
+// =============================================
+// ENHANCED PLANS ENDPOINT - PREMIUM VERSION
+// =============================================
 
 app.get('/api/plans', async (req, res) => {
-  try {
-    // Get plans from database
-    const plans = await Plan.find({ isActive: true }).lean();
-    
-    // Get real-time BTC price
-    let btcPriceUSD = 0;
-    let btcChange24h = 0;
-    let blockReward = 3.125;
-    let networkHashrate = '650 EH/s';
-    let btcDominance = 54.7;
-    
     try {
-      const btcPriceData = await getCryptoPriceWithChange('BTC');
-      if (btcPriceData && btcPriceData.price) {
-        btcPriceUSD = btcPriceData.price;
-        btcChange24h = btcPriceData.change24h || 0;
-      }
-      
-      // Try to get additional market data
-      try {
-        const marketResponse = await axios.get(
-          'https://api.coingecko.com/api/v3/global',
-          { timeout: 5000 }
-        );
-        if (marketResponse.data && marketResponse.data.data) {
-          blockReward = marketResponse.data.data.block_reward || 3.125;
-          networkHashrate = `${(marketResponse.data.data.hashrate / 1e18).toFixed(1)} EH/s` || '650 EH/s';
-          btcDominance = marketResponse.data.data.market_cap_percentage?.btc || 54.7;
-        }
-      } catch (marketErr) {
-        // Use fallback values
-      }
-    } catch (priceErr) {
-      console.warn('Could not fetch BTC price:', priceErr.message);
-      btcPriceUSD = 50000; // Fallback
-    }
-
-    // Get user info if logged in
-    let isLoggedIn = false;
-    let userBalances = { main: 0, matured: 0, active: 0 };
-    let userKYCStatus = { identity: 'not-submitted', address: 'not-submitted', facial: 'not-submitted', overall: 'not-started' };
-    let userPreferences = { displayAsset: 'btc', currency: 'USD' };
-    let user = null;
-    
-    const token = req.headers.authorization?.split(' ')[1];
-    if (token) {
-      try {
-        const decoded = verifyJWT(token);
-        user = await User.findById(decoded.id).select('balances kycStatus preferences firstName lastName email');
-        if (user) {
-          isLoggedIn = true;
-          
-          // Get user balances with crypto conversion
-          let mainUSD = 0;
-          let maturedUSD = 0;
-          let activeUSD = 0;
-          
-          if (user.balances) {
-            // Calculate MAIN wallet USD from crypto holdings
-            if (user.balances.main) {
-              const mainMap = user.balances.main;
-              const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
-              for (const [asset, balance] of entries) {
-                if (balance > 0 && asset !== 'usd') {
-                  const price = await getCryptoPrice(asset.toUpperCase());
-                  if (price && price > 0) {
-                    mainUSD += balance * price;
-                  }
-                }
-              }
-            }
-            
-            // Calculate MATURED wallet USD from crypto holdings
-            if (user.balances.matured) {
-              const maturedMap = user.balances.matured;
-              const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
-              for (const [asset, balance] of entries) {
-                if (balance > 0 && asset !== 'usd') {
-                  const price = await getCryptoPrice(asset.toUpperCase());
-                  if (price && price > 0) {
-                    maturedUSD += balance * price;
-                  }
-                }
-              }
-            }
-            
-            // ACTIVE wallet is already in USD
-            if (user.balances.active) {
-              const activeMap = user.balances.active;
-              const entries = activeMap instanceof Map ? activeMap.entries() : Object.entries(activeMap);
-              for (const [asset, balance] of entries) {
-                if (balance > 0) {
-                  activeUSD += balance;
-                }
-              }
-            }
-          }
-          
-          userBalances = {
-            main: mainUSD,
-            matured: maturedUSD,
-            active: activeUSD,
-            total: mainUSD + maturedUSD + activeUSD
-          };
-          
-          if (user.kycStatus) {
-            userKYCStatus = user.kycStatus;
-          }
-          if (user.preferences) {
-            userPreferences = user.preferences;
-          }
-        }
-      } catch (err) {
-        console.warn('User token invalid or expired');
-      }
-    }
-
-    // Build enhanced plan data
-    const enhancedPlans = plans.map((plan, index) => {
-      const tierKey = plan.name;
-      const tierConfig = PLAN_TIERS[tierKey] || PLAN_TIERS['Standard'];
-      
-      // Calculate dynamic returns
-      const minAmountUSD = plan.minAmount || 0;
-      const maxAmountUSD = plan.maxAmount || 0;
-      const percentage = plan.percentage || 0;
-      
-      // Calculate BTC equivalents using real-time price
-      const minAmountBTC = btcPriceUSD > 0 ? minAmountUSD / btcPriceUSD : 0;
-      const maxAmountBTC = btcPriceUSD > 0 ? maxAmountUSD / btcPriceUSD : 0;
-      
-      // Estimated returns
-      const estimatedDailyReturnUSD = minAmountUSD > 0 ? (minAmountUSD * percentage / 100) / (plan.duration / 24) : 0;
-      const estimatedMonthlyReturnUSD = estimatedDailyReturnUSD * 30;
-      const estimatedAnnualReturnUSD = estimatedDailyReturnUSD * 365;
-      
-      const estimatedDailyReturnBTC = btcPriceUSD > 0 ? estimatedDailyReturnUSD / btcPriceUSD : 0;
-      const estimatedMonthlyReturnBTC = estimatedDailyReturnBTC * 30;
-      const estimatedAnnualReturnBTC = estimatedDailyReturnBTC * 365;
-      
-      // Hashrate range
-      const hashrateMin = tierConfig.hashrateMin || 45;
-      const hashrateMax = tierConfig.hashrateMax || 68;
-      const avgHashrate = (hashrateMin + hashrateMax) / 2;
-      
-      // Check if user can invest in this plan
-      let canInvest = false;
-      let buttonState = 'login';
-      let buttonText = 'Login to Buy';
-      let buttonDisabled = true;
-      
-      if (isLoggedIn) {
-        // Check KYC requirements
-        const isKYCVerified = userKYCStatus.identity === 'verified' && 
-                              userKYCStatus.address === 'verified' &&
-                              userKYCStatus.facial === 'verified';
+        // =============================================
+        // 1. FETCH PLANS FROM DATABASE
+        // =============================================
+        const plans = await Plan.find({ isActive: true }).lean();
         
-        if (!isKYCVerified) {
-          buttonState = 'kyc';
-          buttonText = 'Complete KYC';
-          buttonDisabled = true;
-        } else if (userBalances.total < minAmountUSD) {
-          buttonState = 'insufficient';
-          buttonText = 'Insufficient Balance';
-          buttonDisabled = true;
-        } else {
-          // Check if user has enough BTC (using USD equivalent)
-          // Main wallet can be used for investment
-          const mainBalance = userBalances.main || 0;
-          const maturedBalance = userBalances.matured || 0;
-          const totalAvailable = mainBalance + maturedBalance;
-          
-          if (totalAvailable >= minAmountUSD) {
-            canInvest = true;
-            buttonState = 'invest';
-            buttonText = 'Buy Hash Power';
-            buttonDisabled = false;
-          } else {
-            buttonState = 'insufficient';
-            buttonText = 'Insufficient Balance';
-            buttonDisabled = true;
-          }
+        if (!plans || plans.length === 0) {
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    plans: [],
+                    marketContext: null,
+                    userContext: null,
+                    estimatedReturns: null
+                }
+            });
         }
-      }
-      
-      // Determine if this is the popular plan (Gold or middle plan)
-      const isPopular = (index === 2 && plans.length >= 3) || (tierKey === 'Gold');
-      
-      return {
-        id: plan._id,
-        name: plan.name,
-        tier: tierConfig.tier,
-        tierBadge: tierConfig.badge,
-        badgeColor: tierConfig.badgeColor,
-        tierColors: {
-          primary: tierConfig.color,
-          background: tierConfig.bgColor,
-          border: tierConfig.borderColor
-        },
-        description: plan.description || `${tierConfig.tier} cloud mining contract`,
-        percentage: plan.percentage,
-        duration: plan.duration,
-        durationHours: plan.duration,
-        minAmount: {
-          usd: minAmountUSD,
-          btc: minAmountBTC
-        },
-        maxAmount: {
-          usd: maxAmountUSD,
-          btc: maxAmountBTC
-        },
-        estimatedReturns: {
-          daily: {
-            usd: estimatedDailyReturnUSD,
-            btc: estimatedDailyReturnBTC
-          },
-          monthly: {
-            usd: estimatedMonthlyReturnUSD,
-            btc: estimatedMonthlyReturnBTC
-          },
-          annual: {
-            usd: estimatedAnnualReturnUSD,
-            btc: estimatedAnnualReturnBTC
-          }
-        },
-        hashrate: {
-          min: hashrateMin,
-          max: hashrateMax,
-          average: avgHashrate,
-          unit: 'TH/s'
-        },
-        hardware: tierConfig.hardware,
-        facility: tierConfig.facility,
-        miningPool: tierConfig.pool,
-        features: tierConfig.features || [],
-        referralBonus: plan.referralBonus || 5,
-        isPopular: isPopular,
-        canInvest: canInvest,
-        buttonState: buttonState,
-        buttonText: buttonText,
-        buttonDisabled: buttonDisabled,
-        isActive: plan.isActive || false
-      };
-    });
 
-    // Sort plans by minAmount (ascending)
-    enhancedPlans.sort((a, b) => a.minAmount.usd - b.minAmount.usd);
+        // =============================================
+        // 2. GET REAL-TIME BTC PRICE
+        // =============================================
+        let btcPrice = 0;
+        let btcPriceChange24h = 0;
+        let blockReward = 3.125;
+        
+        try {
+            // Get BTC price from multiple sources
+            const btcPriceResult = await getRealTimeBitcoinPrice();
+            btcPrice = btcPriceResult || 0;
+            
+            // Get 24h change
+            try {
+                const changeResponse = await axios.get(
+                    'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
+                    { timeout: 5000 }
+                );
+                if (changeResponse.data && changeResponse.data.bitcoin) {
+                    btcPriceChange24h = changeResponse.data.bitcoin.usd_24h_change || 0;
+                }
+            } catch (changeErr) {
+                console.warn('Could not fetch BTC 24h change:', changeErr.message);
+            }
+            
+            // Get block reward
+            try {
+                const blockResponse = await axios.get(
+                    'https://blockchain.info/q/bcperblock',
+                    { timeout: 5000 }
+                );
+                if (blockResponse.data) {
+                    blockReward = parseFloat(blockResponse.data) || 3.125;
+                }
+            } catch (blockErr) {
+                console.warn('Could not fetch block reward:', blockErr.message);
+            }
+        } catch (priceErr) {
+            console.error('Failed to fetch BTC price:', priceErr.message);
+            // Continue with fallback values
+        }
 
-    // Prepare response
-    const responseData = {
-      status: 'success',
-      data: {
-        plans: enhancedPlans,
-        marketContext: {
-          btcPrice: {
-            usd: btcPriceUSD,
-            change24h: btcChange24h
-          },
-          blockReward: blockReward,
-          networkHashrate: networkHashrate,
-          btcDominance: btcDominance,
-          timestamp: new Date().toISOString()
-        },
-        userContext: {
-          isLoggedIn: isLoggedIn,
-          balances: userBalances,
-          kycStatus: userKYCStatus,
-          preferences: userPreferences,
-          displayCurrency: userPreferences.currency || 'USD'
-        },
-        kycRequired: true,
-        minInvestmentUSD: enhancedPlans.length > 0 ? enhancedPlans[0].minAmount.usd : 30,
-        maxInvestmentUSD: enhancedPlans.length > 0 ? enhancedPlans[enhancedPlans.length - 1].maxAmount.usd : 1000000
-      }
-    };
+        // =============================================
+        // 3. GET USER CONTEXT (if logged in)
+        // =============================================
+        let userContext = null;
+        let isLoggedIn = false;
+        let mainBalanceBTC = 0;
+        let mainBalanceUSD = 0;
+        let maturedBalanceBTC = 0;
+        let maturedBalanceUSD = 0;
+        let activeBalanceBTC = 0;
+        let activeBalanceUSD = 0;
+        let kycStatus = 'not-submitted';
+        let walletBreakdown = [];
+        let totalPortfolioValueUSD = 0;
+        let kycVerified = false;
+        let hasRecentTransaction = false;
 
-    res.status(200).json(responseData);
+        const token = req.headers.authorization?.split(' ')[1] || req.cookies.jwt;
+        
+        if (token) {
+            try {
+                const decoded = verifyJWT(token);
+                const user = await User.findById(decoded.id)
+                    .select('balances kycStatus firstName lastName email isVerified');
+                
+                if (user) {
+                    isLoggedIn = true;
+                    
+                    // Get KYC status
+                    if (user.kycStatus) {
+                        kycStatus = user.kycStatus.overall || user.kycStatus.identity || 'not-submitted';
+                        kycVerified = user.kycStatus.identity === 'verified' && 
+                                     user.kycStatus.address === 'verified' &&
+                                     user.kycStatus.facial === 'verified';
+                    }
+                    
+                    // Get user's real balances using the same function as WebSocket
+                    const balances = await calculateRealWalletBalances(user);
+                    
+                    mainBalanceUSD = balances.mainUSD || 0;
+                    activeBalanceUSD = balances.activeUSD || 0;
+                    maturedBalanceUSD = balances.maturedUSD || 0;
+                    
+                    // Calculate BTC equivalents using current BTC price
+                    if (btcPrice > 0) {
+                        mainBalanceBTC = mainBalanceUSD / btcPrice;
+                        maturedBalanceBTC = maturedBalanceUSD / btcPrice;
+                        activeBalanceBTC = activeBalanceUSD / btcPrice;
+                    }
+                    
+                    totalPortfolioValueUSD = mainBalanceUSD + activeBalanceUSD + maturedBalanceUSD;
+                    
+                    // Build wallet breakdown with per-asset values
+                    if (balances.mainBreakdown && balances.mainBreakdown.length > 0) {
+                        walletBreakdown = [...balances.mainBreakdown];
+                    }
+                    if (balances.maturedBreakdown && balances.maturedBreakdown.length > 0) {
+                        walletBreakdown = [...walletBreakdown, ...balances.maturedBreakdown];
+                    }
+                    
+                    // Check for recent transaction (within 30 days)
+                    const thirtyDaysAgo = new Date();
+                    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                    const recentTx = await Transaction.findOne({
+                        user: user._id,
+                        type: { $in: ['deposit', 'withdrawal'] },
+                        status: 'completed',
+                        createdAt: { $gte: thirtyDaysAgo }
+                    });
+                    hasRecentTransaction = !!recentTx;
+                    
+                    userContext = {
+                        isLoggedIn: true,
+                        firstName: user.firstName,
+                        lastName: user.lastName,
+                        email: user.email,
+                        isVerified: user.isVerified || false,
+                        kycStatus: kycStatus,
+                        kycVerified: kycVerified,
+                        mainBalance: {
+                            btc: mainBalanceBTC,
+                            usd: mainBalanceUSD
+                        },
+                        activeBalance: {
+                            btc: activeBalanceBTC,
+                            usd: activeBalanceUSD
+                        },
+                        maturedBalance: {
+                            btc: maturedBalanceBTC,
+                            usd: maturedBalanceUSD
+                        },
+                        totalPortfolio: {
+                            btc: (mainBalanceBTC + activeBalanceBTC + maturedBalanceBTC),
+                            usd: totalPortfolioValueUSD
+                        },
+                        walletBreakdown: walletBreakdown.slice(0, 20),
+                        hasRecentTransaction: hasRecentTransaction,
+                        canInvest: true
+                    };
+                }
+            } catch (authErr) {
+                console.warn('Auth token invalid for plans endpoint:', authErr.message);
+                // Continue as guest
+            }
+        }
 
-  } catch (err) {
-    console.error('Error fetching enhanced plans:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to fetch plans'
-    });
-  }
+        // If not logged in, create guest context
+        if (!userContext) {
+            userContext = {
+                isLoggedIn: false,
+                canInvest: false,
+                kycVerified: false,
+                hasRecentTransaction: false,
+                mainBalance: { btc: 0, usd: 0 },
+                activeBalance: { btc: 0, usd: 0 },
+                maturedBalance: { btc: 0, usd: 0 },
+                totalPortfolio: { btc: 0, usd: 0 },
+                walletBreakdown: []
+            };
+        }
+
+        // =============================================
+        // 4. TIER CONFIGURATION
+        // =============================================
+        const tierConfig = {
+            starter: {
+                badge: 'Starter',
+                color: '#4A90D9',
+                lightColor: '#6BA8E8',
+                bgColor: 'rgba(74, 144, 217, 0.12)',
+                borderColor: 'rgba(74, 144, 217, 0.3)',
+                features: [
+                    'SHA-256 ASIC mining',
+                    '24/7 performance monitoring',
+                    'Automated daily payouts',
+                    'Low entry point',
+                    'Email support'
+                ]
+            },
+            standard: {
+                badge: 'Standard',
+                color: '#2ECC71',
+                lightColor: '#58D68D',
+                bgColor: 'rgba(46, 204, 113, 0.12)',
+                borderColor: 'rgba(46, 204, 113, 0.3)',
+                features: [
+                    'SHA-256 ASIC mining',
+                    'Priority mining queue',
+                    '24/7 performance monitoring',
+                    'Automated daily payouts',
+                    'Priority email support'
+                ]
+            },
+            gold: {
+                badge: 'Gold',
+                color: '#F1C40F',
+                lightColor: '#F4D03F',
+                bgColor: 'rgba(241, 196, 15, 0.12)',
+                borderColor: 'rgba(241, 196, 15, 0.3)',
+                features: [
+                    'SHA-256 ASIC mining',
+                    'Premium mining queue',
+                    '24/7 premium monitoring',
+                    'Automated daily payouts',
+                    'Priority 24/7 support',
+                    'Higher hashrate efficiency'
+                ]
+            },
+            enterprise: {
+                badge: 'Enterprise',
+                color: '#9B59B6',
+                lightColor: '#AF7AC5',
+                bgColor: 'rgba(155, 89, 182, 0.12)',
+                borderColor: 'rgba(155, 89, 182, 0.3)',
+                features: [
+                    'SHA-256 ASIC mining',
+                    'VIP mining queue',
+                    '24/7 dedicated monitoring',
+                    'Automated daily payouts',
+                    'VIP 24/7 support',
+                    'Dedicated mining capacity',
+                    'Customizable settings'
+                ]
+            },
+            ultimate: {
+                badge: 'Ultimate',
+                color: '#E74C3C',
+                lightColor: '#EC7063',
+                bgColor: 'rgba(231, 76, 60, 0.12)',
+                borderColor: 'rgba(231, 76, 60, 0.3)',
+                features: [
+                    'SHA-256 ASIC mining',
+                    'Elite mining queue',
+                    '24/7 elite monitoring',
+                    'Automated daily payouts',
+                    'Elite 24/7 support',
+                    'Maximum mining capacity',
+                    'Premium hashrate efficiency',
+                    'Exclusive bonuses'
+                ]
+            }
+        };
+
+        // =============================================
+        // 5. BUILD ENHANCED PLAN DATA
+        // =============================================
+        const enhancedPlans = plans.map((plan, index) => {
+            // Determine tier key
+            let tierKey = 'starter';
+            const planNameLower = (plan.name || '').toLowerCase();
+            if (planNameLower.includes('starter') || planNameLower.includes('basic')) tierKey = 'starter';
+            else if (planNameLower.includes('standard')) tierKey = 'standard';
+            else if (planNameLower.includes('gold')) tierKey = 'gold';
+            else if (planNameLower.includes('enterprise')) tierKey = 'enterprise';
+            else if (planNameLower.includes('ultimate')) tierKey = 'ultimate';
+            else {
+                // Fallback: map by index
+                const tierKeys = ['starter', 'standard', 'gold', 'enterprise', 'ultimate'];
+                tierKey = tierKeys[index % tierKeys.length] || 'starter';
+            }
+            
+            const tier = tierConfig[tierKey] || tierConfig.starter;
+            
+            // Calculate hash rate based on plan
+            let hashrate = 68; // Default for starter
+            if (tierKey === 'starter') hashrate = 68;
+            else if (tierKey === 'standard') hashrate = 110;
+            else if (tierKey === 'gold') hashrate = 150;
+            else if (tierKey === 'enterprise') hashrate = 234;
+            else if (tierKey === 'ultimate') hashrate = 255;
+            
+            // Calculate estimated returns using REAL BTC price
+            const minAmountUSD = plan.minAmount || 0;
+            const maxAmountUSD = plan.maxAmount || 0;
+            const percentage = plan.percentage || 0;
+            
+            // BTC equivalents
+            const minAmountBTC = btcPrice > 0 ? minAmountUSD / btcPrice : 0;
+            const maxAmountBTC = btcPrice > 0 ? maxAmountUSD / btcPrice : 0;
+            
+            // Daily return (percentage / duration_in_days)
+            const durationDays = (plan.duration || 12) / 24;
+            const dailyReturnPercentage = durationDays > 0 ? percentage / durationDays : percentage;
+            
+            // Estimated returns (using min and max amounts)
+            const dailyReturnMin = minAmountUSD * (dailyReturnPercentage / 100);
+            const dailyReturnMax = maxAmountUSD * (dailyReturnPercentage / 100);
+            const monthlyReturnMin = dailyReturnMin * 30;
+            const monthlyReturnMax = dailyReturnMax * 30;
+            const annualReturnMin = dailyReturnMin * 365;
+            const annualReturnMax = dailyReturnMax * 365;
+            
+            // Return in BTC
+            const dailyReturnBTC = btcPrice > 0 ? dailyReturnMin / btcPrice : 0;
+            
+            // Check if user can invest in this plan
+            let canInvest = false;
+            let buttonState = 'login';
+            let buttonText = 'Login to Invest';
+            let buttonTooltip = 'Please login to purchase hashrate';
+            
+            if (isLoggedIn && userContext) {
+                if (!kycVerified) {
+                    buttonState = 'kyc_required';
+                    buttonText = 'Complete KYC';
+                    buttonTooltip = 'KYC verification required to invest';
+                } else if (!hasRecentTransaction) {
+                    buttonState = 'transaction_required';
+                    buttonText = 'Make a Deposit';
+                    buttonTooltip = 'A recent deposit or withdrawal is required';
+                } else {
+                    const totalUserBalance = userContext.mainBalance.usd + userContext.maturedBalance.usd;
+                    if (totalUserBalance >= plan.minAmount) {
+                        canInvest = true;
+                        buttonState = 'invest';
+                        buttonText = 'Buy Hash Power';
+                        buttonTooltip = `Invest in ${plan.name} plan`;
+                    } else {
+                        buttonState = 'insufficient';
+                        buttonText = 'Insufficient Balance';
+                        buttonTooltip = `Minimum $${plan.minAmount.toLocaleString()} required. Your balance: $${totalUserBalance.toLocaleString()}`;
+                    }
+                }
+            }
+            
+            return {
+                id: plan._id,
+                name: plan.name || `${tier.badge} Plan`,
+                tier: tierKey,
+                badge: tier.badge,
+                color: tier.color,
+                lightColor: tier.lightColor,
+                bgColor: tier.bgColor,
+                borderColor: tier.borderColor,
+                description: plan.description || `${tier.badge} cloud mining contract`,
+                minAmount: {
+                    usd: minAmountUSD,
+                    btc: minAmountBTC
+                },
+                maxAmount: {
+                    usd: maxAmountUSD,
+                    btc: maxAmountBTC
+                },
+                percentage: percentage,
+                duration: {
+                    hours: plan.duration || 12,
+                    days: durationDays
+                },
+                hashrate: hashrate,
+                features: tier.features,
+                estimatedReturns: {
+                    daily: {
+                        min: dailyReturnMin,
+                        max: dailyReturnMax,
+                        minBTC: dailyReturnBTC,
+                        display: `$${dailyReturnMin.toFixed(2)} - $${dailyReturnMax.toFixed(2)}`
+                    },
+                    monthly: {
+                        min: monthlyReturnMin,
+                        max: monthlyReturnMax,
+                        display: `$${monthlyReturnMin.toFixed(2)} - $${monthlyReturnMax.toFixed(2)}`
+                    },
+                    annual: {
+                        min: annualReturnMin,
+                        max: annualReturnMax,
+                        display: `$${annualReturnMin.toFixed(2)} - $${annualReturnMax.toFixed(2)}`
+                    }
+                },
+                buttonState: buttonState,
+                buttonText: buttonText,
+                buttonTooltip: buttonTooltip,
+                canInvest: canInvest,
+                isPopular: tierKey === 'gold',
+                isBestValue: tierKey === 'standard'
+            };
+        });
+
+        // =============================================
+        // 6. CALCULATE OVERALL ESTIMATED RETURNS
+        // =============================================
+        let estimatedReturns = null;
+        if (enhancedPlans.length > 0 && btcPrice > 0) {
+            const allMinReturns = enhancedPlans.map(p => p.estimatedReturns.daily.min);
+            const allMaxReturns = enhancedPlans.map(p => p.estimatedReturns.daily.max);
+            
+            estimatedReturns = {
+                daily: {
+                    min: Math.min(...allMinReturns),
+                    max: Math.max(...allMaxReturns),
+                    display: `$${Math.min(...allMinReturns).toFixed(2)} - $${Math.max(...allMaxReturns).toFixed(2)}`
+                },
+                monthly: {
+                    min: Math.min(...allMinReturns) * 30,
+                    max: Math.max(...allMaxReturns) * 30,
+                    display: `$${(Math.min(...allMinReturns) * 30).toFixed(2)} - $${(Math.max(...allMaxReturns) * 30).toFixed(2)}`
+                },
+                annual: {
+                    min: Math.min(...allMinReturns) * 365,
+                    max: Math.max(...allMaxReturns) * 365,
+                    display: `$${(Math.min(...allMinReturns) * 365).toFixed(2)} - $${(Math.max(...allMaxReturns) * 365).toFixed(2)}`
+                }
+            };
+        }
+
+        // =============================================
+        // 7. BUILD RESPONSE
+        // =============================================
+        const response = {
+            status: 'success',
+            data: {
+                plans: enhancedPlans,
+                marketContext: {
+                    btcPrice: btcPrice,
+                    btcPriceChange24h: btcPriceChange24h,
+                    blockReward: blockReward,
+                    timestamp: new Date().toISOString()
+                },
+                userContext: userContext,
+                estimatedReturns: estimatedReturns,
+                totalPlans: enhancedPlans.length
+            }
+        };
+
+        // Cache the response for 60 seconds
+        res.set('Cache-Control', 'public, max-age=60');
+        res.status(200).json(response);
+
+    } catch (err) {
+        console.error('Enhanced plans endpoint error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to load investment plans',
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        });
+    }
 });
-
-
-
-
 
 
 
