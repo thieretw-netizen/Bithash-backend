@@ -43161,7 +43161,6 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 
 
 
-
 // =============================================
 // MINING STATISTICS - SINGLE SOURCE OF TRUTH (REDIS)
 // =============================================
@@ -43169,6 +43168,27 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 // Redis keys for mining stats (single source of truth)
 const REDIS_MINING_KEY = 'mining_stats';
 const REDIS_MINING_LAST_UPDATE_KEY = 'mining_stats_last_update';
+
+// =============================================
+// CLEAR REDIS - FORCE FRESH START
+// =============================================
+const clearRedisMiningStats = async () => {
+    try {
+        await redis.del(REDIS_MINING_KEY);
+        await redis.del(REDIS_MINING_LAST_UPDATE_KEY);
+        console.log('🗑️ Redis mining stats cleared successfully');
+        return true;
+    } catch (err) {
+        console.error('Error clearing Redis mining stats:', err);
+        return false;
+    }
+};
+
+// Execute clear on startup
+setTimeout(async () => {
+    await clearRedisMiningStats();
+    console.log('🔄 Redis mining stats reset complete - starting fresh');
+}, 1000);
 
 // Mining configuration - SINGLE SOURCE OF TRUTH
 const MINING_CONFIG = {
@@ -43541,7 +43561,7 @@ const getCurrentMiningStats = async () => {
 // =============================================
 setTimeout(() => {
     startMiningStatsJob();
-}, 5000);
+}, 3000);
 
 // =============================================
 // ENDPOINT 1: GET /api/mining/stats - Mining Performance Strip
@@ -43593,9 +43613,44 @@ app.get('/api/mining/dashboard', async (req, res) => {
     }
 });
 
+// =============================================
+// ENDPOINT 3: POST /api/mining/reset - Force reset mining stats
+// =============================================
+app.post('/api/mining/reset', async (req, res) => {
+    try {
+        await clearRedisMiningStats();
+        miningStatsCache = null;
+        miningStatsLastCacheTime = 0;
+        
+        // Generate fresh stats
+        const newStats = await generateInitialMiningStats();
+        await saveMiningStatsToRedis(newStats);
+        miningStatsCache = newStats;
+        miningStatsLastCacheTime = Date.now();
+        
+        res.status(200).json({
+            status: 'success',
+            message: 'Mining stats reset successfully',
+            data: {
+                hashrate: newStats.hashrate,
+                capacity: newStats.capacity,
+                rewards: newStats.btcRewards,
+                uptime: newStats.uptime
+            }
+        });
+    } catch (err) {
+        console.error('Error resetting mining stats:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to reset mining statistics'
+        });
+    }
+});
+
 console.log('✅ Mining Statistics endpoints loaded:');
 console.log('   - GET /api/mining/stats');
 console.log('   - GET /api/mining/dashboard');
+console.log('   - POST /api/mining/reset');
 console.log(`   - Active contracts: 5%-30% of investor count (${MINING_CONFIG.contractsPercentage.min*100}%-${MINING_CONFIG.contractsPercentage.max*100}%)`);
 console.log(`   - Update interval: ${MINING_CONFIG.updateInterval/60000} minutes`);
 console.log(`   - Hashrate range: ${MINING_CONFIG.hashrate.min}-${MINING_CONFIG.hashrate.max} PH/s`);
@@ -43603,7 +43658,7 @@ console.log(`   - Capacity range: ${formatNumberWithCommas(MINING_CONFIG.capacit
 console.log(`   - BTC rewards range: ${MINING_CONFIG.btcRewards.min}-${MINING_CONFIG.btcRewards.max} BTC/day`);
 console.log(`   - Uptime range: ${MINING_CONFIG.uptime.min}%-${MINING_CONFIG.uptime.max}%`);
 console.log(`   - Formula: Capacity (TH/s) = Hashrate (PH/s) × 1,000`);
-
+console.log('🗑️ Redis will be cleared on startup');
 
 
 
