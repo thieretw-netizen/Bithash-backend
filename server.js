@@ -28901,8 +28901,6 @@ app.get('/api/admin/kyc/submissions/:id', adminProtect, async (req, res) => {
 
 
 
-
-
 // =============================================
 // APPROVE KYC SUBMISSION - WITH VISUAL EMAIL
 // =============================================
@@ -28966,6 +28964,7 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
       submission.reviewedAt = new Date();
     }
 
+    // Store notes but don't expose admin info in email
     submission.adminNotes = notes || submission.adminNotes;
     submission.updatedAt = new Date();
     
@@ -29021,12 +29020,12 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
     else if (section === 'address') sectionDisplay = 'Address Verification';
     else if (section === 'facial') sectionDisplay = 'Facial Verification';
 
-    // Get status badges
+    // Get status badges (NO admin references)
     const identityStatus = submission.identity.status === 'verified' ? '✅ Verified' : 'Pending';
     const addressStatus = submission.address.status === 'verified' ? '✅ Verified' : 'Pending';
     const facialStatus = submission.facial.status === 'verified' ? '✅ Verified' : 'Pending';
 
-    // Build the visual email HTML matching deposit approved style
+    // Build the visual email HTML - NO admin references
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
         ${brandHeader}
@@ -29199,6 +29198,8 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
 
 
 
+
+
 // =============================================
 // REJECT KYC SUBMISSION - WITH VISUAL EMAIL
 // =============================================
@@ -29336,7 +29337,7 @@ app.post('/api/admin/kyc/submissions/:id/reject', adminProtect, async (req, res)
       rejectionDetails = sectionDisplay;
     }
 
-    // Build the visual email HTML matching deposit rejected style
+    // Build the visual email HTML - NO admin references
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
         ${brandHeader}
