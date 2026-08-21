@@ -28992,7 +28992,6 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
       timeZoneName: 'short'
     });
 
-    // Get user's full name or email
     const userName = user.firstName || 'Valued Customer';
 
     // Branded header
@@ -29049,7 +29048,7 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
           </div>
           
           <p style="color: #333333; line-height: 1.6;">Dear <strong>${userName}</strong>,</p>
-          <p style="color: #333333; line-height: 1.6;">Great news! Your KYC verification has been approved. You now have full access to all platform features.</p>
+          <p style="color: #333333; line-height: 1.6;">Great news! Your KYC verification has been approved by the <strong style="color: #F7A600;">₿itHash Support Team</strong>. You now have full access to all platform features.</p>
           
           <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
             <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
@@ -29086,7 +29085,7 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
               </tr>
               ${notes ? `
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Admin Notes:</strong></td>
+                <td style="padding: 8px 0;"><strong>Notes:</strong></td>
                 <td style="padding: 8px 0; text-align: right; color: #64748B; font-size: 13px;">${notes}</td>
               </tr>
               ` : ''}
@@ -29096,7 +29095,7 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Verified By:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${req.admin.name}</td>
+                <td style="padding: 8px 0; text-align: right;"><span style="color: #F7A600;">₿itHash Support Team</span></td>
               </tr>
             </table>
           </div>
@@ -29132,7 +29131,7 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
     await mailTransporter.sendMail({
       from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
       to: user.email,
-      subject: `🎉 KYC Verification Approved - ₿itHash Capital`,
+      subject: `✅ KYC Verification Approved - ₿itHash Capital`,
       html: emailHtml
     });
 
@@ -29351,9 +29350,9 @@ app.post('/api/admin/kyc/submissions/:id/reject', adminProtect, async (req, res)
             <h2 style="color: #DC2626; font-size: 22px; margin: 0 0 8px 0; font-weight: 700;">KYC VERIFICATION DECLINED</h2>
             <p style="color: #991B1B; font-size: 14px; margin: 0;">${sectionDisplay} could not be verified</p>
           </div>
-          
+  
           <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${userName}</strong>,</p>
-          <p style="color: #333333; line-height: 1.6; margin-bottom: 25px;">We regret to inform you that your KYC verification has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
+          <p style="color: #333333; line-height: 1.6; margin-bottom: 25px;">We regret to inform you that your KYC verification has been reviewed by the <strong style="color: #F7A600;">₿itHash Support Team</strong> and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
           
           <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
             <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON FOR DECLINATION</p>
@@ -29399,7 +29398,7 @@ app.post('/api/admin/kyc/submissions/:id/reject', adminProtect, async (req, res)
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Reviewed By:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${req.admin.name}</td>
+                <td style="padding: 8px 0; text-align: right;"><span style="color: #F7A600;">₿itHash Support Team</span></td>
               </tr>
             </table>
           </div>
@@ -29492,6 +29491,17 @@ app.post('/api/admin/kyc/submissions/:id/reject', adminProtect, async (req, res)
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // GET KYC STATISTICS (For badge counts)
 // =============================================
