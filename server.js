@@ -28900,7 +28900,6 @@ app.get('/api/admin/kyc/submissions/:id', adminProtect, async (req, res) => {
 
 
 
-
 // =============================================
 // APPROVE KYC SUBMISSION - WITH VISUAL EMAIL
 // =============================================
@@ -28964,7 +28963,6 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
       submission.reviewedAt = new Date();
     }
 
-    // Store notes but don't expose admin info in email
     submission.adminNotes = notes || submission.adminNotes;
     submission.updatedAt = new Date();
     
@@ -29020,12 +29018,12 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
     else if (section === 'address') sectionDisplay = 'Address Verification';
     else if (section === 'facial') sectionDisplay = 'Facial Verification';
 
-    // Get status badges (NO admin references)
+    // Get status badges
     const identityStatus = submission.identity.status === 'verified' ? '✅ Verified' : 'Pending';
     const addressStatus = submission.address.status === 'verified' ? '✅ Verified' : 'Pending';
     const facialStatus = submission.facial.status === 'verified' ? '✅ Verified' : 'Pending';
 
-    // Build the visual email HTML - NO admin references
+    // Build the visual email HTML - NO NOTES SECTION
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
         ${brandHeader}
@@ -29082,12 +29080,6 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
                 <td style="padding: 8px 0;"><strong>Overall Status:</strong></td>
                 <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 12px; border-radius: 20px; font-size: 12px;">${submission.overallStatus.toUpperCase()}</span></td>
               </tr>
-              ${notes ? `
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Notes:</strong></td>
-                <td style="padding: 8px 0; text-align: right; color: #64748B; font-size: 13px;">${notes}</td>
-              </tr>
-              ` : ''}
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Verified At:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
@@ -29185,7 +29177,6 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
     });
   }
 });
-
 
 
 
