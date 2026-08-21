@@ -28893,7 +28893,7 @@ app.get('/api/admin/kyc/submissions/:id', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// APPROVE KYC SUBMISSION
+// APPROVE KYC SUBMISSION - WITH DIRECT EMAIL BUILDING
 // =============================================
 app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res) => {
   try {
@@ -28923,6 +28923,22 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
         message: 'User not found'
       });
     }
+
+    // Determine document type from submission
+    let documentType = 'Government ID';
+    if (submission.identity && submission.identity.documentType) {
+      const docTypeMap = {
+        'passport': 'Passport',
+        'drivers_license': "Driver's License",
+        'national_id': 'National ID Card'
+      };
+      documentType = docTypeMap[submission.identity.documentType] || submission.identity.documentType || 'Government ID';
+    }
+
+    // Check verification statuses
+    const identityVerified = submission.identity?.status === 'verified' || section === 'identity' || section === 'all';
+    const addressVerified = submission.address?.status === 'verified' || section === 'address' || section === 'all';
+    const facialVerified = submission.facial?.status === 'verified' || section === 'facial' || section === 'all';
 
     if (section === 'all' || section === 'identity') {
       submission.identity.status = 'verified';
@@ -28968,19 +28984,187 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
       kycUpdatedAt: new Date()
     });
 
-    try {
-      await sendProfessionalEmail({
-        email: user.email,
-        template: 'kyc_approved',
-        data: {
-          name: user.firstName,
-          message: `Your KYC verification has been approved${section !== 'all' ? ` for ${section} section` : ''}. You now have full access to all platform features.`
-        }
-      });
-    } catch (emailError) {
-      console.error('Failed to send KYC approval email:', emailError);
-    }
+    // =============================================
+    // BUILD KYC APPROVED EMAIL DIRECTLY (LIKE DEPOSIT APPROVED)
+    // =============================================
+    const formattedTimestamp = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
 
+    const kycReference = `KYC-${Date.now().toString().slice(-8)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const userName = user.firstName || 'Valued Customer';
+
+    // BRAND HEADER - SAME AS DEPOSIT APPROVED
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+    `;
+
+    // BRAND FOOTER - SAME AS DEPOSIT APPROVED
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+
+    // KYC VERIFICATION LOGO (using shield icon SVG)
+    const kycIconSvg = `
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2L3 7L4 12L12 22L20 12L21 7L12 2Z" stroke="#10B981" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M9 12L11 14L15 10" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    `;
+
+    // BUILD THE COMPLETE HTML EMAIL - SAME STYLE AS DEPOSIT APPROVED
+    const emailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${brandHeader}
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          
+          <!-- SUCCESS BANNER - SAME STYLE AS DEPOSIT APPROVED -->
+          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L3 7L4 12L12 22L20 12L21 7L12 2Z" stroke="#10B981" stroke-width="2" stroke-linejoin="round"/>
+                <path d="M9 12L11 14L15 10" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">KYC VERIFICATION APPROVED!</h2>
+            <p style="color: #065F46; font-size: 13px; margin: 0;">Your identity verification has been successfully completed</p>
+          </div>
+          
+          <!-- GREETING -->
+          <p style="color: #333333; line-height: 1.6;">Dear <strong>${userName}</strong>,</p>
+          <p style="color: #333333; line-height: 1.6;">Great news! Your KYC verification has been <strong style="color: #10B981;">approved</strong>. You now have full access to all features and services on the ₿itHash Capital platform.</p>
+          
+          <!-- VERIFICATION DETAILS CARD - SAME STYLE AS DEPOSIT DETAILS -->
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L3 7L4 12L12 22L20 12L21 7L12 2Z" stroke="#F7A600" stroke-width="2" stroke-linejoin="round"/>
+                <path d="M9 12L11 14L15 10" stroke="#F7A600" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <div>
+                <div style="font-weight: bold; font-size: 16px; color: #0B0E11;">Verification Details</div>
+                <div style="color: #64748B; font-size: 12px;">Your identity has been fully verified</div>
+              </div>
+            </div>
+            
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0;"><strong>Verification Status:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Approved</span></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Verification Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">Full KYC</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Document Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${documentType}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Identity Verification:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="color: #10B981;">✅ Verified</span></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Address Verification:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="color: #10B981;">✅ Verified</span></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Facial Verification:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="color: #10B981;">✅ Verified</span></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Reference ID:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px;">${kycReference}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Approved At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <!-- BENEFITS SECTION - WHAT YOU CAN DO NOW -->
+          <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; margin: 20px 0; border-left: 4px solid #3B82F6;">
+            <p style="color: #1E3A8A; margin: 0 0 8px 0; font-weight: 600;">✨ What You Can Do Now</p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+              <tr>
+                <td style="padding: 4px 0;">•</td>
+                <td style="padding: 4px 0; color: #1E40AF;">Increased withdrawal limits up to <strong>$50,000/day</strong></td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0;">•</td>
+                <td style="padding: 4px 0; color: #1E40AF;">Access to all investment plans</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0;">•</td>
+                <td style="padding: 4px 0; color: #1E40AF;">Priority support and faster processing</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0;">•</td>
+                <td style="padding: 4px 0; color: #1E40AF;">Full access to trading features</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0;">•</td>
+                <td style="padding: 4px 0; color: #1E40AF;">Enhanced security features</td>
+              </tr>
+            </table>
+          </div>
+          
+          <!-- ACTION BUTTONS - SAME AS DEPOSIT APPROVED -->
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-right: 12px;">Go to Dashboard</a>
+            <a href="https://www.bithashcapital.live/invest" style="background-color: #10B981; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Start Investing</a>
+          </div>
+          
+          <!-- SUPPORT CONTACT -->
+          <p style="color: #666666; font-size: 12px; margin-top: 30px; text-align: center; border-top: 1px solid #F3F4F6; padding-top: 20px;">
+            If you have any questions, please contact our support team at 
+            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
+          </p>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 10px;">Email sent: ${formattedTimestamp}</p>
+        </div>
+        
+        ${brandFooter}
+      </div>
+    `;
+
+    // =============================================
+    // SEND THE EMAIL USING THE SAME TRANSPORTER AS DEPOSIT APPROVED
+    // =============================================
+    const mailTransporter = infoTransporter;
+    await mailTransporter.sendMail({
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: user.email,
+      subject: `✅ KYC Verification Approved - ₿itHash Capital`,
+      html: emailHtml
+    });
+    
+    console.log(`📧 KYC approval email sent to ${user.email}`);
+
+    // Create notification for user
     await Notification.create({
       title: 'KYC Approved',
       message: `Your KYC verification has been approved. You now have full access to all platform features.`,
@@ -28991,6 +29175,7 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
       isImportant: true
     });
 
+    // Log the activity
     await logActivity(
       'kyc_approved',
       'KYC',
