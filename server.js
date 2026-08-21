@@ -8295,6 +8295,18 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // ENHANCED DEVICE DETECTION WITH ACCURATE BROWSER/OS DETECTION
 // =============================================
@@ -8412,6 +8424,40 @@ function getGreetingByTimezone(offsetMinutes = 0) {
     if (hour >= 17 && hour < 22) return 'Good evening';
     return 'Hello';
 }
+
+// =============================================
+// HELPER: Update pending auth logs in SystemLog
+// =============================================
+const updatePendingAuthLogs = async (email, status, metadata = {}) => {
+    try {
+        const result = await SystemLog.updateMany(
+            {
+                'metadata.email': email,
+                action: { 
+                    $in: [
+                        'google_login_otp_sent', 
+                        'google_signup_otp_sent', 
+                        'login_initiated',
+                        'signup_initiated'
+                    ] 
+                },
+                status: 'pending'
+            },
+            {
+                $set: {
+                    status: status,
+                    'metadata.resolvedAt': new Date().toISOString(),
+                    'metadata.resolvedStatus': status,
+                    ...metadata
+                }
+            }
+        );
+        return result;
+    } catch (err) {
+        console.error('Error updating pending auth logs:', err);
+        return null;
+    }
+};
 
 // =============================================
 // SIGNUP ENDPOINT - authProvider is set ONLY during signup
@@ -8619,7 +8665,7 @@ app.post('/api/auth/signup', [
         const newUser = await User.create(userData);
         console.log(`✅ New user created: ${newUser.email} (Account Type: ${newUser.accountType}, Auth Provider: email)`);
 
-        // LOG ONLY TO SYSTEMLOG
+        // LOG ONLY TO SYSTEMLOG - SUCCESSFUL SIGNUP
         await SystemLog.create({
             action: 'user_signup_success',
             entity: 'User',
@@ -8704,16 +8750,16 @@ app.post('/api/auth/signup', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || userCity}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        // LOG ONLY TO SYSTEMLOG (no UserLog)
+        // LOG ONLY TO SYSTEMLOG - OTP SENT (PENDING)
         await SystemLog.create({
-            action: 'user_registered',
+            action: 'signup_initiated',
             entity: 'User',
             entityId: newUser._id,
             performedBy: newUser._id,
             performedByModel: 'User',
             performedByEmail: newUser.email,
             performedByName: `${newUser.firstName} ${newUser.lastName}`,
-            status: 'success',
+            status: 'pending',
             requestMethod: req.method,
             requestPath: req.path,
             ip: rawDeviceInfo.ip,
@@ -8735,11 +8781,13 @@ app.post('/api/auth/signup', [
                 organizationName: organizationName || null,
                 city: userCity,
                 timezoneOffset: timezoneOffset,
-                authProvider: 'email'
+                authProvider: 'email',
+                otpSent: true,
+                otpExpiresAt: expiresAt
             }
         });
 
-        // Admin notification
+        // Admin notification (keep existing code)
         const formattedTimestamp = new Date().toLocaleString('en-US', {
             year: 'numeric',
             month: 'long',
@@ -9161,7 +9209,7 @@ app.post('/api/auth/login', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || user.city}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        // LOG ONLY TO SYSTEMLOG (no UserLog)
+        // LOG ONLY TO SYSTEMLOG - OTP SENT (PENDING)
         await SystemLog.create({
             action: 'login_initiated',
             entity: 'User',
@@ -9190,11 +9238,13 @@ app.post('/api/auth/login', [
                 rememberMe: rememberMe || false,
                 accountType: accountType || user.accountType,
                 authProvider: user.authProvider || 'email',
-                timezoneOffset: timezoneOffset
+                timezoneOffset: timezoneOffset,
+                otpSent: true,
+                otpExpiresAt: expiresAt
             }
         });
 
-        // Admin notification
+        // Admin notification (keep existing code)
         const formattedTimestamp = new Date().toLocaleString('en-US', {
             year: 'numeric',
             month: 'long',
@@ -9385,6 +9435,25 @@ app.post('/api/auth/google', async (req, res) => {
             console.log('Google token verified successfully');
         } catch (verifyError) {
             console.error('Google token verification failed:', verifyError);
+
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'google_auth_verification_failed',
+                entity: 'User',
+                performedBy: null,
+                performedByModel: 'System',
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    error: verifyError.message,
+                    isSignup: isSignup,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
             return res.status(400).json({
                 status: 'fail',
                 message: 'Invalid Google token. Please try again.'
@@ -9393,6 +9462,23 @@ app.post('/api/auth/google', async (req, res) => {
 
         if (!payload) {
             console.error('No payload from Google token');
+
+            await SystemLog.create({
+                action: 'google_auth_no_payload',
+                entity: 'User',
+                performedBy: null,
+                performedByModel: 'System',
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    isSignup: isSignup,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
             return res.status(400).json({
                 status: 'fail',
                 message: 'Invalid token payload'
@@ -9403,6 +9489,23 @@ app.post('/api/auth/google', async (req, res) => {
 
         if (!email) {
             console.error('No email in Google payload');
+
+            await SystemLog.create({
+                action: 'google_auth_no_email',
+                entity: 'User',
+                performedBy: null,
+                performedByModel: 'System',
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    isSignup: isSignup,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
             return res.status(400).json({
                 status: 'fail',
                 message: 'No email found in Google account'
@@ -9422,6 +9525,25 @@ app.post('/api/auth/google', async (req, res) => {
             console.log('User lookup result:', user ? 'Found' : 'Not found');
         } catch (dbError) {
             console.error('Database lookup error:', dbError);
+
+            await SystemLog.create({
+                action: 'google_auth_db_lookup_error',
+                entity: 'User',
+                performedBy: null,
+                performedByModel: 'System',
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                errorMessage: dbError.message,
+                metadata: {
+                    email: originalEmail,
+                    isSignup: isSignup,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
             return res.status(500).json({
                 status: 'error',
                 message: 'Database error during user lookup'
@@ -9632,7 +9754,7 @@ app.post('/api/auth/google', async (req, res) => {
                 isNewUser = true;
                 console.log('New user created via Google SIGNUP:', originalEmail);
 
-                // LOG ONLY TO SYSTEMLOG
+                // LOG ONLY TO SYSTEMLOG - SUCCESSFUL SIGNUP
                 await SystemLog.create({
                     action: 'google_signup_success',
                     entity: 'User',
@@ -9663,7 +9785,7 @@ app.post('/api/auth/google', async (req, res) => {
                     }
                 });
 
-                // Admin notification for Google signup
+                // Admin notification for Google signup (keep existing code)
                 const brandHeader = `
                     <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
                         <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
@@ -9774,6 +9896,25 @@ app.post('/api/auth/google', async (req, res) => {
 
             } catch (createError) {
                 console.error('User creation error:', createError);
+
+                await SystemLog.create({
+                    action: 'google_signup_creation_error',
+                    entity: 'User',
+                    performedBy: null,
+                    performedByModel: 'System',
+                    status: 'failed',
+                    requestMethod: req.method,
+                    requestPath: req.path,
+                    ip: rawDeviceInfo.ip,
+                    userAgent: req.headers['user-agent'] || 'Unknown',
+                    errorMessage: createError.message,
+                    metadata: {
+                        email: originalEmail,
+                        isSignup: isSignup,
+                        timezoneOffset: timezoneOffset
+                    }
+                });
+
                 return res.status(500).json({
                     status: 'error',
                     message: 'Failed to create user account'
@@ -9811,6 +9952,28 @@ app.post('/api/auth/google', async (req, res) => {
 
             } catch (updateError) {
                 console.error('User update error:', updateError);
+
+                await SystemLog.create({
+                    action: 'google_link_account_error',
+                    entity: 'User',
+                    entityId: user._id,
+                    performedBy: user._id,
+                    performedByModel: 'User',
+                    performedByEmail: user.email,
+                    performedByName: `${user.firstName} ${user.lastName}`,
+                    status: 'failed',
+                    requestMethod: req.method,
+                    requestPath: req.path,
+                    ip: rawDeviceInfo.ip,
+                    userAgent: req.headers['user-agent'] || 'Unknown',
+                    errorMessage: updateError.message,
+                    metadata: {
+                        email: originalEmail,
+                        googleId: sub,
+                        timezoneOffset: timezoneOffset
+                    }
+                });
+
                 return res.status(500).json({
                     status: 'error',
                     message: 'Failed to link Google account'
@@ -9851,6 +10014,27 @@ app.post('/api/auth/google', async (req, res) => {
         }
 
         if (user.status !== 'active') {
+            // LOG ONLY TO SYSTEMLOG
+            await SystemLog.create({
+                action: 'google_login_inactive_account',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: rawDeviceInfo.ip,
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    email: originalEmail,
+                    status: user.status,
+                    timezoneOffset: timezoneOffset
+                }
+            });
+
             return res.status(401).json({
                 status: 'fail',
                 message: 'Your account has been suspended. Please contact support.'
@@ -9881,7 +10065,7 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            // LOG ONLY TO SYSTEMLOG (no UserLog)
+            // LOG ONLY TO SYSTEMLOG - OTP SENT (PENDING)
             await SystemLog.create({
                 action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
                 entity: 'User',
@@ -9895,16 +10079,28 @@ app.post('/api/auth/google', async (req, res) => {
                 requestPath: req.path,
                 ip: rawDeviceInfo.ip,
                 userAgent: req.headers['user-agent'] || 'Unknown',
+                location: formattedLocation.formatted,
+                deviceType: formattedDeviceInfo.type,
+                os: formattedDeviceInfo.os.name,
+                browser: formattedDeviceInfo.browser.name,
+                countryCode: formattedLocation.country.code,
+                city: formattedLocation.city,
+                region: formattedLocation.region.name,
+                latitude: formattedLocation.latitude,
+                longitude: formattedLocation.longitude,
                 metadata: {
                     email: originalEmail,
                     isNewUser: isNewUser,
                     timezoneOffset: timezoneOffset,
                     otpType: isNewUser ? 'signup' : 'login',
-                    authProvider: user.authProvider
+                    authProvider: user.authProvider,
+                    googleId: sub,
+                    otpSent: true,
+                    otpExpiresAt: expiresAt
                 }
             });
 
-            // Admin notification for Google login (existing user)
+            // Admin notification for Google login (existing user) - keep existing code
             if (!isNewUser) {
                 const brandHeader = `
                     <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
@@ -10018,6 +10214,27 @@ app.post('/api/auth/google', async (req, res) => {
 
         } catch (otpError) {
             console.error('OTP creation error:', otpError);
+
+            await SystemLog.create({
+                action: 'google_otp_creation_error',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: rawDeviceInfo.ip,
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                errorMessage: otpError.message,
+                metadata: {
+                    email: originalEmail,
+                    isNewUser: isNewUser,
+                    timezoneOffset: timezoneOffset
+                }
+            });
         }
 
         const tempToken = generateJWT(user._id);
@@ -10047,34 +10264,6 @@ app.post('/api/auth/google', async (req, res) => {
                     accountType: user.accountType,
                     authProvider: user.authProvider  // ✅ Return authProvider as set during signup
                 }
-            }
-        });
-
-        // LOG ONLY TO SYSTEMLOG
-        await SystemLog.create({
-            action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
-            entity: 'User',
-            entityId: user._id,
-            performedBy: user._id,
-            performedByModel: 'User',
-            performedByEmail: user.email,
-            performedByName: `${user.firstName} ${user.lastName}`,
-            status: 'pending',
-            requestMethod: req.method,
-            requestPath: req.path,
-            ip: rawDeviceInfo.ip,
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            location: formattedLocation.formatted,
-            deviceType: formattedDeviceInfo.type,
-            os: formattedDeviceInfo.os.name,
-            browser: formattedDeviceInfo.browser.name,
-            metadata: {
-                isNewUser,
-                provider: 'google',
-                email: originalEmail,
-                operation: isNewUser ? 'signup' : 'login',
-                timezoneOffset: timezoneOffset,
-                authProvider: user.authProvider
             }
         });
 
@@ -10108,17 +10297,225 @@ app.post('/api/auth/google', async (req, res) => {
     }
 });
 
+// =============================================
+// OTP VERIFICATION ENDPOINT - UPDATES SYSTEMLOG FROM PENDING TO SUCCESS/FAILED
+// =============================================
+app.post('/api/auth/verify-otp', [
+    body('email').isEmail().withMessage('Please provide a valid email'),
+    body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            status: 'fail',
+            message: 'Please enter a valid 6-digit OTP code'
+        });
+    }
 
+    try {
+        const { email, otp } = req.body;
+        const token = req.headers.authorization?.replace('Bearer ', '');
 
+        if (!token) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Authentication required. Please try logging in again.'
+            });
+        }
 
+        let decoded;
+        try {
+            decoded = verifyJWT(token);
+        } catch (err) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Session expired. Please try logging in again.'
+            });
+        }
 
+        const user = await User.findById(decoded.id).select('-password');
 
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
 
+        if (user.email !== email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email does not match user account'
+            });
+        }
 
+        const otpRecord = await OTP.findOne({
+            email: email,
+            otp,
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
 
+        if (!otpRecord) {
+            await OTP.updateMany(
+                { email: email, otp, used: false },
+                { $inc: { attempts: 1 } }
+            );
 
+            const failedAttempts = await OTP.countDocuments({
+                email: email,
+                used: false,
+                createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+                attempts: { $gte: 5 }
+            });
 
+            if (failedAttempts >= 5) {
+                await User.findByIdAndUpdate(user._id, {
+                    status: 'suspended',
+                    suspensionLiftAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+                });
 
+                // UPDATE SYSTEMLOG FROM PENDING TO FAILED
+                await updatePendingAuthLogs(email, 'failed', {
+                    'metadata.failureReason': 'Too many failed OTP attempts',
+                    'metadata.failedAt': new Date().toISOString()
+                });
+
+                return res.status(429).json({
+                    status: 'fail',
+                    message: 'Too many failed attempts. Account suspended for 24 hours.'
+                });
+            }
+
+            const expiredOtp = await OTP.findOne({
+                email: email,
+                otp,
+                used: false,
+                expiresAt: { $lte: new Date() }
+            });
+
+            if (expiredOtp) {
+                // UPDATE SYSTEMLOG FROM PENDING TO FAILED
+                await updatePendingAuthLogs(email, 'failed', {
+                    'metadata.failureReason': 'OTP expired',
+                    'metadata.failedAt': new Date().toISOString()
+                });
+
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'Verification code has expired. Please request a new one.'
+                });
+            }
+
+            // UPDATE SYSTEMLOG FROM PENDING TO FAILED
+            await updatePendingAuthLogs(email, 'failed', {
+                'metadata.failureReason': 'Invalid OTP',
+                'metadata.failedAt': new Date().toISOString()
+            });
+
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid verification code. Please try again.'
+            });
+        }
+
+        otpRecord.used = true;
+        await otpRecord.save();
+
+        const isSignupOtp = otpRecord.type === 'signup';
+        const isLoginOtp = otpRecord.type === 'login';
+
+        let wasJustVerified = false;
+        if (isSignupOtp && !user.isVerified) {
+            user.isVerified = true;
+            wasJustVerified = true;
+            await user.save();
+        }
+
+        const finalToken = generateJWT(user._id);
+
+        if (isLoginOtp) {
+            user.lastLogin = new Date();
+            const deviceInfo = await getUserDeviceInfo(req);
+            user.loginHistory.push(deviceInfo);
+            await user.save();
+        } else if (wasJustVerified) {
+            await user.save();
+        }
+
+        res.cookie('jwt', finalToken, {
+            expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict'
+        });
+
+        const deviceInfoForEmail = await getUserDeviceInfo(req);
+
+        // =============================================
+        // UPDATE SYSTEMLOG FROM PENDING TO SUCCESS
+        // =============================================
+        await updatePendingAuthLogs(email, 'success', {
+            'metadata.verifiedAt': new Date().toISOString(),
+            'metadata.verificationMethod': 'otp',
+            'metadata.otpVerified': true,
+            'metadata.otpType': otpRecord.type
+        });
+
+        if (isSignupOtp && wasJustVerified) {
+            try {
+                await sendAutomatedEmail(user, 'welcome', {
+                    name: user.firstName,
+                    email: user.email
+                });
+                console.log(`📧 Welcome email sent to ${user.email} (after OTP verification)`);
+            } catch (emailError) {
+                console.error('Failed to send welcome email:', emailError);
+            }
+        }
+
+        if (isLoginOtp) {
+            try {
+                await sendAutomatedEmail(user, 'login_success', {
+                    name: user.firstName,
+                    device: deviceInfoForEmail.device || 'Unknown device',
+                    location: deviceInfoForEmail.location || 'Unknown location',
+                    ip: deviceInfoForEmail.ip || 'Unknown IP',
+                    timestamp: new Date().toISOString()
+                });
+                console.log(`📧 Login success email sent to ${user.email} (after OTP verification)`);
+            } catch (emailError) {
+                console.error('Failed to send login success email:', emailError);
+            }
+        }
+
+        res.status(200).json({
+            status: 'success',
+            message: isSignupOtp
+                ? 'Email verified successfully! Welcome to ₿itHash Capital!'
+                : 'Login successful! Redirecting to dashboard...',
+            token: finalToken,
+            data: {
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    isVerified: user.isVerified,
+                    hasGoogleAuth: !!user.googleId,
+                    accountType: user.accountType
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Verify OTP error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'An error occurred during verification. Please try again.'
+        });
+    }
+});
 
 // =============================================
 // WEB3 AUTHENTICATION SYSTEM - MULTICHAIN SUPPORT
@@ -11433,13 +11830,29 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
     } catch (err) {
         console.error('Failed to send admin Web3 signup notification:', err);
     }
-}
+});
 
-// =============================================
-// All other endpoints remain unchanged
-// =============================================
-// The rest of the file continues with all other routes and functionality
-// (withdrawals, deposits, investments, etc.) - they remain exactly as they were
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
