@@ -28892,8 +28892,19 @@ app.get('/api/admin/kyc/submissions/:id', adminProtect, async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// APPROVE KYC SUBMISSION - WITH DIRECT EMAIL BUILDING
+// APPROVE KYC SUBMISSION - CLEAN PROFESSIONAL EMAIL
 // =============================================
 app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res) => {
   try {
@@ -28925,14 +28936,14 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
     }
 
     // Determine document type from submission
-    let documentType = 'Government ID';
+    let documentType = 'Government Issued ID';
     if (submission.identity && submission.identity.documentType) {
       const docTypeMap = {
-        'passport': 'Passport',
+        'passport': 'International Passport',
         'drivers_license': "Driver's License",
-        'national_id': 'National ID Card'
+        'national_id': 'National Identity Card'
       };
-      documentType = docTypeMap[submission.identity.documentType] || submission.identity.documentType || 'Government ID';
+      documentType = docTypeMap[submission.identity.documentType] || submission.identity.documentType || 'Government Issued ID';
     }
 
     // Check verification statuses
@@ -28985,7 +28996,7 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
     });
 
     // =============================================
-    // BUILD KYC APPROVED EMAIL DIRECTLY (LIKE DEPOSIT APPROVED)
+    // BUILD CLEAN PROFESSIONAL KYC APPROVED EMAIL
     // =============================================
     const formattedTimestamp = new Date().toLocaleString('en-US', {
       year: 'numeric',
@@ -29000,151 +29011,144 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
     const kycReference = `KYC-${Date.now().toString().slice(-8)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
     const userName = user.firstName || 'Valued Customer';
 
-    // BRAND HEADER - SAME AS DEPOSIT APPROVED
+    // BRAND HEADER - CLEAN VERSION
     const brandHeader = `
-      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      <div style="text-align: center; padding: 30px 20px 25px 20px; background: #0B0E11;">
+        <div style="width: 70px; height: 70px; margin: 0 auto 15px auto; background: #F7A600; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+          <span style="color: #0B0E11; font-size: 32px; font-weight: 700; font-family: 'Georgia', serif;">₿</span>
+        </div>
+        <h1 style="color: #FFFFFF; font-size: 26px; margin: 0; font-weight: 600; letter-spacing: 1px; font-family: 'Georgia', serif;">BitHash Capital</h1>
+        <p style="color: #B7BDC6; font-size: 13px; margin: 8px 0 0 0; font-weight: 300; letter-spacing: 0.5px;">Where Your Financial Goals Become Reality</p>
+        <div style="width: 80px; height: 2px; background: #F7A600; margin: 12px auto 0 auto;"></div>
       </div>
     `;
 
-    // BRAND FOOTER - SAME AS DEPOSIT APPROVED
+    // BRAND FOOTER - CLEAN VERSION
     const brandFooter = `
       <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-        </p>
+        <p style="color: #6C7480; font-size: 11px; margin: 3px 0;">&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 11px; margin: 3px 0;">800 Plant Street, Wilmington, DE 19801, United States</p>
+        <div style="margin: 8px 0 3px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none; font-size: 11px; margin: 0 8px;">support@bithashcapital.live</a>
+          <span style="color: #6C7480; font-size: 11px;">|</span>
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none; font-size: 11px; margin: 0 8px;">www.bithashcapital.live</a>
+        </div>
       </div>
     `;
 
-    // KYC VERIFICATION LOGO (using shield icon SVG)
-    const kycIconSvg = `
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 2L3 7L4 12L12 22L20 12L21 7L12 2Z" stroke="#10B981" stroke-width="2" stroke-linejoin="round"/>
-        <path d="M9 12L11 14L15 10" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    `;
-
-    // BUILD THE COMPLETE HTML EMAIL - SAME STYLE AS DEPOSIT APPROVED
+    // BUILD THE COMPLETE HTML EMAIL - CLEAN PROFESSIONAL VERSION
     const emailHtml = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
         ${brandHeader}
         
-        <div style="padding: 30px; background: #FFFFFF;">
+        <div style="padding: 35px 35px 25px 35px; background: #FFFFFF;">
           
-          <!-- SUCCESS BANNER - SAME STYLE AS DEPOSIT APPROVED -->
-          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2L3 7L4 12L12 22L20 12L21 7L12 2Z" stroke="#10B981" stroke-width="2" stroke-linejoin="round"/>
-                <path d="M9 12L11 14L15 10" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
+          <!-- SUCCESS BANNER -->
+          <div style="background: #F0FDF4; border-radius: 8px; padding: 20px 24px; text-align: center; margin-bottom: 28px; border: 1px solid #BBF7D0;">
+            <div style="width: 48px; height: 48px; margin: 0 auto 12px auto; background: #10B981; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+              <span style="color: #FFFFFF; font-size: 22px; font-weight: 300;">✓</span>
             </div>
-            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">KYC VERIFICATION APPROVED!</h2>
-            <p style="color: #065F46; font-size: 13px; margin: 0;">Your identity verification has been successfully completed</p>
+            <h2 style="color: #065F46; font-size: 20px; margin: 0 0 6px 0; font-weight: 600;">KYC Verification Approved</h2>
+            <p style="color: #047857; font-size: 14px; margin: 0; font-weight: 400;">Your identity has been successfully verified</p>
           </div>
           
           <!-- GREETING -->
-          <p style="color: #333333; line-height: 1.6;">Dear <strong>${userName}</strong>,</p>
-          <p style="color: #333333; line-height: 1.6;">Great news! Your KYC verification has been <strong style="color: #10B981;">approved</strong>. You now have full access to all features and services on the ₿itHash Capital platform.</p>
+          <p style="color: #1F2937; line-height: 1.7; font-size: 15px; margin: 0 0 6px 0;">Dear <strong style="color: #0B0E11;">${userName}</strong>,</p>
+          <p style="color: #4B5563; line-height: 1.7; font-size: 14px; margin: 0 0 24px 0;">We are pleased to confirm that your KYC verification has been <strong style="color: #10B981;">approved</strong>. You now have full access to all features and services on the BitHash Capital platform.</p>
           
-          <!-- VERIFICATION DETAILS CARD - SAME STYLE AS DEPOSIT DETAILS -->
-          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2L3 7L4 12L12 22L20 12L21 7L12 2Z" stroke="#F7A600" stroke-width="2" stroke-linejoin="round"/>
-                <path d="M9 12L11 14L15 10" stroke="#F7A600" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <div>
-                <div style="font-weight: bold; font-size: 16px; color: #0B0E11;">Verification Details</div>
-                <div style="color: #64748B; font-size: 12px;">Your identity has been fully verified</div>
-              </div>
+          <!-- VERIFICATION DETAILS CARD -->
+          <div style="background: #F8FAFC; border-radius: 8px; padding: 20px 24px; margin-bottom: 24px; border: 1px solid #E5E7EB;">
+            <div style="padding-bottom: 14px; border-bottom: 1px solid #E5E7EB; margin-bottom: 14px;">
+              <h3 style="color: #0B0E11; font-size: 15px; margin: 0; font-weight: 600;">Verification Details</h3>
             </div>
             
-            <table style="width: 100%; border-collapse: collapse;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
               <tr>
-                <td style="padding: 8px 0;"><strong>Verification Status:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Approved</span></td>
+                <td style="padding: 6px 0; color: #6B7280; width: 45%;">Verification Status</td>
+                <td style="padding: 6px 0; text-align: right; font-weight: 500; color: #10B981;">Approved</td>
               </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Verification Type:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">Full KYC</td>
+              <tr style="border-top: 1px solid #F3F4F6;">
+                <td style="padding: 6px 0; color: #6B7280;">Verification Type</td>
+                <td style="padding: 6px 0; text-align: right; font-weight: 500; color: #0B0E11;">Full KYC</td>
               </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Document Type:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${documentType}</td>
+              <tr style="border-top: 1px solid #F3F4F6;">
+                <td style="padding: 6px 0; color: #6B7280;">Document Type</td>
+                <td style="padding: 6px 0; text-align: right; font-weight: 500; color: #0B0E11;">${documentType}</td>
               </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Identity Verification:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><span style="color: #10B981;">✅ Verified</span></td>
+              <tr style="border-top: 1px solid #F3F4F6;">
+                <td style="padding: 6px 0; color: #6B7280;">Identity Verification</td>
+                <td style="padding: 6px 0; text-align: right; font-weight: 500; color: #10B981;">Verified</td>
               </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Address Verification:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><span style="color: #10B981;">✅ Verified</span></td>
+              <tr style="border-top: 1px solid #F3F4F6;">
+                <td style="padding: 6px 0; color: #6B7280;">Address Verification</td>
+                <td style="padding: 6px 0; text-align: right; font-weight: 500; color: #10B981;">Verified</td>
               </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Facial Verification:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><span style="color: #10B981;">✅ Verified</span></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Reference ID:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px;">${kycReference}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Approved At:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
+              <tr style="border-top: 1px solid #F3F4F6;">
+                <td style="padding: 6px 0; color: #6B7280;">Facial Verification</td>
+                <td style="padding: 6px 0; text-align: right; font-weight: 500; color: #10B981;">Verified</td>
               </tr>
             </table>
           </div>
           
-          <!-- BENEFITS SECTION - WHAT YOU CAN DO NOW -->
-          <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; margin: 20px 0; border-left: 4px solid #3B82F6;">
-            <p style="color: #1E3A8A; margin: 0 0 8px 0; font-weight: 600;">✨ What You Can Do Now</p>
+          <!-- WHAT YOU CAN DO NOW -->
+          <div style="background: #EFF6FF; border-radius: 8px; padding: 18px 24px; margin-bottom: 24px; border-left: 4px solid #3B82F6;">
+            <h4 style="color: #1E3A8A; margin: 0 0 10px 0; font-size: 14px; font-weight: 600;">Account Benefits</h4>
             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
               <tr>
-                <td style="padding: 4px 0;">•</td>
-                <td style="padding: 4px 0; color: #1E40AF;">Increased withdrawal limits up to <strong>$50,000/day</strong></td>
+                <td style="padding: 3px 0; color: #1E40AF; width: 20px;">•</td>
+                <td style="padding: 3px 0; color: #1E40AF;">Increased withdrawal limits up to <strong>$50,000 USD</strong> per day</td>
               </tr>
               <tr>
-                <td style="padding: 4px 0;">•</td>
-                <td style="padding: 4px 0; color: #1E40AF;">Access to all investment plans</td>
+                <td style="padding: 3px 0; color: #1E40AF;">•</td>
+                <td style="padding: 3px 0; color: #1E40AF;">Access to all investment plans and products</td>
               </tr>
               <tr>
-                <td style="padding: 4px 0;">•</td>
-                <td style="padding: 4px 0; color: #1E40AF;">Priority support and faster processing</td>
+                <td style="padding: 3px 0; color: #1E40AF;">•</td>
+                <td style="padding: 3px 0; color: #1E40AF;">Priority support with faster processing times</td>
               </tr>
               <tr>
-                <td style="padding: 4px 0;">•</td>
-                <td style="padding: 4px 0; color: #1E40AF;">Full access to trading features</td>
+                <td style="padding: 3px 0; color: #1E40AF;">•</td>
+                <td style="padding: 3px 0; color: #1E40AF;">Full access to trading and investment features</td>
               </tr>
               <tr>
-                <td style="padding: 4px 0;">•</td>
-                <td style="padding: 4px 0; color: #1E40AF;">Enhanced security features</td>
+                <td style="padding: 3px 0; color: #1E40AF;">•</td>
+                <td style="padding: 3px 0; color: #1E40AF;">Enhanced security and account protection</td>
               </tr>
             </table>
           </div>
           
-          <!-- ACTION BUTTONS - SAME AS DEPOSIT APPROVED -->
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-right: 12px;">Go to Dashboard</a>
-            <a href="https://www.bithashcapital.live/invest" style="background-color: #10B981; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Start Investing</a>
+          <!-- REFERENCE SECTION -->
+          <div style="background: #F9FAFB; border-radius: 8px; padding: 14px 20px; margin-bottom: 28px; text-align: center; border: 1px solid #E5E7EB;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+              <tr>
+                <td style="padding: 2px 0; color: #6B7280;">Reference ID</td>
+                <td style="padding: 2px 0; color: #0B0E11; font-family: monospace; font-weight: 500;">${kycReference}</td>
+              </tr>
+              <tr>
+                <td style="padding: 2px 0; color: #6B7280;">Approved On</td>
+                <td style="padding: 2px 0; color: #0B0E11;">${formattedTimestamp}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <!-- ACTION BUTTONS -->
+          <div style="text-align: center; margin: 24px 0 8px 0;">
+            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #0B0E11; padding: 14px 36px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block; letter-spacing: 0.3px;">Access Dashboard</a>
+          </div>
+          <div style="text-align: center; margin: 12px 0 8px 0;">
+            <a href="https://www.bithashcapital.live/invest" style="background-color: #10B981; color: #FFFFFF; padding: 12px 32px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 13px; display: inline-block;">Explore Investment Plans</a>
           </div>
           
           <!-- SUPPORT CONTACT -->
-          <p style="color: #666666; font-size: 12px; margin-top: 30px; text-align: center; border-top: 1px solid #F3F4F6; padding-top: 20px;">
-            If you have any questions, please contact our support team at 
-            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
-          </p>
-          
-          <p style="color: #666666; font-size: 12px; margin-top: 10px;">Email sent: ${formattedTimestamp}</p>
+          <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
+            <p style="color: #6B7280; font-size: 12px; text-align: center; margin: 0; line-height: 1.6;">
+              For any questions, please contact our support team at 
+              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
+            </p>
+            <p style="color: #9CA3AF; font-size: 11px; text-align: center; margin: 12px 0 0 0;">
+              This is an automated notification. Please do not reply to this email.
+            </p>
+          </div>
         </div>
         
         ${brandFooter}
@@ -29152,13 +29156,13 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
     `;
 
     // =============================================
-    // SEND THE EMAIL USING THE SAME TRANSPORTER AS DEPOSIT APPROVED
+    // SEND THE EMAIL
     // =============================================
     const mailTransporter = infoTransporter;
     await mailTransporter.sendMail({
-      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      from: `BitHash Capital <${process.env.EMAIL_INFO_USER}>`,
       to: user.email,
-      subject: `✅ KYC Verification Approved - ₿itHash Capital`,
+      subject: `KYC Verification Approved - BitHash Capital`,
       html: emailHtml
     });
     
@@ -29213,6 +29217,18 @@ app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // REJECT KYC SUBMISSION
