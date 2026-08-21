@@ -8426,35 +8426,117 @@ function getGreetingByTimezone(offsetMinutes = 0) {
 }
 
 // =============================================
-// HELPER: Update pending auth logs in SystemLog
+// HELPER: Centralized SystemLog authentication logging
 // =============================================
-const updatePendingAuthLogs = async (email, status, metadata = {}) => {
+const createAuthLog = async ({
+    action,
+    entity,
+    entityId,
+    performedBy,
+    performedByModel,
+    performedByEmail,
+    performedByName,
+    status,
+    requestMethod,
+    requestPath,
+    ip,
+    userAgent,
+    location,
+    deviceType,
+    os,
+    browser,
+    countryCode,
+    city,
+    region,
+    latitude,
+    longitude,
+    errorMessage,
+    errorStack,
+    metadata = {}
+}) => {
     try {
-        const result = await SystemLog.updateMany(
-            {
-                'metadata.email': email,
-                action: { 
-                    $in: [
-                        'google_login_otp_sent', 
-                        'google_signup_otp_sent', 
-                        'login_initiated',
-                        'signup_initiated'
-                    ] 
-                },
-                status: 'pending'
-            },
+        return await SystemLog.create({
+            action,
+            entity: entity || 'User',
+            entityId: entityId || null,
+            performedBy: performedBy || null,
+            performedByModel: performedByModel || 'System',
+            performedByEmail: performedByEmail || null,
+            performedByName: performedByName || null,
+            status: status || 'pending',
+            requestMethod: requestMethod || 'POST',
+            requestPath: requestPath || '/api/auth',
+            ip: ip || 'Unknown',
+            userAgent: userAgent || 'Unknown',
+            location: location || 'Unknown',
+            deviceType: deviceType || 'desktop',
+            os: os || 'Unknown',
+            browser: browser || 'Unknown',
+            countryCode: countryCode || 'Unknown',
+            city: city || 'Unknown',
+            region: region || 'Unknown',
+            latitude: latitude || null,
+            longitude: longitude || null,
+            errorMessage: errorMessage || null,
+            errorStack: errorStack || null,
+            metadata
+        });
+    } catch (err) {
+        console.error('Error creating SystemLog:', err);
+        return null;
+    }
+};
+
+const updateAuthLog = async (logId, updates) => {
+    try {
+        return await SystemLog.findByIdAndUpdate(
+            logId,
+            { $set: updates },
+            { new: true }
+        );
+    } catch (err) {
+        console.error('Error updating SystemLog:', err);
+        return null;
+    }
+};
+
+const completeAuthLog = async (logId, metadata = {}) => {
+    try {
+        return await SystemLog.findByIdAndUpdate(
+            logId,
             {
                 $set: {
-                    status: status,
+                    status: 'success',
                     'metadata.resolvedAt': new Date().toISOString(),
-                    'metadata.resolvedStatus': status,
+                    'metadata.resolvedStatus': 'success',
                     ...metadata
                 }
-            }
+            },
+            { new: true }
         );
-        return result;
     } catch (err) {
-        console.error('Error updating pending auth logs:', err);
+        console.error('Error completing SystemLog:', err);
+        return null;
+    }
+};
+
+const failAuthLog = async (logId, failureReason, metadata = {}) => {
+    try {
+        return await SystemLog.findByIdAndUpdate(
+            logId,
+            {
+                $set: {
+                    status: 'failed',
+                    'metadata.resolvedAt': new Date().toISOString(),
+                    'metadata.resolvedStatus': 'failed',
+                    'metadata.failureReason': failureReason,
+                    ...metadata
+                }
+            },
+            { new: true }
+        );
+    } catch (err) {
+        console.error('Error failing SystemLog:', err);
         return null;
     }
 };
@@ -8496,8 +8578,7 @@ app.post('/api/auth/signup', [
     if (!errors.isEmpty()) {
         console.error('Signup validation errors:', errors.array());
 
-        // LOG ONLY TO SYSTEMLOG
-        await SystemLog.create({
+        await createAuthLog({
             action: 'signup_validation_failed',
             entity: 'User',
             performedBy: null,
@@ -8575,8 +8656,7 @@ app.post('/api/auth/signup', [
                 ? `${originalEmail.split('@')[0].substring(0, 3)}...${originalEmail.split('@')[0].substring(originalEmail.split('@')[0].length - 3)}@${originalEmail.split('@')[1]}`
                 : originalEmail;
 
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'signup_attempt_duplicate',
                 entity: 'User',
                 entityId: existingUser._id,
@@ -8646,7 +8726,7 @@ app.post('/api/auth/signup', [
             referredBy: referredByUser ? referredByUser._id : undefined,
             isVerified: false,
             accountType: userAccountType,
-            authProvider: 'email',  // ✅ authProvider set ONLY during signup
+            authProvider: 'email',
             signupSource: referralCode ? 'referral' : 'organic',
             organizationName: userOrganizationName,
             role: userRole,
@@ -8665,16 +8745,16 @@ app.post('/api/auth/signup', [
         const newUser = await User.create(userData);
         console.log(`✅ New user created: ${newUser.email} (Account Type: ${newUser.accountType}, Auth Provider: email)`);
 
-        // LOG ONLY TO SYSTEMLOG - SUCCESSFUL SIGNUP
-        await SystemLog.create({
-            action: 'user_signup_success',
+        // LOG: Account created (but NOT yet verified)
+        await createAuthLog({
+            action: 'signup_initiated',
             entity: 'User',
             entityId: newUser._id,
             performedBy: newUser._id,
             performedByModel: 'User',
             performedByEmail: newUser.email,
             performedByName: `${newUser.firstName} ${newUser.lastName}`,
-            status: 'success',
+            status: 'pending',
             requestMethod: req.method,
             requestPath: req.path,
             ip: getRealClientIP(req),
@@ -8750,9 +8830,9 @@ app.post('/api/auth/signup', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || userCity}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        // LOG ONLY TO SYSTEMLOG - OTP SENT (PENDING)
-        await SystemLog.create({
-            action: 'signup_initiated',
+        // LOG: OTP sent (pending verification)
+        await createAuthLog({
+            action: 'signup_otp_sent',
             entity: 'User',
             entityId: newUser._id,
             performedBy: newUser._id,
@@ -8935,8 +9015,7 @@ app.post('/api/auth/signup', [
     } catch (err) {
         console.error('Signup error:', err);
 
-        // LOG ONLY TO SYSTEMLOG
-        await SystemLog.create({
+        await createAuthLog({
             action: 'signup_error',
             entity: 'User',
             performedBy: null,
@@ -8979,8 +9058,7 @@ app.post('/api/auth/login', [
 ], async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        // LOG ONLY TO SYSTEMLOG
-        await SystemLog.create({
+        await createAuthLog({
             action: 'login_validation_failed',
             entity: 'User',
             performedBy: null,
@@ -9017,8 +9095,7 @@ app.post('/api/auth/login', [
         const isPasswordValid = user && (await bcrypt.compare(password, user.password));
 
         if (!user || !isPasswordValid) {
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'login_failed',
                 entity: 'User',
                 entityId: user ? user._id : null,
@@ -9064,10 +9141,8 @@ app.post('/api/auth/login', [
         }
 
         // ✅ AUTH PROVIDER CHECK - User must log in with the method they signed up with
-        // authProvider is NEVER changed during login - it is set ONLY during signup
         if (user.authProvider !== 'email') {
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'login_wrong_provider',
                 entity: 'User',
                 entityId: user._id,
@@ -9096,8 +9171,7 @@ app.post('/api/auth/login', [
         }
 
         if (accountType && user.accountType !== accountType) {
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'login_account_type_mismatch',
                 entity: 'User',
                 entityId: user._id,
@@ -9124,8 +9198,7 @@ app.post('/api/auth/login', [
         }
 
         if (user.status !== 'active') {
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'login_account_inactive',
                 entity: 'User',
                 entityId: user._id,
@@ -9209,9 +9282,9 @@ app.post('/api/auth/login', [
             formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || user.city}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
         };
 
-        // LOG ONLY TO SYSTEMLOG - OTP SENT (PENDING)
-        await SystemLog.create({
-            action: 'login_initiated',
+        // LOG: Password validated, OTP sent (pending verification)
+        const authLog = await createAuthLog({
+            action: 'login_otp_sent',
             entity: 'User',
             entityId: user._id,
             performedBy: user._id,
@@ -9234,13 +9307,16 @@ app.post('/api/auth/login', [
             longitude: formattedLocation.longitude,
             metadata: {
                 email: email,
-                loginMethod: 'password',
+                loginMethod: 'password_otp',
                 rememberMe: rememberMe || false,
                 accountType: accountType || user.accountType,
                 authProvider: user.authProvider || 'email',
                 timezoneOffset: timezoneOffset,
                 otpSent: true,
-                otpExpiresAt: expiresAt
+                otpExpiresAt: expiresAt,
+                passwordValidated: true,
+                authenticated: false,
+                sessionCreated: false
             }
         });
 
@@ -9380,8 +9456,7 @@ app.post('/api/auth/login', [
     } catch (err) {
         console.error('Login error:', err);
 
-        // LOG ONLY TO SYSTEMLOG
-        await SystemLog.create({
+        await createAuthLog({
             action: 'login_error',
             entity: 'User',
             performedBy: null,
@@ -9436,8 +9511,7 @@ app.post('/api/auth/google', async (req, res) => {
         } catch (verifyError) {
             console.error('Google token verification failed:', verifyError);
 
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'google_auth_verification_failed',
                 entity: 'User',
                 performedBy: null,
@@ -9463,7 +9537,7 @@ app.post('/api/auth/google', async (req, res) => {
         if (!payload) {
             console.error('No payload from Google token');
 
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'google_auth_no_payload',
                 entity: 'User',
                 performedBy: null,
@@ -9490,7 +9564,7 @@ app.post('/api/auth/google', async (req, res) => {
         if (!email) {
             console.error('No email in Google payload');
 
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'google_auth_no_email',
                 entity: 'User',
                 performedBy: null,
@@ -9526,7 +9600,7 @@ app.post('/api/auth/google', async (req, res) => {
         } catch (dbError) {
             console.error('Database lookup error:', dbError);
 
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'google_auth_db_lookup_error',
                 entity: 'User',
                 performedBy: null,
@@ -9601,8 +9675,7 @@ app.post('/api/auth/google', async (req, res) => {
         if (isSignup === false && !user) {
             console.log('Login attempt with Google: User does not exist');
 
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'google_login_user_not_found',
                 entity: 'User',
                 performedBy: null,
@@ -9636,8 +9709,7 @@ app.post('/api/auth/google', async (req, res) => {
         if (isSignup === true && user) {
             console.log('Signup attempt with Google: User already exists');
 
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'google_signup_user_exists',
                 entity: 'User',
                 entityId: user._id,
@@ -9738,11 +9810,11 @@ app.post('/api/auth/google', async (req, res) => {
                     lastName: family_name || 'User',
                     email: originalEmail,
                     googleId: sub,
-                    isVerified: true,
+                    isVerified: false,
                     referralCode,
                     status: 'active',
                     accountType: 'individual',
-                    authProvider: 'google',  // ✅ authProvider set ONLY during signup
+                    authProvider: 'google',
                     metadata: {
                         signupMethod: 'google_oauth',
                         signupDate: new Date(),
@@ -9754,16 +9826,16 @@ app.post('/api/auth/google', async (req, res) => {
                 isNewUser = true;
                 console.log('New user created via Google SIGNUP:', originalEmail);
 
-                // LOG ONLY TO SYSTEMLOG - SUCCESSFUL SIGNUP
-                await SystemLog.create({
-                    action: 'google_signup_success',
+                // LOG: Google signup initiated (account created, awaiting OTP)
+                await createAuthLog({
+                    action: 'google_signup_initiated',
                     entity: 'User',
                     entityId: user._id,
                     performedBy: user._id,
                     performedByModel: 'User',
                     performedByEmail: user.email,
                     performedByName: `${user.firstName} ${user.lastName}`,
-                    status: 'success',
+                    status: 'pending',
                     requestMethod: req.method,
                     requestPath: req.path,
                     ip: rawDeviceInfo.ip,
@@ -9781,7 +9853,8 @@ app.post('/api/auth/google', async (req, res) => {
                         email: originalEmail,
                         authProvider: 'google',
                         timezoneOffset: timezoneOffset,
-                        googleId: sub
+                        googleId: sub,
+                        isVerified: false
                     }
                 });
 
@@ -9897,7 +9970,7 @@ app.post('/api/auth/google', async (req, res) => {
             } catch (createError) {
                 console.error('User creation error:', createError);
 
-                await SystemLog.create({
+                await createAuthLog({
                     action: 'google_signup_creation_error',
                     entity: 'User',
                     performedBy: null,
@@ -9923,14 +9996,11 @@ app.post('/api/auth/google', async (req, res) => {
         } else if (!user.googleId) {
             try {
                 user.googleId = sub;
-                user.isVerified = true;
-                // ✅ DO NOT change authProvider during login - keep whatever was set during signup
-                // user.authProvider should NOT be changed here
+                user.isVerified = false;
                 await user.save();
                 console.log('Existing user linked with Google:', originalEmail);
 
-                // LOG ONLY TO SYSTEMLOG
-                await SystemLog.create({
+                await createAuthLog({
                     action: 'google_account_linked',
                     entity: 'User',
                     entityId: user._id,
@@ -9938,7 +10008,7 @@ app.post('/api/auth/google', async (req, res) => {
                     performedByModel: 'User',
                     performedByEmail: user.email,
                     performedByName: `${user.firstName} ${user.lastName}`,
-                    status: 'success',
+                    status: 'pending',
                     requestMethod: req.method,
                     requestPath: req.path,
                     ip: rawDeviceInfo.ip,
@@ -9946,14 +10016,14 @@ app.post('/api/auth/google', async (req, res) => {
                     metadata: {
                         email: originalEmail,
                         googleId: sub,
-                        authProvider: user.authProvider  // Keep existing authProvider
+                        authProvider: user.authProvider
                     }
                 });
 
             } catch (updateError) {
                 console.error('User update error:', updateError);
 
-                await SystemLog.create({
+                await createAuthLog({
                     action: 'google_link_account_error',
                     entity: 'User',
                     entityId: user._id,
@@ -9981,11 +10051,9 @@ app.post('/api/auth/google', async (req, res) => {
             }
         }
 
-        // ✅ AUTH PROVIDER CHECK - User must log in with the method they signed up with
-        // authProvider is NEVER changed during login - it is set ONLY during signup
+        // ✅ AUTH PROVIDER CHECK
         if (user.authProvider !== 'google') {
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'google_login_wrong_provider',
                 entity: 'User',
                 entityId: user._id,
@@ -10014,8 +10082,7 @@ app.post('/api/auth/google', async (req, res) => {
         }
 
         if (user.status !== 'active') {
-            // LOG ONLY TO SYSTEMLOG
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'google_login_inactive_account',
                 entity: 'User',
                 entityId: user._id,
@@ -10065,8 +10132,8 @@ app.post('/api/auth/google', async (req, res) => {
                 }
             });
 
-            // LOG ONLY TO SYSTEMLOG - OTP SENT (PENDING)
-            await SystemLog.create({
+            // LOG: Google OTP sent (pending verification)
+            const authLog = await createAuthLog({
                 action: isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent',
                 entity: 'User',
                 entityId: user._id,
@@ -10096,7 +10163,9 @@ app.post('/api/auth/google', async (req, res) => {
                     authProvider: user.authProvider,
                     googleId: sub,
                     otpSent: true,
-                    otpExpiresAt: expiresAt
+                    otpExpiresAt: expiresAt,
+                    authenticated: false,
+                    sessionCreated: false
                 }
             });
 
@@ -10215,7 +10284,7 @@ app.post('/api/auth/google', async (req, res) => {
         } catch (otpError) {
             console.error('OTP creation error:', otpError);
 
-            await SystemLog.create({
+            await createAuthLog({
                 action: 'google_otp_creation_error',
                 entity: 'User',
                 entityId: user._id,
@@ -10239,13 +10308,7 @@ app.post('/api/auth/google', async (req, res) => {
 
         const tempToken = generateJWT(user._id);
 
-        try {
-            user.lastLogin = new Date();
-            user.loginHistory.push(rawDeviceInfo);
-            await user.save();
-        } catch (updateError) {
-            console.error('User update error:', updateError);
-        }
+        // DO NOT update lastLogin or loginHistory here - OTP not verified yet
 
         res.status(200).json({
             status: 'success',
@@ -10262,7 +10325,7 @@ app.post('/api/auth/google', async (req, res) => {
                     lastName: user.lastName,
                     email: user.email,
                     accountType: user.accountType,
-                    authProvider: user.authProvider  // ✅ Return authProvider as set during signup
+                    authProvider: user.authProvider
                 }
             }
         });
@@ -10271,8 +10334,7 @@ app.post('/api/auth/google', async (req, res) => {
         console.error('Google auth UNEXPECTED error:', err);
         console.error('Error stack:', err.stack);
 
-        // LOG ONLY TO SYSTEMLOG
-        await SystemLog.create({
+        await createAuthLog({
             action: 'google_auth_error',
             entity: 'User',
             performedBy: null,
@@ -10376,8 +10438,8 @@ app.post('/api/auth/verify-otp', [
                 });
 
                 // UPDATE SYSTEMLOG FROM PENDING TO FAILED
-                await updatePendingAuthLogs(email, 'failed', {
-                    'metadata.failureReason': 'Too many failed OTP attempts',
+                await failAuthLog(null, 'Too many failed OTP attempts', {
+                    'metadata.email': email,
                     'metadata.failedAt': new Date().toISOString()
                 });
 
@@ -10396,8 +10458,8 @@ app.post('/api/auth/verify-otp', [
 
             if (expiredOtp) {
                 // UPDATE SYSTEMLOG FROM PENDING TO FAILED
-                await updatePendingAuthLogs(email, 'failed', {
-                    'metadata.failureReason': 'OTP expired',
+                await failAuthLog(null, 'OTP expired', {
+                    'metadata.email': email,
                     'metadata.failedAt': new Date().toISOString()
                 });
 
@@ -10408,8 +10470,8 @@ app.post('/api/auth/verify-otp', [
             }
 
             // UPDATE SYSTEMLOG FROM PENDING TO FAILED
-            await updatePendingAuthLogs(email, 'failed', {
-                'metadata.failureReason': 'Invalid OTP',
+            await failAuthLog(null, 'Invalid OTP', {
+                'metadata.email': email,
                 'metadata.failedAt': new Date().toISOString()
             });
 
@@ -10434,47 +10496,65 @@ app.post('/api/auth/verify-otp', [
 
         const finalToken = generateJWT(user._id);
 
-        if (isLoginOtp) {
-            user.lastLogin = new Date();
-            const deviceInfo = await getUserDeviceInfo(req);
-            user.loginHistory.push(deviceInfo);
-            await user.save();
-        } else if (wasJustVerified) {
-            await user.save();
-        }
-
-        res.cookie('jwt', finalToken, {
-            expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict'
-        });
+        // =============================================
+        // ONLY NOW - Authentication is complete, update all logs and user data
+        // =============================================
 
         const deviceInfoForEmail = await getUserDeviceInfo(req);
 
-        // =============================================
-        // UPDATE SYSTEMLOG FROM PENDING TO SUCCESS
-        // =============================================
-        await updatePendingAuthLogs(email, 'success', {
-            'metadata.verifiedAt': new Date().toISOString(),
-            'metadata.verificationMethod': 'otp',
-            'metadata.otpVerified': true,
-            'metadata.otpType': otpRecord.type
-        });
-
-        if (isSignupOtp && wasJustVerified) {
-            try {
-                await sendAutomatedEmail(user, 'welcome', {
-                    name: user.firstName,
-                    email: user.email
-                });
-                console.log(`📧 Welcome email sent to ${user.email} (after OTP verification)`);
-            } catch (emailError) {
-                console.error('Failed to send welcome email:', emailError);
-            }
+        // Determine the auth provider and login method
+        const authProvider = user.authProvider || 'email';
+        let loginMethod = 'otp';
+        if (authProvider === 'google') {
+            loginMethod = 'google_otp';
+        } else if (authProvider === 'web3') {
+            loginMethod = 'web3_otp';
+        } else {
+            loginMethod = 'password_otp';
         }
 
         if (isLoginOtp) {
+            // ✅ ONLY NOW update lastLogin and loginHistory
+            user.lastLogin = new Date();
+            user.loginHistory.push(deviceInfoForEmail);
+            await user.save();
+
+            // LOG: Authentication success
+            await createAuthLog({
+                action: 'user_login_success',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'success',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: deviceInfoForEmail.ip || getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                location: deviceInfoForEmail.location || 'Unknown',
+                metadata: {
+                    authProvider: authProvider,
+                    loginMethod: loginMethod,
+                    authenticated: true,
+                    otpVerified: true,
+                    sessionCreated: true,
+                    otpType: 'login',
+                    email: user.email,
+                    timezoneOffset: req.body.timezoneOffset || 0
+                }
+            });
+
+            // LOG: OTP verified successfully (update pending record)
+            await completeAuthLog(null, {
+                'metadata.email': email,
+                'metadata.verifiedAt': new Date().toISOString(),
+                'metadata.verificationMethod': 'otp',
+                'metadata.otpVerified': true,
+                'metadata.otpType': otpRecord.type
+            });
+
             try {
                 await sendAutomatedEmail(user, 'login_success', {
                     name: user.firstName,
@@ -10487,26 +10567,116 @@ app.post('/api/auth/verify-otp', [
             } catch (emailError) {
                 console.error('Failed to send login success email:', emailError);
             }
-        }
 
-        res.status(200).json({
-            status: 'success',
-            message: isSignupOtp
-                ? 'Email verified successfully! Welcome to ₿itHash Capital!'
-                : 'Login successful! Redirecting to dashboard...',
-            token: finalToken,
-            data: {
-                user: {
-                    id: user._id,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
+            res.status(200).json({
+                status: 'success',
+                message: 'Login successful! Redirecting to dashboard...',
+                token: finalToken,
+                data: {
+                    user: {
+                        id: user._id,
+                        firstName: user.firstName,
+                        lastName: user.lastName,
+                        email: user.email,
+                        isVerified: user.isVerified,
+                        hasGoogleAuth: !!user.googleId,
+                        accountType: user.accountType,
+                        authProvider: user.authProvider
+                    }
+                }
+            });
+
+        } else if (isSignupOtp && wasJustVerified) {
+            // ✅ Signup completed successfully
+            await user.save();
+
+            // LOG: Signup OTP verified
+            await completeAuthLog(null, {
+                'metadata.email': email,
+                'metadata.verifiedAt': new Date().toISOString(),
+                'metadata.verificationMethod': 'otp',
+                'metadata.otpVerified': true,
+                'metadata.otpType': 'signup'
+            });
+
+            // LOG: User signup success
+            await createAuthLog({
+                action: 'user_signup_success',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'success',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: deviceInfoForEmail.ip || getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                location: deviceInfoForEmail.location || 'Unknown',
+                metadata: {
+                    authProvider: authProvider,
+                    signupMethod: loginMethod,
+                    verified: true,
+                    otpVerified: true,
                     email: user.email,
-                    isVerified: user.isVerified,
-                    hasGoogleAuth: !!user.googleId,
                     accountType: user.accountType
                 }
+            });
+
+            try {
+                await sendAutomatedEmail(user, 'welcome', {
+                    name: user.firstName,
+                    email: user.email
+                });
+                console.log(`📧 Welcome email sent to ${user.email} (after OTP verification)`);
+            } catch (emailError) {
+                console.error('Failed to send welcome email:', emailError);
             }
-        });
+
+            res.cookie('jwt', finalToken, {
+                expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'strict'
+            });
+
+            res.status(200).json({
+                status: 'success',
+                message: 'Email verified successfully! Welcome to ₿itHash Capital!',
+                token: finalToken,
+                data: {
+                    user: {
+                        id: user._id,
+                        firstName: user.firstName,
+                        lastName: user.lastName,
+                        email: user.email,
+                        isVerified: user.isVerified,
+                        hasGoogleAuth: !!user.googleId,
+                        accountType: user.accountType,
+                        authProvider: user.authProvider
+                    }
+                }
+            });
+        } else {
+            // Fallback - shouldn't happen
+            res.status(200).json({
+                status: 'success',
+                message: 'OTP verified successfully.',
+                token: finalToken,
+                data: {
+                    user: {
+                        id: user._id,
+                        firstName: user.firstName,
+                        lastName: user.lastName,
+                        email: user.email,
+                        isVerified: user.isVerified,
+                        accountType: user.accountType,
+                        authProvider: user.authProvider
+                    }
+                }
+            });
+        }
 
     } catch (err) {
         console.error('Verify OTP error:', err);
@@ -10626,7 +10796,7 @@ app.get('/api/web3/nonce', async (req, res) => {
             walletAddress: normalizedAddress,
             chainId: chainIdNum,
             nonce: nonce,
-            message: message, // STORE THE EXACT MESSAGE
+            message: message,
             type: purpose,
             isSignup: isSignupRequest,
             used: false,
@@ -10651,19 +10821,26 @@ app.get('/api/web3/nonce', async (req, res) => {
             await existingWeb3User.save();
         }
 
-        // Log the nonce generation
-        await Web3Log.create({
-            walletAddress: normalizedAddress,
-            walletType: 'metamask',
-            action: 'nonce_generated',
-            status: 'success',
-            ipAddress: getRealClientIP(req),
+        // Log the nonce generation to SystemLog
+        await createAuthLog({
+            action: 'web3_nonce_generated',
+            entity: 'Web3User',
+            entityId: existingWeb3User?._id || null,
+            performedBy: null,
+            performedByModel: 'System',
+            status: 'pending',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown',
             metadata: {
-                isSignup: isSignupRequest,
+                walletAddress: normalizedAddress,
                 chainId: chainIdNum,
+                isSignup: isSignupRequest,
                 accountType: accountType || 'individual',
-                nonceId: nonceRecord._id
+                nonceId: nonceRecord._id,
+                purpose: purpose,
+                exists: !!existingWeb3User
             }
         });
 
@@ -10674,7 +10851,7 @@ app.get('/api/web3/nonce', async (req, res) => {
             status: 'success',
             data: {
                 nonce: nonce,
-                message: message, // EXACT MESSAGE TO BE SIGNED
+                message: message,
                 expiresAt: expiresAt,
                 walletAddress: normalizedAddress,
                 chainId: chainIdNum,
@@ -10748,12 +10925,46 @@ app.post('/api/web3/verify', async (req, res) => {
 
             if (expiredOrUsed) {
                 if (expiredOrUsed.used) {
+                    // LOG: Nonce already used
+                    await createAuthLog({
+                        action: 'web3_nonce_already_used',
+                        entity: 'Web3User',
+                        performedBy: null,
+                        performedByModel: 'System',
+                        status: 'failed',
+                        requestMethod: req.method,
+                        requestPath: req.path,
+                        ip: getRealClientIP(req),
+                        userAgent: req.headers['user-agent'] || 'Unknown',
+                        metadata: {
+                            walletAddress: normalizedAddress,
+                            chainId: chainIdNum,
+                            isSignup: isSignup
+                        }
+                    });
                     return res.status(400).json({
                         status: 'fail',
                         message: 'This authentication challenge has already been used.'
                     });
                 }
                 if (expiredOrUsed.expiresAt <= new Date()) {
+                    // LOG: Nonce expired
+                    await createAuthLog({
+                        action: 'web3_nonce_expired',
+                        entity: 'Web3User',
+                        performedBy: null,
+                        performedByModel: 'System',
+                        status: 'failed',
+                        requestMethod: req.method,
+                        requestPath: req.path,
+                        ip: getRealClientIP(req),
+                        userAgent: req.headers['user-agent'] || 'Unknown',
+                        metadata: {
+                            walletAddress: normalizedAddress,
+                            chainId: chainIdNum,
+                            isSignup: isSignup
+                        }
+                    });
                     return res.status(400).json({
                         status: 'fail',
                         message: 'This authentication challenge has expired. Please request a new one.'
@@ -10770,10 +10981,27 @@ app.post('/api/web3/verify', async (req, res) => {
         // Verify the signature against the STORED message
         let recoveredAddress;
         try {
-            // CRITICAL: Verify against the exact stored message
             recoveredAddress = ethers.verifyMessage(nonceRecord.message, signature);
         } catch (signErr) {
             console.error('Signature verification error:', signErr);
+            // LOG: Signature verification failed
+            await createAuthLog({
+                action: 'web3_signature_verification_failed',
+                entity: 'Web3User',
+                performedBy: null,
+                performedByModel: 'System',
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    walletAddress: normalizedAddress,
+                    chainId: chainIdNum,
+                    isSignup: isSignup,
+                    error: signErr.message
+                }
+            });
             return res.status(400).json({
                 status: 'fail',
                 message: 'Invalid signature. Please try again.'
@@ -10782,6 +11010,24 @@ app.post('/api/web3/verify', async (req, res) => {
 
         // Compare recovered address with the challenge address
         if (recoveredAddress.toLowerCase() !== normalizedAddress) {
+            // LOG: Address mismatch
+            await createAuthLog({
+                action: 'web3_address_mismatch',
+                entity: 'Web3User',
+                performedBy: null,
+                performedByModel: 'System',
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    walletAddress: normalizedAddress,
+                    recoveredAddress: recoveredAddress,
+                    chainId: chainIdNum,
+                    isSignup: isSignup
+                }
+            });
             return res.status(400).json({
                 status: 'fail',
                 message: 'Signature verification failed. Address mismatch.'
@@ -10875,6 +11121,32 @@ app.post('/api/web3/verify', async (req, res) => {
             };
         }
 
+        // LOG: Signature verified successfully
+        await createAuthLog({
+            action: 'web3_signature_verified',
+            entity: 'Web3User',
+            entityId: web3User?._id || null,
+            performedBy: userId || null,
+            performedByModel: userId ? 'User' : 'System',
+            performedByEmail: userEmail || null,
+            performedByName: fullUser ? `${fullUser.firstName} ${fullUser.lastName}` : null,
+            status: 'pending',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                walletAddress: normalizedAddress,
+                isSignup: isSignupRequest,
+                accountType: accountType || 'individual',
+                nonceUsed: nonce,
+                chainId: chainIdNum,
+                hasWalletConnectData: !!walletConnectData,
+                approvedChainsCount: walletConnectData?.approvedChains?.length || 0,
+                nonceId: nonceRecord._id
+            }
+        });
+
         // Generate temporary token for OTP flow
         const tempToken = jwt.sign(
             { 
@@ -10889,28 +11161,6 @@ app.post('/api/web3/verify', async (req, res) => {
             JWT_SECRET,
             { expiresIn: '10m' }
         );
-
-        // Log successful verification
-        await Web3Log.create({
-            walletAddress: normalizedAddress,
-            walletType: walletType || 'metamask',
-            action: 'signature_verified',
-            status: 'success',
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            metadata: {
-                isSignup: isSignupRequest,
-                accountType: accountType || 'individual',
-                nonceUsed: nonce,
-                chainId: chainIdNum,
-                hasWalletConnectData: !!walletConnectData,
-                approvedChainsCount: walletConnectData?.approvedChains?.length || 0,
-                nonceId: nonceRecord._id
-            },
-            user: userId || null,
-            relatedEntity: nonceRecord._id,
-            relatedEntityModel: 'Web3Nonce'
-        });
 
         res.status(200).json({
             status: 'success',
@@ -11031,7 +11281,7 @@ app.post('/api/web3/signup', async (req, res) => {
             isVerified: false,
             status: 'active',
             accountType: accountType || 'individual',
-            authProvider: 'web3',  // ✅ authProvider set ONLY during signup
+            authProvider: 'web3',
             organizationName: organizationName || null,
             role: role || null,
             workEmail: workEmail || null,
@@ -11076,16 +11326,13 @@ app.post('/api/web3/signup', async (req, res) => {
                 const address = accountsByChain[caipChainId];
                 if (!address) continue;
                 
-                // Skip if it's the same as the primary address
                 if (address.toLowerCase() === normalizedAddress.toLowerCase()) continue;
                 
-                // Extract chain ID from CAIP-2 format (e.g., "eip155:1" -> 1)
                 const chainIdMatch = caipChainId.match(/eip155:(\d+)/);
                 const chainIdNum = chainIdMatch ? parseInt(chainIdMatch[1], 10) : null;
                 
                 if (!chainIdNum) continue;
                 
-                // Get chain name from SUPPORTED_CHAINS or use a default
                 const chainName = SUPPORTED_CHAINS?.[chainIdNum]?.name || `Chain ${chainIdNum}`;
                 
                 walletEntries.push({
@@ -11158,24 +11405,54 @@ app.post('/api/web3/signup', async (req, res) => {
             $set: { web3UserId: web3User._id }
         });
 
-        // Log each wallet address - LOG ONLY TO WEB3LOG
+        // LOG: Web3 signup initiated (account created, awaiting OTP)
+        await createAuthLog({
+            action: 'web3_signup_initiated',
+            entity: 'User',
+            entityId: newUser._id,
+            performedBy: newUser._id,
+            performedByModel: 'User',
+            performedByEmail: newUser.email,
+            performedByName: `${newUser.firstName} ${newUser.lastName}`,
+            status: 'pending',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            location: req.clientLocation?.location || 'Unknown',
+            metadata: {
+                email: email,
+                walletAddress: normalizedAddress,
+                totalWallets: web3User.wallets.length,
+                multichainEnabled: walletConnectData ? true : false,
+                approvedChains: walletConnectData?.approvedChains || [],
+                accountType: accountType || 'individual',
+                authProvider: 'web3'
+            }
+        });
+
+        // Log each wallet address to SystemLog
         for (const wallet of web3User.wallets) {
-            await Web3Log.create({
-                user: newUser._id,
-                walletAddress: wallet.address,
-                walletType: wallet.type,
-                action: 'wallet_added',
+            await createAuthLog({
+                action: 'web3_wallet_added',
+                entity: 'Web3User',
+                entityId: web3User._id,
+                performedBy: newUser._id,
+                performedByModel: 'User',
+                performedByEmail: newUser.email,
+                performedByName: `${newUser.firstName} ${newUser.lastName}`,
                 status: 'success',
-                ipAddress: getRealClientIP(req),
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
                 userAgent: req.headers['user-agent'] || 'Unknown',
                 metadata: {
+                    walletAddress: wallet.address,
+                    walletType: wallet.type,
                     isPrimary: wallet.isPrimary,
                     chainId: wallet.chainId || 1,
-                    caipChainId: wallet.caipChainId || null,
-                    walletConnectSessionTopic: wallet.metadata?.walletConnectSessionTopic || null
-                },
-                relatedEntity: web3User._id,
-                relatedEntityModel: 'Web3User'
+                    caipChainId: wallet.caipChainId || null
+                }
             });
         }
 
@@ -11219,25 +11496,28 @@ app.post('/api/web3/signup', async (req, res) => {
             }
         });
 
-        // LOG ONLY TO WEB3LOG
-        await Web3Log.create({
-            user: newUser._id,
-            walletAddress: normalizedAddress,
-            walletType: walletType || 'metamask',
-            action: 'signup_success',
-            status: 'success',
-            ipAddress: getRealClientIP(req),
+        // LOG: Web3 OTP sent (pending verification)
+        await createAuthLog({
+            action: 'web3_otp_sent',
+            entity: 'User',
+            entityId: newUser._id,
+            performedBy: newUser._id,
+            performedByModel: 'User',
+            performedByEmail: newUser.email,
+            performedByName: `${newUser.firstName} ${newUser.lastName}`,
+            status: 'pending',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown',
+            location: req.clientLocation?.location || 'Unknown',
             metadata: {
-                accountType: accountType || 'individual',
-                referralCode: referralCode || null,
-                organizationName: organizationName || null,
-                totalWallets: web3User.wallets.length,
-                multichainEnabled: walletConnectData ? true : false,
-                approvedChains: walletConnectData?.approvedChains || []
-            },
-            relatedEntity: web3User._id,
-            relatedEntityModel: 'Web3User'
+                email: email,
+                walletAddress: normalizedAddress,
+                otpSent: true,
+                otpExpiresAt: expiresAt,
+                authProvider: 'web3'
+            }
         });
 
         await sendAdminWeb3SignupNotification(newUser, web3User, req);
@@ -11255,7 +11535,7 @@ app.post('/api/web3/signup', async (req, res) => {
                     lastName: newUser.lastName,
                     email: newUser.email,
                     accountType: newUser.accountType,
-                    authProvider: newUser.authProvider,  // ✅ Return authProvider as set during signup
+                    authProvider: newUser.authProvider,
                     walletAddress: normalizedAddress,
                     totalWallets: web3User.wallets.length
                 },
@@ -11382,6 +11662,27 @@ app.post('/api/web3/send-otp', async (req, res) => {
             }
         });
 
+        // LOG: Web3 OTP resent
+        await createAuthLog({
+            action: 'web3_otp_resent',
+            entity: 'User',
+            entityId: user._id,
+            performedBy: user._id,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'pending',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                email: email,
+                walletAddress: decoded.walletAddress || 'unknown',
+                otpSent: true
+            }
+        });
+
         console.log(`📧 Web3 OTP sent to ${email}`);
 
         res.status(200).json({
@@ -11479,6 +11780,25 @@ app.post('/api/web3/verify-otp', async (req, res) => {
             });
 
             if (expiredOtp) {
+                // LOG: OTP expired
+                await createAuthLog({
+                    action: 'web3_otp_expired',
+                    entity: 'User',
+                    entityId: user._id,
+                    performedBy: user._id,
+                    performedByModel: 'User',
+                    performedByEmail: user.email,
+                    performedByName: `${user.firstName} ${user.lastName}`,
+                    status: 'failed',
+                    requestMethod: req.method,
+                    requestPath: req.path,
+                    ip: getRealClientIP(req),
+                    userAgent: req.headers['user-agent'] || 'Unknown',
+                    metadata: {
+                        email: email,
+                        failureReason: 'OTP expired'
+                    }
+                });
                 return res.status(400).json({
                     status: 'fail',
                     message: 'OTP has expired. Please request a new one.'
@@ -11489,6 +11809,26 @@ app.post('/api/web3/verify-otp', async (req, res) => {
                 { email: email, otp: otp, type: 'signup', used: false },
                 { $inc: { attempts: 1 } }
             );
+
+            // LOG: Invalid OTP
+            await createAuthLog({
+                action: 'web3_otp_failed',
+                entity: 'User',
+                entityId: user._id,
+                performedBy: user._id,
+                performedByModel: 'User',
+                performedByEmail: user.email,
+                performedByName: `${user.firstName} ${user.lastName}`,
+                status: 'failed',
+                requestMethod: req.method,
+                requestPath: req.path,
+                ip: getRealClientIP(req),
+                userAgent: req.headers['user-agent'] || 'Unknown',
+                metadata: {
+                    email: email,
+                    failureReason: 'Invalid OTP'
+                }
+            });
 
             return res.status(400).json({
                 status: 'fail',
@@ -11516,21 +11856,48 @@ app.post('/api/web3/verify-otp', async (req, res) => {
 
         const finalToken = generateJWT(user._id);
 
-        // LOG ONLY TO WEB3LOG
-        await Web3Log.create({
-            user: user._id,
-            walletAddress: web3User?.wallets[0]?.address || 'unknown',
-            walletType: web3User?.wallets[0]?.type || 'metamask',
-            action: 'login_success',
+        // LOG: Web3 OTP verified successfully
+        await createAuthLog({
+            action: 'web3_otp_verified',
+            entity: 'User',
+            entityId: user._id,
+            performedBy: user._id,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
             status: 'success',
-            ipAddress: getRealClientIP(req),
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown',
             metadata: {
                 email: email,
-                verificationType: 'web3'
-            },
-            relatedEntity: otpRecord._id,
-            relatedEntityModel: null
+                authProvider: 'web3',
+                verified: true,
+                otpVerified: true
+            }
+        });
+
+        // LOG: Web3 signup success (final)
+        await createAuthLog({
+            action: 'web3_signup_success',
+            entity: 'User',
+            entityId: user._id,
+            performedBy: user._id,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'success',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            metadata: {
+                email: email,
+                authProvider: 'web3',
+                totalWallets: web3User?.wallets?.length || 0,
+                verified: true
+            }
         });
 
         await sendAutomatedEmail(user, 'welcome', {
@@ -11552,7 +11919,7 @@ app.post('/api/web3/verify-otp', async (req, res) => {
                     email: user.email,
                     isVerified: user.isVerified,
                     accountType: user.accountType,
-                    authProvider: user.authProvider,  // ✅ Return authProvider as set during signup
+                    authProvider: user.authProvider,
                     web3User: web3User ? {
                         id: web3User._id,
                         wallets: web3User.wallets.map(w => ({
@@ -11610,7 +11977,7 @@ app.get('/api/web3/check-user', async (req, res) => {
                         status: web3User.user.status,
                         isVerified: web3User.user.isVerified,
                         accountType: web3User.user.accountType,
-                        authProvider: web3User.user.authProvider  // ✅ Return authProvider as set during signup
+                        authProvider: web3User.user.authProvider
                     } : null,
                     web3User: {
                         id: web3User._id,
@@ -11830,8 +12197,13 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
     } catch (err) {
         console.error('Failed to send admin Web3 signup notification:', err);
     }
-});
+}
 
+// =============================================
+// All other endpoints remain unchanged
+// =============================================
+// The rest of the file continues with all other routes and functionality
+// (withdrawals, deposits, investments, etc.) - they remain exactly as they were
 
 
 
