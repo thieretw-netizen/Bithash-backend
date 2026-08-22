@@ -40214,9 +40214,11 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, restrictTo('supe
     }
 });
 
+
+
+
 // =============================================
 // 5. GET /api/admin/wallet-management/wallets - Wallet Addresses
-// FIXED: Properly populates user data from DepositAddress
 // =============================================
 app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
     const startTime = Date.now();
@@ -40261,15 +40263,8 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
 
         console.log(`[WALLET ADDRESSES] Query: ${JSON.stringify(query)}`);
 
-        // =============================================
-        // FIX: Use populate with correct field path
-        // The schema has userId field that references User
-        // =============================================
         const wallets = await DepositAddress.find(query)
-            .populate({
-                path: 'userId',
-                select: 'firstName lastName email'
-            })
+            .populate('userId', 'firstName lastName email')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
@@ -40280,146 +40275,157 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
         console.log(`[WALLET ADDRESSES] Found ${wallets.length} wallets (total: ${total})`);
 
         // =============================================
-        // FIX: Get real-time balances from ON-CHAIN for each wallet
+        // ✅ CRITICAL: Get real-time balances from ON-CHAIN for each wallet
         // =============================================
         const enhancedWallets = await Promise.all(wallets.map(async (wallet, index) => {
             let balance = 0;
             let usdValue = 0;
-            let balanceStatus = 'available';
-            let balanceError = null;
+            let addressBalanceChecked = false;
 
             try {
-                const config = ASSET_NETWORK_MAP[wallet.asset.toUpperCase()];
-                if (config) {
+                const assetUpper = wallet.asset.toUpperCase();
+                const config = ASSET_NETWORK_MAP[assetUpper];
+                
+                if (config && config.type) {
                     console.log(`[WALLET ADDRESSES] Fetching balance for wallet ${index + 1}/${wallets.length}: ${wallet.address}`);
-                    // CRITICAL: Balance fetched ON-CHAIN via RPC
-                    const balanceResult = await getBlockchainBalance(
-                        wallet.asset.toUpperCase(),
-                        [wallet.address],
-                        config
-                    );
                     
-                    if (balanceResult.status === 'unavailable') {
-                        balanceStatus = 'unavailable';
-                        balanceError = balanceResult.error;
-                        balance = 0;
-                    } else {
+                    // =============================================
+                    // ✅ CRITICAL: Balance fetched ON-CHAIN via RPC
+                    // =============================================
+                    // Use a try-catch per address to ensure one failure doesn't break the whole batch
+                    try {
+                        const balanceResult = await getBlockchainBalance(
+                            wallet.asset.toUpperCase(),
+                            [wallet.address],
+                            config
+                        );
                         balance = balanceResult.confirmed || 0;
-                        balanceStatus = 'available';
+                        addressBalanceChecked = true;
+                        console.log(`[WALLET ADDRESSES] Balance for ${wallet.address}: ${balance} ${wallet.asset}`);
+                    } catch (rpcError) {
+                        console.warn(`[WALLET ADDRESSES] RPC balance check failed for ${wallet.address}: ${rpcError.message}`);
+                        // Continue with balance = 0, but don't mark as checked
+                        addressBalanceChecked = false;
                     }
-                    console.log(`[WALLET ADDRESSES] Balance: ${balance} ${wallet.asset} (status: ${balanceStatus})`);
 
-                    const price = await getCryptoPrice(wallet.asset.toUpperCase());
-                    usdValue = balance * (price || 0);
-                    console.log(`[WALLET ADDRESSES] USD value: $${usdValue}`);
+                    // Only fetch price if balance > 0 or we need USD value
+                    if (balance > 0 || addressBalanceChecked) {
+                        try {
+                            const price = await getCryptoPrice(wallet.asset.toUpperCase());
+                            usdValue = balance * (price || 0);
+                            console.log(`[WALLET ADDRESSES] USD value for ${wallet.address}: $${usdValue}`);
+                        } catch (priceError) {
+                            console.warn(`[WALLET ADDRESSES] Failed to fetch price for ${wallet.asset}: ${priceError.message}`);
+                            // Keep usdValue = 0
+                        }
+                    }
+                } else {
+                    console.warn(`[WALLET ADDRESSES] No config for asset: ${wallet.asset}`);
                 }
             } catch (err) {
                 console.warn(`[WALLET ADDRESSES] Failed to get balance for ${wallet.address}:`, err.message);
-                balanceStatus = 'unavailable';
-                balanceError = err.message;
+                // Continue with balance = 0
             }
 
             // Get deposit count and last deposit
-            const depositCount = await Transaction.countDocuments({
-                'details.toAddress': wallet.address,
-                type: 'deposit',
-                status: 'completed'
-            });
-
-            const lastDeposit = await Transaction.findOne({
-                'details.toAddress': wallet.address,
-                type: 'deposit',
-                status: 'completed'
-            }).sort({ createdAt: -1 });
-
-            // Get withdrawal count and last activity
-            const withdrawalCount = await Transaction.countDocuments({
-                'details.fromAddress': wallet.address,
-                type: 'withdrawal',
-                status: 'completed'
-            });
-
-            const lastActivity = await Transaction.findOne({
-                $or: [
-                    { 'details.toAddress': wallet.address },
-                    { 'details.fromAddress': wallet.address }
-                ],
-                status: 'completed'
-            }).sort({ createdAt: -1 });
-
-            // =============================================
-            // FIX: Properly extract user data from populated userId
-            // =============================================
-            const userData = wallet.userId || {};
-            
-            // Get the user ID from the populated field or the raw field
-            const userIdValue = wallet.userId?._id || wallet.userId || null;
-            
-            // Build the assigned user object
-            let assignedUser = null;
-            if (userData && (userData.firstName || userData.lastName || userData.email)) {
-                assignedUser = {
-                    _id: userData._id || userIdValue,
-                    name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User',
-                    email: userData.email || 'No email'
-                };
-            } else {
-                // If no user data, check if userId exists but wasn't populated
-                if (wallet.userId) {
-                    // Try to get the user directly if populate didn't work
-                    try {
-                        const directUser = await User.findById(wallet.userId).select('firstName lastName email').lean();
-                        if (directUser) {
-                            assignedUser = {
-                                _id: directUser._id,
-                                name: `${directUser.firstName || ''} ${directUser.lastName || ''}`.trim() || 'Unknown User',
-                                email: directUser.email || 'No email'
-                            };
-                        }
-                    } catch (userErr) {
-                        console.warn(`[WALLET ADDRESSES] Failed to fetch user directly for ${wallet.userId}:`, userErr.message);
-                    }
-                }
+            let depositCount = 0;
+            let lastDeposit = null;
+            try {
+                depositCount = await Transaction.countDocuments({
+                    'details.toAddress': wallet.address,
+                    type: 'deposit',
+                    status: 'completed'
+                });
+                
+                lastDeposit = await Transaction.findOne({
+                    'details.toAddress': wallet.address,
+                    type: 'deposit',
+                    status: 'completed'
+                }).sort({ createdAt: -1 });
+            } catch (txError) {
+                console.warn(`[WALLET ADDRESSES] Failed to get deposit data for ${wallet.address}: ${txError.message}`);
             }
 
-            // Extract userId as string for display
-            const userIdDisplay = userIdValue ? userIdValue.toString() : 'N/A';
+            // Get last activity
+            let lastActivity = null;
+            try {
+                lastActivity = await Transaction.findOne({
+                    $or: [
+                        { 'details.toAddress': wallet.address },
+                        { 'details.fromAddress': wallet.address }
+                    ],
+                    status: 'completed'
+                }).sort({ createdAt: -1 });
+            } catch (activityError) {
+                console.warn(`[WALLET ADDRESSES] Failed to get activity for ${wallet.address}: ${activityError.message}`);
+            }
 
-            console.log(`[WALLET ADDRESSES] Wallet ${wallet.address} -> User: ${assignedUser?.name || 'N/A'} (${userIdDisplay})`);
+            // Get withdrawal count
+            let withdrawalCount = 0;
+            try {
+                withdrawalCount = await Transaction.countDocuments({
+                    'details.fromAddress': wallet.address,
+                    type: 'withdrawal',
+                    status: 'completed'
+                });
+            } catch (withdrawalError) {
+                console.warn(`[WALLET ADDRESSES] Failed to get withdrawal count for ${wallet.address}: ${withdrawalError.message}`);
+            }
 
+            // =============================================
+            // ✅ CRITICAL: Build assignedUser object for HTML
+            // The HTML expects: assignedUser.name and assignedUser.email
+            // =============================================
+            const assignedUser = wallet.userId ? {
+                _id: wallet.userId._id,
+                name: `${wallet.userId.firstName || ''} ${wallet.userId.lastName || ''}`.trim() || wallet.userId.email || 'Unknown User',
+                email: wallet.userId.email || 'N/A'
+            } : null;
+
+            // Also provide userId as a separate field for the HTML
+            const userId = wallet.userId?._id || null;
+
+            // Build the wallet object with ALL fields the HTML expects
             return {
                 _id: wallet._id,
                 address: wallet.address,
-                network: platformWallet.getNetworkName(wallet.asset),
+                network: platformWallet.getNetworkName(wallet.asset) || 'Unknown Network',
                 coin: wallet.asset.toUpperCase(),
-                // CRITICAL: Shows which user is assigned to this wallet
+                // =============================================
+                // ✅ CRITICAL: assignedUser for the HTML table
+                // The HTML displays: assignedUser.name (or N/A) and assignedUser.email
+                // =============================================
                 assignedUser: assignedUser,
-                userId: userIdDisplay,
-                userEmail: assignedUser?.email || 'N/A',
+                userId: userId,
+                user: wallet.userId ? {
+                    _id: wallet.userId._id,
+                    firstName: wallet.userId.firstName || '',
+                    lastName: wallet.userId.lastName || '',
+                    email: wallet.userId.email || ''
+                } : null,
                 label: wallet.label || null,
-                generatedDate: wallet.createdAt,
+                generatedDate: wallet.createdAt || new Date(),
                 balance: balance,
-                balanceStatus: balanceStatus,
-                balanceSource: 'blockchain',
-                balanceError: balanceError,
                 usdValue: usdValue,
-                depositCount: depositCount,
-                withdrawalCount: withdrawalCount,
+                depositCount: depositCount || 0,
                 lastDeposit: lastDeposit?.createdAt || null,
                 lastActivity: lastActivity?.createdAt || null,
                 status: wallet.isActive ? 'active' : 'inactive',
-                derivationPath: wallet.derivationPath,
-                createdAt: wallet.createdAt
+                derivationPath: wallet.derivationPath || '',
+                // Additional fields for debugging or future use
+                balanceChecked: addressBalanceChecked,
+                withdrawalCount: withdrawalCount || 0
             };
         }));
 
-        // =============================================
-        // FIX: Ensure all wallets with userId show user data
-        // =============================================
-        // Log summary of user assignments
-        const withUser = enhancedWallets.filter(w => w.assignedUser !== null).length;
-        const withoutUser = enhancedWallets.filter(w => w.assignedUser === null).length;
-        console.log(`[WALLET ADDRESSES] User assignment summary: ${withUser} with user, ${withoutUser} without user`);
+        // Sort wallets - active with balance first, then active with no balance, then inactive
+        enhancedWallets.sort((a, b) => {
+            // First by status (active first)
+            if (a.status === 'active' && b.status !== 'active') return -1;
+            if (a.status !== 'active' && b.status === 'active') return 1;
+            // Then by balance (higher first)
+            return (b.balance || 0) - (a.balance || 0);
+        });
 
         const responseData = {
             status: 'success',
@@ -40437,14 +40443,16 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
         res.status(200).json(responseData);
         responseSent = true;
 
-        console.log(`[WALLET ADDRESSES] Successfully returned ${enhancedWallets.length} wallets`);
+        console.log(`[WALLET ADDRESSES] Successfully returned ${enhancedWallets.length} wallets with user data`);
 
     } catch (err) {
         console.error('[WALLET ADDRESSES] Error:', err);
         if (!responseSent) {
+            // Return a meaningful error with the stack trace in development
             res.status(500).json({
                 status: 'error',
-                message: err.message || 'Failed to get wallets'
+                message: err.message || 'Failed to get wallets',
+                ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
             });
         }
     } finally {
@@ -40452,6 +40460,18 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
         console.log(`[WALLET ADDRESSES] Completed in ${duration}ms`);
     }
 });
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // 6. GET /api/admin/wallet-management/transactions - Detailed Transactions
