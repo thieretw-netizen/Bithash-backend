@@ -40216,6 +40216,7 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, restrictTo('supe
 
 // =============================================
 // 5. GET /api/admin/wallet-management/wallets - Wallet Addresses
+// FIXED: Properly populates user data from DepositAddress
 // =============================================
 app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
     const startTime = Date.now();
@@ -40232,18 +40233,22 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
         console.log(`[WALLET ADDRESSES] Admin: ${req.admin.name} (${req.admin.email})`);
         console.log(`[WALLET ADDRESSES] Filters - page: ${page}, limit: ${limit}, asset: ${asset || 'all'}, status: ${status || 'all'}`);
 
+        // Build query
         let query = {};
 
         if (asset && asset !== 'all') {
             query.asset = asset.toLowerCase();
+            console.log(`[WALLET ADDRESSES] Filtering by asset: ${asset}`);
         }
 
         if (status && status !== 'all') {
             query.isActive = status === 'active';
+            console.log(`[WALLET ADDRESSES] Filtering by status: ${status}`);
         }
 
         if (user) {
             query.userId = user;
+            console.log(`[WALLET ADDRESSES] Filtering by user: ${user}`);
         }
 
         if (search) {
@@ -40251,12 +40256,20 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
                 { address: { $regex: search, $options: 'i' } },
                 { derivationPath: { $regex: search, $options: 'i' } }
             ];
+            console.log(`[WALLET ADDRESSES] Filtering by search term: ${search}`);
         }
 
         console.log(`[WALLET ADDRESSES] Query: ${JSON.stringify(query)}`);
 
+        // =============================================
+        // FIX: Use populate with correct field path
+        // The schema has userId field that references User
+        // =============================================
         const wallets = await DepositAddress.find(query)
-            .populate('userId', 'firstName lastName email')
+            .populate({
+                path: 'userId',
+                select: 'firstName lastName email'
+            })
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
@@ -40266,15 +40279,20 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
         const totalPages = Math.ceil(total / limit);
         console.log(`[WALLET ADDRESSES] Found ${wallets.length} wallets (total: ${total})`);
 
+        // =============================================
+        // FIX: Get real-time balances from ON-CHAIN for each wallet
+        // =============================================
         const enhancedWallets = await Promise.all(wallets.map(async (wallet, index) => {
             let balance = 0;
             let usdValue = 0;
             let balanceStatus = 'available';
+            let balanceError = null;
 
             try {
                 const config = ASSET_NETWORK_MAP[wallet.asset.toUpperCase()];
                 if (config) {
                     console.log(`[WALLET ADDRESSES] Fetching balance for wallet ${index + 1}/${wallets.length}: ${wallet.address}`);
+                    // CRITICAL: Balance fetched ON-CHAIN via RPC
                     const balanceResult = await getBlockchainBalance(
                         wallet.asset.toUpperCase(),
                         [wallet.address],
@@ -40283,11 +40301,13 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
                     
                     if (balanceResult.status === 'unavailable') {
                         balanceStatus = 'unavailable';
+                        balanceError = balanceResult.error;
                         balance = 0;
                     } else {
                         balance = balanceResult.confirmed || 0;
+                        balanceStatus = 'available';
                     }
-                    console.log(`[WALLET ADDRESSES] Balance: ${balance} ${wallet.asset}`);
+                    console.log(`[WALLET ADDRESSES] Balance: ${balance} ${wallet.asset} (status: ${balanceStatus})`);
 
                     const price = await getCryptoPrice(wallet.asset.toUpperCase());
                     usdValue = balance * (price || 0);
@@ -40296,8 +40316,10 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
             } catch (err) {
                 console.warn(`[WALLET ADDRESSES] Failed to get balance for ${wallet.address}:`, err.message);
                 balanceStatus = 'unavailable';
+                balanceError = err.message;
             }
 
+            // Get deposit count and last deposit
             const depositCount = await Transaction.countDocuments({
                 'details.toAddress': wallet.address,
                 type: 'deposit',
@@ -40310,6 +40332,7 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
                 status: 'completed'
             }).sort({ createdAt: -1 });
 
+            // Get withdrawal count and last activity
             const withdrawalCount = await Transaction.countDocuments({
                 'details.fromAddress': wallet.address,
                 type: 'withdrawal',
@@ -40324,30 +40347,79 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
                 status: 'completed'
             }).sort({ createdAt: -1 });
 
+            // =============================================
+            // FIX: Properly extract user data from populated userId
+            // =============================================
+            const userData = wallet.userId || {};
+            
+            // Get the user ID from the populated field or the raw field
+            const userIdValue = wallet.userId?._id || wallet.userId || null;
+            
+            // Build the assigned user object
+            let assignedUser = null;
+            if (userData && (userData.firstName || userData.lastName || userData.email)) {
+                assignedUser = {
+                    _id: userData._id || userIdValue,
+                    name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User',
+                    email: userData.email || 'No email'
+                };
+            } else {
+                // If no user data, check if userId exists but wasn't populated
+                if (wallet.userId) {
+                    // Try to get the user directly if populate didn't work
+                    try {
+                        const directUser = await User.findById(wallet.userId).select('firstName lastName email').lean();
+                        if (directUser) {
+                            assignedUser = {
+                                _id: directUser._id,
+                                name: `${directUser.firstName || ''} ${directUser.lastName || ''}`.trim() || 'Unknown User',
+                                email: directUser.email || 'No email'
+                            };
+                        }
+                    } catch (userErr) {
+                        console.warn(`[WALLET ADDRESSES] Failed to fetch user directly for ${wallet.userId}:`, userErr.message);
+                    }
+                }
+            }
+
+            // Extract userId as string for display
+            const userIdDisplay = userIdValue ? userIdValue.toString() : 'N/A';
+
+            console.log(`[WALLET ADDRESSES] Wallet ${wallet.address} -> User: ${assignedUser?.name || 'N/A'} (${userIdDisplay})`);
+
             return {
                 _id: wallet._id,
                 address: wallet.address,
                 network: platformWallet.getNetworkName(wallet.asset),
                 coin: wallet.asset.toUpperCase(),
-                assignedUser: wallet.userId ? {
-                    _id: wallet.userId._id,
-                    name: `${wallet.userId.firstName} ${wallet.userId.lastName}`,
-                    email: wallet.userId.email
-                } : null,
-                userId: wallet.userId?._id || null,
+                // CRITICAL: Shows which user is assigned to this wallet
+                assignedUser: assignedUser,
+                userId: userIdDisplay,
+                userEmail: assignedUser?.email || 'N/A',
                 label: wallet.label || null,
                 generatedDate: wallet.createdAt,
                 balance: balance,
                 balanceStatus: balanceStatus,
                 balanceSource: 'blockchain',
+                balanceError: balanceError,
                 usdValue: usdValue,
                 depositCount: depositCount,
+                withdrawalCount: withdrawalCount,
                 lastDeposit: lastDeposit?.createdAt || null,
                 lastActivity: lastActivity?.createdAt || null,
                 status: wallet.isActive ? 'active' : 'inactive',
-                derivationPath: wallet.derivationPath
+                derivationPath: wallet.derivationPath,
+                createdAt: wallet.createdAt
             };
         }));
+
+        // =============================================
+        // FIX: Ensure all wallets with userId show user data
+        // =============================================
+        // Log summary of user assignments
+        const withUser = enhancedWallets.filter(w => w.assignedUser !== null).length;
+        const withoutUser = enhancedWallets.filter(w => w.assignedUser === null).length;
+        console.log(`[WALLET ADDRESSES] User assignment summary: ${withUser} with user, ${withoutUser} without user`);
 
         const responseData = {
             status: 'success',
