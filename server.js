@@ -3122,6 +3122,7 @@ const PlanSchema = new mongoose.Schema({
   duration: { type: Number, required: [true, 'Duration is required'], min: [1, 'Duration must be at least 1 hour'] },
   minAmount: { type: Number, required: [true, 'Minimum amount is required'], min: [0, 'Minimum amount cannot be negative'] },
   maxAmount: { type: Number, required: [true, 'Maximum amount is required'] },
+    hashrate: { type: Number, default: 0, min: [0, 'Hashrate cannot be negative'] },
   isActive: { type: Boolean, default: true },
   referralBonus: { type: Number, default: 5, min: [0, 'Bonus cannot be negative'] }
 }, { timestamps: true });
@@ -18016,13 +18017,13 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 // =============================================
-// ENHANCED PLANS ENDPOINT - PREMIUM VERSION
+// FIXED PLANS ENDPOINT - ONLY DATABASE DATA, NO HARDCODED VALUES
 // =============================================
 
 app.get('/api/plans', async (req, res) => {
     try {
         // =============================================
-        // 1. FETCH PLANS FROM DATABASE
+        // 1. FETCH PLANS FROM DATABASE - THIS IS THE ONLY SOURCE OF TRUTH
         // =============================================
         const plans = await Plan.find({ isActive: true }).lean();
         
@@ -18032,8 +18033,7 @@ app.get('/api/plans', async (req, res) => {
                 data: {
                     plans: [],
                     marketContext: null,
-                    userContext: null,
-                    estimatedReturns: null
+                    userContext: null
                 }
             });
         }
@@ -18042,42 +18042,11 @@ app.get('/api/plans', async (req, res) => {
         // 2. GET REAL-TIME BTC PRICE
         // =============================================
         let btcPrice = 0;
-        let btcPriceChange24h = 0;
-        let blockReward = 3.125;
-        
         try {
-            // Get BTC price from multiple sources
             const btcPriceResult = await getRealTimeBitcoinPrice();
             btcPrice = btcPriceResult || 0;
-            
-            // Get 24h change
-            try {
-                const changeResponse = await axios.get(
-                    'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
-                    { timeout: 5000 }
-                );
-                if (changeResponse.data && changeResponse.data.bitcoin) {
-                    btcPriceChange24h = changeResponse.data.bitcoin.usd_24h_change || 0;
-                }
-            } catch (changeErr) {
-                console.warn('Could not fetch BTC 24h change:', changeErr.message);
-            }
-            
-            // Get block reward
-            try {
-                const blockResponse = await axios.get(
-                    'https://blockchain.info/q/bcperblock',
-                    { timeout: 5000 }
-                );
-                if (blockResponse.data) {
-                    blockReward = parseFloat(blockResponse.data) || 3.125;
-                }
-            } catch (blockErr) {
-                console.warn('Could not fetch block reward:', blockErr.message);
-            }
         } catch (priceErr) {
             console.error('Failed to fetch BTC price:', priceErr.message);
-            // Continue with fallback values
         }
 
         // =============================================
@@ -18085,15 +18054,8 @@ app.get('/api/plans', async (req, res) => {
         // =============================================
         let userContext = null;
         let isLoggedIn = false;
-        let mainBalanceBTC = 0;
         let mainBalanceUSD = 0;
-        let maturedBalanceBTC = 0;
         let maturedBalanceUSD = 0;
-        let activeBalanceBTC = 0;
-        let activeBalanceUSD = 0;
-        let kycStatus = 'not-submitted';
-        let walletBreakdown = [];
-        let totalPortfolioValueUSD = 0;
         let kycVerified = false;
         let hasRecentTransaction = false;
 
@@ -18108,39 +18070,16 @@ app.get('/api/plans', async (req, res) => {
                 if (user) {
                     isLoggedIn = true;
                     
-                    // Get KYC status
                     if (user.kycStatus) {
-                        kycStatus = user.kycStatus.overall || user.kycStatus.identity || 'not-submitted';
                         kycVerified = user.kycStatus.identity === 'verified' && 
                                      user.kycStatus.address === 'verified' &&
                                      user.kycStatus.facial === 'verified';
                     }
                     
-                    // Get user's real balances using the same function as WebSocket
                     const balances = await calculateRealWalletBalances(user);
-                    
                     mainBalanceUSD = balances.mainUSD || 0;
-                    activeBalanceUSD = balances.activeUSD || 0;
                     maturedBalanceUSD = balances.maturedUSD || 0;
                     
-                    // Calculate BTC equivalents using current BTC price
-                    if (btcPrice > 0) {
-                        mainBalanceBTC = mainBalanceUSD / btcPrice;
-                        maturedBalanceBTC = maturedBalanceUSD / btcPrice;
-                        activeBalanceBTC = activeBalanceUSD / btcPrice;
-                    }
-                    
-                    totalPortfolioValueUSD = mainBalanceUSD + activeBalanceUSD + maturedBalanceUSD;
-                    
-                    // Build wallet breakdown with per-asset values
-                    if (balances.mainBreakdown && balances.mainBreakdown.length > 0) {
-                        walletBreakdown = [...balances.mainBreakdown];
-                    }
-                    if (balances.maturedBreakdown && balances.maturedBreakdown.length > 0) {
-                        walletBreakdown = [...walletBreakdown, ...balances.maturedBreakdown];
-                    }
-                    
-                    // Check for recent transaction (within 30 days)
                     const thirtyDaysAgo = new Date();
                     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                     const recentTx = await Transaction.findOne({
@@ -18157,174 +18096,59 @@ app.get('/api/plans', async (req, res) => {
                         lastName: user.lastName,
                         email: user.email,
                         isVerified: user.isVerified || false,
-                        kycStatus: kycStatus,
                         kycVerified: kycVerified,
                         mainBalance: {
-                            btc: mainBalanceBTC,
                             usd: mainBalanceUSD
                         },
-                        activeBalance: {
-                            btc: activeBalanceBTC,
-                            usd: activeBalanceUSD
-                        },
                         maturedBalance: {
-                            btc: maturedBalanceBTC,
                             usd: maturedBalanceUSD
                         },
                         totalPortfolio: {
-                            btc: (mainBalanceBTC + activeBalanceBTC + maturedBalanceBTC),
-                            usd: totalPortfolioValueUSD
+                            usd: mainBalanceUSD + maturedBalanceUSD
                         },
-                        walletBreakdown: walletBreakdown.slice(0, 20),
                         hasRecentTransaction: hasRecentTransaction,
-                        canPurchase: true // Changed from canInvest
+                        canPurchase: true
                     };
                 }
             } catch (authErr) {
                 console.warn('Auth token invalid for plans endpoint:', authErr.message);
-                // Continue as guest
             }
         }
 
-        // If not logged in, create guest context
         if (!userContext) {
             userContext = {
                 isLoggedIn: false,
-                canPurchase: false, // Changed from canInvest
+                canPurchase: false,
                 kycVerified: false,
                 hasRecentTransaction: false,
-                mainBalance: { btc: 0, usd: 0 },
-                activeBalance: { btc: 0, usd: 0 },
-                maturedBalance: { btc: 0, usd: 0 },
-                totalPortfolio: { btc: 0, usd: 0 },
-                walletBreakdown: []
+                mainBalance: { usd: 0 },
+                maturedBalance: { usd: 0 },
+                totalPortfolio: { usd: 0 }
             };
         }
 
         // =============================================
-        // 4. TIER CONFIGURATION
+        // 4. BUILD PLAN DATA - PURELY FROM DATABASE
         // =============================================
-        const tierConfig = {
-            starter: {
-                badge: 'Starter',
-                color: '#4A90D9',
-                lightColor: '#6BA8E8',
-                bgColor: 'rgba(74, 144, 217, 0.12)',
-                borderColor: 'rgba(74, 144, 217, 0.3)',
-                features: [
-                    'SHA-256 ASIC mining',
-                    '24/7 performance monitoring',
-                    'Automated daily payouts',
-                    'Low entry point',
-                    'Email support'
-                ]
-            },
-            standard: {
-                badge: 'Standard',
-                color: '#2ECC71',
-                lightColor: '#58D68D',
-                bgColor: 'rgba(46, 204, 113, 0.12)',
-                borderColor: 'rgba(46, 204, 113, 0.3)',
-                features: [
-                    'SHA-256 ASIC mining',
-                    'Priority mining queue',
-                    '24/7 performance monitoring',
-                    'Automated daily payouts',
-                    'Priority email support'
-                ]
-            },
-            gold: {
-                badge: 'Gold',
-                color: '#F1C40F',
-                lightColor: '#F4D03F',
-                bgColor: 'rgba(241, 196, 15, 0.12)',
-                borderColor: 'rgba(241, 196, 15, 0.3)',
-                features: [
-                    'SHA-256 ASIC mining',
-                    'Premium mining queue',
-                    '24/7 premium monitoring',
-                    'Automated daily payouts',
-                    'Priority 24/7 support',
-                    'Higher hashrate efficiency'
-                ]
-            },
-            enterprise: {
-                badge: 'Enterprise',
-                color: '#9B59B6',
-                lightColor: '#AF7AC5',
-                bgColor: 'rgba(155, 89, 182, 0.12)',
-                borderColor: 'rgba(155, 89, 182, 0.3)',
-                features: [
-                    'SHA-256 ASIC mining',
-                    'VIP mining queue',
-                    '24/7 dedicated monitoring',
-                    'Automated daily payouts',
-                    'VIP 24/7 support',
-                    'Dedicated mining capacity',
-                    'Customizable settings'
-                ]
-            },
-            ultimate: {
-                badge: 'Ultimate',
-                color: '#E74C3C',
-                lightColor: '#EC7063',
-                bgColor: 'rgba(231, 76, 60, 0.12)',
-                borderColor: 'rgba(231, 76, 60, 0.3)',
-                features: [
-                    'SHA-256 ASIC mining',
-                    'Elite mining queue',
-                    '24/7 elite monitoring',
-                    'Automated daily payouts',
-                    'Elite 24/7 support',
-                    'Maximum mining capacity',
-                    'Premium hashrate efficiency',
-                    'Exclusive bonuses'
-                ]
-            }
-        };
-
-        // =============================================
-        // 5. BUILD ENHANCED PLAN DATA
-        // =============================================
-        const enhancedPlans = plans.map((plan, index) => {
-            // Determine tier key
-            let tierKey = 'starter';
-            const planNameLower = (plan.name || '').toLowerCase();
-            if (planNameLower.includes('starter') || planNameLower.includes('basic')) tierKey = 'starter';
-            else if (planNameLower.includes('standard')) tierKey = 'standard';
-            else if (planNameLower.includes('gold')) tierKey = 'gold';
-            else if (planNameLower.includes('enterprise')) tierKey = 'enterprise';
-            else if (planNameLower.includes('ultimate')) tierKey = 'ultimate';
-            else {
-                // Fallback: map by index
-                const tierKeys = ['starter', 'standard', 'gold', 'enterprise', 'ultimate'];
-                tierKey = tierKeys[index % tierKeys.length] || 'starter';
-            }
-            
-            const tier = tierConfig[tierKey] || tierConfig.starter;
-            
-            // Calculate hash rate based on plan
-            let hashrate = 68; // Default for starter
-            if (tierKey === 'starter') hashrate = 68;
-            else if (tierKey === 'standard') hashrate = 110;
-            else if (tierKey === 'gold') hashrate = 150;
-            else if (tierKey === 'enterprise') hashrate = 234;
-            else if (tierKey === 'ultimate') hashrate = 255;
-            
-            // Calculate estimated returns using REAL BTC price
+        const enhancedPlans = plans.map((plan) => {
+            // ALL data comes directly from the database
             const minAmountUSD = plan.minAmount || 0;
             const maxAmountUSD = plan.maxAmount || 0;
             const percentage = plan.percentage || 0;
+            const durationHours = plan.duration || 0;
+            const hashrate = plan.hashrate || 0; // ✅ FROM DATABASE
+            const planName = plan.name || 'Mining Contract';
+            const planDescription = plan.description || `${planName} SHA-256 ASIC mining contract`;
             
             // BTC equivalents
             const minAmountBTC = btcPrice > 0 ? minAmountUSD / btcPrice : 0;
             const maxAmountBTC = btcPrice > 0 ? maxAmountUSD / btcPrice : 0;
             
-            // Daily return (percentage / duration_in_days)
-            const durationDays = (plan.duration || 12) / 24;
+            // Duration in days
+            const durationDays = durationHours / 24;
             const dailyReturnPercentage = durationDays > 0 ? percentage / durationDays : percentage;
             
-            // Estimated returns (using min and max amounts)
+            // Estimated returns
             const dailyReturnMin = minAmountUSD * (dailyReturnPercentage / 100);
             const dailyReturnMax = maxAmountUSD * (dailyReturnPercentage / 100);
             const monthlyReturnMin = dailyReturnMin * 30;
@@ -18335,17 +18159,17 @@ app.get('/api/plans', async (req, res) => {
             // Return in BTC
             const dailyReturnBTC = btcPrice > 0 ? dailyReturnMin / btcPrice : 0;
             
-            // Check if user can purchase this mining contract
+            // Check if user can purchase
             let canPurchase = false;
             let buttonState = 'login';
-            let buttonText = 'Login to Purchase'; // Changed from 'Login to Invest'
-            let buttonTooltip = 'Please login to purchase hashrate'; // Changed from 'Please login to purchase hashrate'
+            let buttonText = 'Login to Purchase';
+            let buttonTooltip = 'Please login to purchase hashrate';
             
             if (isLoggedIn && userContext) {
                 if (!kycVerified) {
                     buttonState = 'kyc_required';
                     buttonText = 'Complete KYC';
-                    buttonTooltip = 'KYC verification required to purchase hashrate'; // Changed from 'KYC verification required to invest'
+                    buttonTooltip = 'KYC verification required to purchase hashrate';
                 } else if (!hasRecentTransaction) {
                     buttonState = 'transaction_required';
                     buttonText = 'Make a Deposit';
@@ -18354,9 +18178,9 @@ app.get('/api/plans', async (req, res) => {
                     const totalUserBalance = userContext.mainBalance.usd + userContext.maturedBalance.usd;
                     if (totalUserBalance >= plan.minAmount) {
                         canPurchase = true;
-                        buttonState = 'purchase'; // Changed from 'invest'
-                        buttonText = 'Buy Hash Power'; // Changed from 'Buy Hash Power'
-                        buttonTooltip = `Purchase ${plan.name} mining contract`; // Changed from 'Invest in ${plan.name} plan'
+                        buttonState = 'purchase';
+                        buttonText = 'Buy Hash Power';
+                        buttonTooltip = `Purchase ${planName} mining contract`;
                     } else {
                         buttonState = 'insufficient';
                         buttonText = 'Insufficient Balance';
@@ -18365,16 +18189,81 @@ app.get('/api/plans', async (req, res) => {
                 }
             }
             
+            // Determine tier from plan name for styling only
+            const planNameLower = planName.toLowerCase();
+            let tierKey = 'standard';
+            let badge = 'Standard';
+            let color = '#2ECC71';
+            let lightColor = '#58D68D';
+            let bgColor = 'rgba(46, 204, 113, 0.12)';
+            let borderColor = 'rgba(46, 204, 113, 0.3)';
+            
+            if (planNameLower.includes('starter') || planNameLower.includes('basic')) {
+                tierKey = 'starter';
+                badge = 'Starter';
+                color = '#4A90D9';
+                lightColor = '#6BA8E8';
+                bgColor = 'rgba(74, 144, 217, 0.12)';
+                borderColor = 'rgba(74, 144, 217, 0.3)';
+            } else if (planNameLower.includes('gold')) {
+                tierKey = 'gold';
+                badge = 'Gold';
+                color = '#F1C40F';
+                lightColor = '#F4D03F';
+                bgColor = 'rgba(241, 196, 15, 0.12)';
+                borderColor = 'rgba(241, 196, 15, 0.3)';
+            } else if (planNameLower.includes('enterprise')) {
+                tierKey = 'enterprise';
+                badge = 'Enterprise';
+                color = '#9B59B6';
+                lightColor = '#AF7AC5';
+                bgColor = 'rgba(155, 89, 182, 0.12)';
+                borderColor = 'rgba(155, 89, 182, 0.3)';
+            } else if (planNameLower.includes('ultimate')) {
+                tierKey = 'ultimate';
+                badge = 'Ultimate';
+                color = '#E74C3C';
+                lightColor = '#EC7063';
+                bgColor = 'rgba(231, 76, 60, 0.12)';
+                borderColor = 'rgba(231, 76, 60, 0.3)';
+            } else if (planNameLower.includes('standard')) {
+                tierKey = 'standard';
+                badge = 'Standard';
+                color = '#2ECC71';
+                lightColor = '#58D68D';
+                bgColor = 'rgba(46, 204, 113, 0.12)';
+                borderColor = 'rgba(46, 204, 113, 0.3)';
+            }
+            
+            // Build features - dynamic based on plan
+            const features = [
+                'SHA-256 ASIC mining',
+                '24/7 performance monitoring',
+                'Automated daily payouts',
+                `${hashrate > 0 ? hashrate + ' TH/s hashrate' : 'Premium mining capacity'}`
+            ];
+            
+            // Add tier-specific features
+            if (tierKey === 'gold' || tierKey === 'enterprise' || tierKey === 'ultimate') {
+                features.push('Priority support');
+            }
+            if (tierKey === 'enterprise' || tierKey === 'ultimate') {
+                features.push('Dedicated mining capacity');
+            }
+            if (tierKey === 'ultimate') {
+                features.push('Exclusive bonuses');
+            }
+            
             return {
                 id: plan._id,
-                name: plan.name || `${tier.badge} Mining Contract`, // Changed from 'Plan'
+                name: planName,
                 tier: tierKey,
-                badge: tier.badge,
-                color: tier.color,
-                lightColor: tier.lightColor,
-                bgColor: tier.bgColor,
-                borderColor: tier.borderColor,
-                description: plan.description || `${tier.badge} SHA-256 ASIC mining contract`, // Changed from 'cloud mining contract'
+                badge: badge,
+                color: color,
+                lightColor: lightColor,
+                bgColor: bgColor,
+                borderColor: borderColor,
+                description: planDescription,
                 minAmount: {
                     usd: minAmountUSD,
                     btc: minAmountBTC
@@ -18385,67 +18274,40 @@ app.get('/api/plans', async (req, res) => {
                 },
                 percentage: percentage,
                 duration: {
-                    hours: plan.duration || 12,
+                    hours: durationHours,
                     days: durationDays
                 },
-                hashrate: hashrate,
-                features: tier.features,
+                hashrate: hashrate, // ✅ FROM DATABASE
+                features: features,
                 estimatedReturns: {
                     daily: {
                         min: dailyReturnMin,
                         max: dailyReturnMax,
                         minBTC: dailyReturnBTC,
-                        display: `<span style="color: #2ECC71;">$${dailyReturnMin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${dailyReturnMax.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
+                        display: `<span style="color: #2ECC71;">$${dailyReturnMin.toFixed(2)} - $${dailyReturnMax.toFixed(2)}</span>`
                     },
                     monthly: {
                         min: monthlyReturnMin,
                         max: monthlyReturnMax,
-                        display: `<span style="color: #2ECC71;">$${monthlyReturnMin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${monthlyReturnMax.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
+                        display: `<span style="color: #2ECC71;">$${monthlyReturnMin.toFixed(2)} - $${monthlyReturnMax.toFixed(2)}</span>`
                     },
                     annual: {
                         min: annualReturnMin,
                         max: annualReturnMax,
-                        display: `<span style="color: #2ECC71;">$${annualReturnMin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${annualReturnMax.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
+                        display: `<span style="color: #2ECC71;">$${annualReturnMin.toFixed(2)} - $${annualReturnMax.toFixed(2)}</span>`
                     }
                 },
                 buttonState: buttonState,
                 buttonText: buttonText,
                 buttonTooltip: buttonTooltip,
-                canPurchase: canPurchase, // Changed from canInvest
+                canPurchase: canPurchase,
                 isPopular: tierKey === 'gold',
                 isBestValue: tierKey === 'standard'
             };
         });
 
         // =============================================
-        // 6. CALCULATE OVERALL ESTIMATED RETURNS
-        // =============================================
-        let estimatedReturns = null;
-        if (enhancedPlans.length > 0 && btcPrice > 0) {
-            const allMinReturns = enhancedPlans.map(p => p.estimatedReturns.daily.min);
-            const allMaxReturns = enhancedPlans.map(p => p.estimatedReturns.daily.max);
-            
-            estimatedReturns = {
-                daily: {
-                    min: Math.min(...allMinReturns),
-                    max: Math.max(...allMaxReturns),
-                    display: `<span style="color: #2ECC71;">$${Math.min(...allMinReturns).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${Math.max(...allMaxReturns).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
-                },
-                monthly: {
-                    min: Math.min(...allMinReturns) * 30,
-                    max: Math.max(...allMaxReturns) * 30,
-                    display: `<span style="color: #2ECC71;">$${(Math.min(...allMinReturns) * 30).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${(Math.max(...allMaxReturns) * 30).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
-                },
-                annual: {
-                    min: Math.min(...allMinReturns) * 365,
-                    max: Math.max(...allMaxReturns) * 365,
-                    display: `<span style="color: #2ECC71;">$${(Math.min(...allMinReturns) * 365).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} - $${(Math.max(...allMaxReturns) * 365).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>` // Added green color and commas
-                }
-            };
-        }
-
-        // =============================================
-        // 7. BUILD RESPONSE
+        // 5. BUILD RESPONSE
         // =============================================
         const response = {
             status: 'success',
@@ -18453,12 +18315,9 @@ app.get('/api/plans', async (req, res) => {
                 plans: enhancedPlans,
                 marketContext: {
                     btcPrice: btcPrice,
-                    btcPriceChange24h: btcPriceChange24h,
-                    blockReward: blockReward,
                     timestamp: new Date().toISOString()
                 },
                 userContext: userContext,
-                estimatedReturns: estimatedReturns,
                 totalPlans: enhancedPlans.length
             }
         };
@@ -18468,10 +18327,10 @@ app.get('/api/plans', async (req, res) => {
         res.status(200).json(response);
 
     } catch (err) {
-        console.error('Enhanced plans endpoint error:', err);
+        console.error('Plans endpoint error:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to load mining contracts', // Changed from 'Failed to load investment plans'
+            message: 'Failed to load mining contracts',
             error: process.env.NODE_ENV === 'development' ? err.message : undefined
         });
     }
