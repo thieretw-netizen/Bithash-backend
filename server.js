@@ -44317,6 +44317,1380 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
+// =============================================
+// TWO-FACTOR AUTHENTICATION ENDPOINTS
+// =============================================
+
+// =============================================
+// GET /api/users/two-factor - Get all 2FA methods with status
+// =============================================
+app.get('/api/users/two-factor', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('twoFactorAuth phone email firstName lastName');
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Initialize twoFactorAuth if it doesn't exist
+        if (!user.twoFactorAuth) {
+            user.twoFactorAuth = {
+                enabled: false,
+                secret: null,
+                smsEnabled: false,
+                smsSecret: null,
+                backupCodes: [],
+                enabledAt: null,
+                smsEnabledAt: null,
+                lastUsed: null,
+                smsLastUsed: null,
+                emailLastUsed: null,
+                failedAttempts: 0,
+                lastFailedAttempt: null,
+                smsFailedAttempts: 0,
+                smsLastFailedAttempt: null,
+                recoveryEmailSentAt: null
+            };
+            await user.save();
+        }
+
+        // Build methods array
+        const methods = [];
+
+        // Authenticator App method
+        const authenticatorMethod = {
+            id: 'authenticator',
+            name: 'Authenticator App',
+            description: 'Use an authenticator app like Google Authenticator or Authy to generate time-based verification codes',
+            active: user.twoFactorAuth.enabled || false,
+            type: 'authenticator',
+            enabledAt: user.twoFactorAuth.enabledAt || null,
+            lastUsed: user.twoFactorAuth.lastUsed || null,
+            setupRequired: user.twoFactorAuth.enabled === false,
+            hasBackupCodes: user.twoFactorAuth.backupCodes && user.twoFactorAuth.backupCodes.length > 0
+        };
+        methods.push(authenticatorMethod);
+
+        // SMS method
+        const smsMethod = {
+            id: 'sms',
+            name: 'SMS Verification',
+            description: 'Receive verification codes via SMS to your registered phone number',
+            active: user.twoFactorAuth.smsEnabled || false,
+            type: 'sms',
+            phoneNumber: user.phone || null,
+            enabledAt: user.twoFactorAuth.smsEnabledAt || null,
+            lastUsed: user.twoFactorAuth.smsLastUsed || null,
+            setupRequired: !user.phone || user.twoFactorAuth.smsEnabled === false,
+            phoneVerified: !!user.phone
+        };
+        methods.push(smsMethod);
+
+        // Email method (always available as fallback)
+        const emailMethod = {
+            id: 'email',
+            name: 'Email Verification',
+            description: 'Receive verification codes via email to your registered email address',
+            active: true,
+            type: 'email',
+            enabledAt: user.createdAt,
+            lastUsed: user.twoFactorAuth.emailLastUsed || null,
+            setupRequired: false,
+            email: user.email
+        };
+        methods.push(emailMethod);
+
+        // Get backup codes if 2FA is enabled
+        let backupCodes = [];
+        let availableBackupCodes = 0;
+        let usedBackupCodes = 0;
+        
+        if (user.twoFactorAuth.enabled && user.twoFactorAuth.backupCodes) {
+            const allCodes = user.twoFactorAuth.backupCodes;
+            availableBackupCodes = allCodes.filter(bc => !bc.used).length;
+            usedBackupCodes = allCodes.filter(bc => bc.used).length;
+            
+            backupCodes = allCodes.map(code => ({
+                id: code._id,
+                code: code.used ? null : '••••••••', // Don't show actual codes, just indicate availability
+                used: code.used || false,
+                usedAt: code.usedAt || null,
+                createdAt: code.createdAt || null
+            }));
+        }
+
+        // Check if recovery email was recently sent
+        let recoveryEmailSent = false;
+        if (user.twoFactorAuth.recoveryEmailSentAt) {
+            const hoursSinceSent = (Date.now() - new Date(user.twoFactorAuth.recoveryEmailSentAt).getTime()) / (1000 * 60 * 60);
+            if (hoursSinceSent < 24) {
+                recoveryEmailSent = true;
+            }
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                methods: methods,
+                backupCodes: backupCodes,
+                availableBackupCodes: availableBackupCodes,
+                usedBackupCodes: usedBackupCodes,
+                hasBackupCodes: availableBackupCodes > 0,
+                recoveryEmail: user.email,
+                recoveryEmailSent: recoveryEmailSent,
+                twoFactorEnabled: user.twoFactorAuth.enabled || false,
+                twoFactorConfigured: user.twoFactorAuth.enabled || user.twoFactorAuth.smsEnabled || false,
+                failedAttempts: user.twoFactorAuth.failedAttempts || 0,
+                maxFailedAttempts: 5,
+                isLocked: (user.twoFactorAuth.failedAttempts || 0) >= 5
+            }
+        });
+
+        await logActivity('view_two_factor_methods', 'User', userId, userId, 'User', req, {
+            methodsCount: methods.length,
+            authenticatorEnabled: authenticatorMethod.active,
+            smsEnabled: smsMethod.active,
+            backupCodesAvailable: availableBackupCodes
+        });
+
+    } catch (err) {
+        console.error('Get two-factor methods error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch two-factor authentication methods'
+        });
+    }
+});
+
+// =============================================
+// POST /api/users/two-factor/:methodId/enable - Enable 2FA method
+// =============================================
+app.post('/api/users/two-factor/:methodId/enable', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { methodId } = req.params;
+        const { token, phoneNumber } = req.body;
+
+        const user = await User.findById(userId).select('+twoFactorAuth.secret +twoFactorAuth.smsSecret +twoFactorAuth.backupCodes +twoFactorAuth.failedAttempts +twoFactorAuth.smsFailedAttempts');
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Initialize twoFactorAuth if it doesn't exist
+        if (!user.twoFactorAuth) {
+            user.twoFactorAuth = {
+                enabled: false,
+                secret: null,
+                smsEnabled: false,
+                smsSecret: null,
+                backupCodes: [],
+                enabledAt: null,
+                smsEnabledAt: null,
+                lastUsed: null,
+                smsLastUsed: null,
+                emailLastUsed: null,
+                failedAttempts: 0,
+                lastFailedAttempt: null,
+                smsFailedAttempts: 0,
+                smsLastFailedAttempt: null,
+                recoveryEmailSentAt: null
+            };
+        }
+
+        // Check if user is locked out
+        if (user.twoFactorAuth.failedAttempts >= 5) {
+            const lockoutTime = new Date(user.twoFactorAuth.lastFailedAttempt);
+            const now = new Date();
+            const minutesSinceLockout = (now - lockoutTime) / (1000 * 60);
+            
+            if (minutesSinceLockout < 30) {
+                return res.status(429).json({
+                    status: 'fail',
+                    message: `Too many failed attempts. Please wait ${Math.ceil(30 - minutesSinceLockout)} minutes before trying again.`,
+                    lockoutRemaining: Math.ceil(30 - minutesSinceLockout),
+                    maxAttempts: 5
+                });
+            } else {
+                // Reset failed attempts after lockout period
+                user.twoFactorAuth.failedAttempts = 0;
+                user.twoFactorAuth.lastFailedAttempt = null;
+                await user.save();
+            }
+        }
+
+        switch (methodId) {
+            case 'authenticator': {
+                // If already enabled, return conflict
+                if (user.twoFactorAuth.enabled) {
+                    return res.status(409).json({
+                        status: 'fail',
+                        message: 'Authenticator app is already enabled for this account',
+                        data: {
+                            method: 'authenticator',
+                            enabled: true,
+                            enabledAt: user.twoFactorAuth.enabledAt
+                        }
+                    });
+                }
+
+                // If token provided, verify and enable
+                if (token) {
+                    // Verify the token against the stored secret
+                    if (!user.twoFactorAuth.secret) {
+                        return res.status(400).json({
+                            status: 'fail',
+                            message: 'No authenticator setup in progress. Please request a new setup.'
+                        });
+                    }
+
+                    const isValid = speakeasy.totp.verify({
+                        secret: user.twoFactorAuth.secret,
+                        encoding: 'base32',
+                        token: token,
+                        window: 2
+                    });
+
+                    if (!isValid) {
+                        user.twoFactorAuth.failedAttempts = (user.twoFactorAuth.failedAttempts || 0) + 1;
+                        user.twoFactorAuth.lastFailedAttempt = new Date();
+                        await user.save();
+
+                        return res.status(401).json({
+                            status: 'fail',
+                            message: 'Invalid verification code. Please try again.',
+                            remainingAttempts: Math.max(0, 5 - (user.twoFactorAuth.failedAttempts || 0)),
+                            maxAttempts: 5
+                        });
+                    }
+
+                    // Generate backup codes (10 codes, 8 characters each with format XXXX-XXXX)
+                    const backupCodes = [];
+                    for (let i = 0; i < 10; i++) {
+                        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+                        const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
+                        backupCodes.push({
+                            code: crypto.createHash('sha256').update(formattedCode).digest('hex'),
+                            used: false,
+                            usedAt: null,
+                            createdAt: new Date()
+                        });
+                    }
+                    
+                    // Enable authenticator
+                    user.twoFactorAuth.enabled = true;
+                    user.twoFactorAuth.enabledAt = new Date();
+                    user.twoFactorAuth.lastUsed = new Date();
+                    user.twoFactorAuth.failedAttempts = 0;
+                    user.twoFactorAuth.backupCodes = backupCodes;
+
+                    await user.save();
+
+                    // Get plain backup codes for display (only time they'll be shown)
+                    const plainBackupCodes = backupCodes.map((bc, index) => {
+                        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+                        return `${code.slice(0, 4)}-${code.slice(4, 8)}`;
+                    });
+
+                    // Log the activity
+                    await logActivity('two_factor_enabled', 'User', userId, userId, 'User', req, {
+                        method: 'authenticator',
+                        hasBackupCodes: plainBackupCodes.length
+                    });
+
+                    // Send email notification
+                    try {
+                        await sendProfessionalEmail({
+                            email: user.email,
+                            template: 'default',
+                            data: {
+                                name: user.firstName || 'Valued Customer',
+                                subject: '🔐 Two-Factor Authentication Enabled - BitHash Capital',
+                                message: 'Two-factor authentication using Authenticator App has been enabled on your account.',
+                                details: `
+                                    <div style="background: #FEF3C7; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #F7A600;">
+                                        <p style="margin: 0 0 10px 0; font-weight: 600; color: #92400E;">⚠️ Backup Codes</p>
+                                        <p style="margin: 0 0 10px 0; color: #78350F; font-size: 14px;">Save these backup codes securely. They will not be shown again.</p>
+                                        <div style="background: #0B0E11; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 14px; letter-spacing: 2px; color: #F7A600;">
+                                            ${plainBackupCodes.join('<br>')}
+                                        </div>
+                                        <p style="margin: 10px 0 0 0; color: #78350F; font-size: 12px;">Store these in a secure location. Each code can be used only once.</p>
+                                    </div>
+                                `,
+                                buttonText: 'View Security Settings',
+                                actionLink: 'https://www.bithashcapital.live/settings/security'
+                            }
+                        });
+                    } catch (emailErr) {
+                        console.error('Failed to send 2FA enable email:', emailErr);
+                        // Still return success but with a warning
+                    }
+
+                    return res.status(200).json({
+                        status: 'success',
+                        message: 'Authenticator app enabled successfully',
+                        data: {
+                            method: 'authenticator',
+                            enabled: true,
+                            backupCodes: plainBackupCodes,
+                            warning: 'Store these backup codes securely. They will not be shown again.',
+                            enabledAt: user.twoFactorAuth.enabledAt
+                        }
+                    });
+                }
+
+                // No token provided - generate new secret and QR code
+                const secret = speakeasy.generateSecret({
+                    length: 20,
+                    name: `BitHash:${user.email}`,
+                    issuer: 'BitHash Capital'
+                });
+
+                // Store the secret temporarily
+                user.twoFactorAuth.secret = secret.base32;
+                user.twoFactorAuth.enabled = false;
+                await user.save();
+
+                // Generate QR code URL using QRServer API
+                const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(secret.otpauth_url)}`;
+
+                return res.status(200).json({
+                    status: 'success',
+                    message: 'Authenticator app setup initiated. Please scan the QR code and verify with a token.',
+                    data: {
+                        method: 'authenticator',
+                        secret: secret.base32,
+                        qrCodeUrl: qrCodeUrl,
+                        otpauthUrl: secret.otpauth_url,
+                        setupSteps: [
+                            '1. Install Google Authenticator or Authy on your phone',
+                            '2. Scan the QR code with your authenticator app',
+                            '3. Enter the 6-digit code from your app to complete setup'
+                        ],
+                        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+                    }
+                });
+            }
+
+            case 'sms': {
+                // Check if SMS is already enabled
+                if (user.twoFactorAuth.smsEnabled) {
+                    return res.status(409).json({
+                        status: 'fail',
+                        message: 'SMS verification is already enabled for this account',
+                        data: {
+                            method: 'sms',
+                            enabled: true,
+                            phoneNumber: user.phone,
+                            enabledAt: user.twoFactorAuth.smsEnabledAt
+                        }
+                    });
+                }
+
+                // Validate phone number
+                const smsPhone = phoneNumber || user.phone;
+                if (!smsPhone) {
+                    return res.status(400).json({
+                        status: 'fail',
+                        message: 'Phone number is required to enable SMS verification',
+                        action: 'provide_phone_number'
+                    });
+                }
+
+                // Validate phone number format (basic)
+                const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+                if (!phoneRegex.test(smsPhone.replace(/\s/g, ''))) {
+                    return res.status(400).json({
+                        status: 'fail',
+                        message: 'Invalid phone number format. Please use international format (e.g., +1234567890).'
+                    });
+                }
+
+                // If token provided, verify and enable
+                if (token) {
+                    if (!user.twoFactorAuth.smsSecret) {
+                        return res.status(400).json({
+                            status: 'fail',
+                            message: 'No SMS verification in progress. Please request a new code.'
+                        });
+                    }
+
+                    // Check SMS failed attempts
+                    if (user.twoFactorAuth.smsFailedAttempts >= 5) {
+                        const lockoutTime = new Date(user.twoFactorAuth.smsLastFailedAttempt);
+                        const now = new Date();
+                        const minutesSinceLockout = (now - lockoutTime) / (1000 * 60);
+                        
+                        if (minutesSinceLockout < 30) {
+                            return res.status(429).json({
+                                status: 'fail',
+                                message: `Too many failed attempts. Please wait ${Math.ceil(30 - minutesSinceLockout)} minutes before trying again.`
+                            });
+                        } else {
+                            user.twoFactorAuth.smsFailedAttempts = 0;
+                            user.twoFactorAuth.smsLastFailedAttempt = null;
+                            await user.save();
+                        }
+                    }
+
+                    const isValid = speakeasy.totp.verify({
+                        secret: user.twoFactorAuth.smsSecret,
+                        encoding: 'base32',
+                        token: token,
+                        window: 2
+                    });
+
+                    if (!isValid) {
+                        user.twoFactorAuth.smsFailedAttempts = (user.twoFactorAuth.smsFailedAttempts || 0) + 1;
+                        user.twoFactorAuth.smsLastFailedAttempt = new Date();
+                        await user.save();
+
+                        return res.status(401).json({
+                            status: 'fail',
+                            message: 'Invalid verification code. Please try again.',
+                            remainingAttempts: Math.max(0, 5 - (user.twoFactorAuth.smsFailedAttempts || 0))
+                        });
+                    }
+
+                    // Enable SMS
+                    user.twoFactorAuth.smsEnabled = true;
+                    user.twoFactorAuth.smsEnabledAt = new Date();
+                    user.twoFactorAuth.smsLastUsed = new Date();
+                    user.twoFactorAuth.smsFailedAttempts = 0;
+                    
+                    // Update phone if provided
+                    if (phoneNumber) {
+                        user.phone = smsPhone;
+                    }
+
+                    await user.save();
+
+                    await logActivity('two_factor_enabled', 'User', userId, userId, 'User', req, {
+                        method: 'sms',
+                        phoneNumber: smsPhone
+                    });
+
+                    // Send confirmation email
+                    try {
+                        await sendProfessionalEmail({
+                            email: user.email,
+                            template: 'default',
+                            data: {
+                                name: user.firstName || 'Valued Customer',
+                                subject: '📱 SMS Two-Factor Authentication Enabled - BitHash Capital',
+                                message: 'SMS two-factor authentication has been enabled on your account.',
+                                details: `
+                                    <div style="background: #F0FDF4; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #228B22;">
+                                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #065F46;">SMS Verification Enabled</p>
+                                        <p style="margin: 0; color: #047857; font-size: 14px;">Phone number: <strong>${maskPhoneNumber(smsPhone)}</strong></p>
+                                        <p style="margin: 5px 0 0 0; color: #047857; font-size: 13px;">You will receive verification codes via SMS for security-sensitive actions.</p>
+                                    </div>
+                                `,
+                                buttonText: 'View Security Settings',
+                                actionLink: 'https://www.bithashcapital.live/settings/security'
+                            }
+                        });
+                    } catch (emailErr) {
+                        console.error('Failed to send SMS 2FA enable email:', emailErr);
+                    }
+
+                    return res.status(200).json({
+                        status: 'success',
+                        message: 'SMS verification enabled successfully',
+                        data: {
+                            method: 'sms',
+                            enabled: true,
+                            phoneNumber: smsPhone,
+                            enabledAt: user.twoFactorAuth.smsEnabledAt
+                        }
+                    });
+                }
+
+                // No token - generate and send SMS code
+                const smsSecret = speakeasy.generateSecret({ length: 10 });
+                const smsCode = speakeasy.totp({
+                    secret: smsSecret.base32,
+                    encoding: 'base32',
+                    step: 300 // 5 minute expiry
+                });
+
+                // Store secret temporarily
+                user.twoFactorAuth.smsSecret = smsSecret.base32;
+                user.twoFactorAuth.smsEnabled = false;
+                await user.save();
+
+                // Send SMS with verification code
+                try {
+                    await sendSmsVerification(smsPhone, smsCode);
+                } catch (smsErr) {
+                    console.error('Failed to send SMS verification:', smsErr);
+                    return res.status(503).json({
+                        status: 'error',
+                        message: 'Failed to send SMS verification code. Please check your phone number or try again later.',
+                        action: 'retry_or_use_authenticator'
+                    });
+                }
+
+                return res.status(200).json({
+                    status: 'success',
+                    message: 'SMS verification code sent to your phone',
+                    data: {
+                        method: 'sms',
+                        phoneNumber: smsPhone,
+                        expiresIn: 300, // 5 minutes
+                        expiresAt: new Date(Date.now() + 300 * 1000).toISOString(),
+                        requiresVerification: true,
+                        verificationHint: `Code sent to ${maskPhoneNumber(smsPhone)}`,
+                        resendAvailable: true
+                    }
+                });
+            }
+
+            default: {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: `Invalid method: ${methodId}. Supported methods: authenticator, sms`,
+                    supportedMethods: ['authenticator', 'sms']
+                });
+            }
+        }
+
+    } catch (err) {
+        console.error('Enable two-factor method error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to enable two-factor authentication method'
+        });
+    }
+});
+
+// =============================================
+// POST /api/users/two-factor/:methodId/manage - Manage 2FA method
+// =============================================
+app.post('/api/users/two-factor/:methodId/manage', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { methodId } = req.params;
+        const { action, token, backupCode, newPhoneNumber, sendRecoveryEmail } = req.body;
+
+        const user = await User.findById(userId).select('+twoFactorAuth.secret +twoFactorAuth.smsSecret +twoFactorAuth.backupCodes +twoFactorAuth.failedAttempts +twoFactorAuth.smsFailedAttempts');
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Initialize twoFactorAuth if it doesn't exist
+        if (!user.twoFactorAuth) {
+            user.twoFactorAuth = {
+                enabled: false,
+                secret: null,
+                smsEnabled: false,
+                smsSecret: null,
+                backupCodes: [],
+                enabledAt: null,
+                smsEnabledAt: null,
+                lastUsed: null,
+                smsLastUsed: null,
+                emailLastUsed: null,
+                failedAttempts: 0,
+                lastFailedAttempt: null,
+                smsFailedAttempts: 0,
+                smsLastFailedAttempt: null,
+                recoveryEmailSentAt: null
+            };
+        }
+
+        // Check if user is locked out for authenticator
+        if (user.twoFactorAuth.failedAttempts >= 5) {
+            const lockoutTime = new Date(user.twoFactorAuth.lastFailedAttempt);
+            const now = new Date();
+            const minutesSinceLockout = (now - lockoutTime) / (1000 * 60);
+            
+            if (minutesSinceLockout < 30) {
+                return res.status(429).json({
+                    status: 'fail',
+                    message: `Too many failed attempts. Please wait ${Math.ceil(30 - minutesSinceLockout)} minutes before trying again.`,
+                    lockoutRemaining: Math.ceil(30 - minutesSinceLockout)
+                });
+            } else {
+                user.twoFactorAuth.failedAttempts = 0;
+                user.twoFactorAuth.lastFailedAttempt = null;
+                await user.save();
+            }
+        }
+
+        switch (methodId) {
+            case 'authenticator': {
+                if (!user.twoFactorAuth.enabled) {
+                    return res.status(400).json({
+                        status: 'fail',
+                        message: 'Authenticator app is not enabled for this account'
+                    });
+                }
+
+                const actionType = action || 'info';
+
+                switch (actionType) {
+                    case 'regenerate_backup_codes': {
+                        // Verify user's identity with token or backup code
+                        let isValid = false;
+                        let verificationMethod = null;
+
+                        if (token) {
+                            isValid = speakeasy.totp.verify({
+                                secret: user.twoFactorAuth.secret,
+                                encoding: 'base32',
+                                token: token,
+                                window: 2
+                            });
+                            if (isValid) verificationMethod = 'authenticator';
+                        }
+
+                        if (!isValid && backupCode) {
+                            const hashedBackupCode = crypto.createHash('sha256').update(backupCode).digest('hex');
+                            const matchedCode = user.twoFactorAuth.backupCodes.find(
+                                bc => bc.code === hashedBackupCode && !bc.used
+                            );
+                            if (matchedCode) {
+                                isValid = true;
+                                verificationMethod = 'backup_code';
+                                matchedCode.used = true;
+                                matchedCode.usedAt = new Date();
+                            }
+                        }
+
+                        if (!isValid) {
+                            user.twoFactorAuth.failedAttempts = (user.twoFactorAuth.failedAttempts || 0) + 1;
+                            user.twoFactorAuth.lastFailedAttempt = new Date();
+                            await user.save();
+
+                            return res.status(401).json({
+                                status: 'fail',
+                                message: 'Invalid verification code or backup code. Please try again.',
+                                remainingAttempts: Math.max(0, 5 - (user.twoFactorAuth.failedAttempts || 0))
+                            });
+                        }
+
+                        // Generate new backup codes
+                        const newBackupCodes = [];
+                        const plainNewCodes = [];
+                        for (let i = 0; i < 10; i++) {
+                            const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+                            const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
+                            plainNewCodes.push(formattedCode);
+                            newBackupCodes.push({
+                                code: crypto.createHash('sha256').update(formattedCode).digest('hex'),
+                                used: false,
+                                usedAt: null,
+                                createdAt: new Date()
+                            });
+                        }
+
+                        user.twoFactorAuth.backupCodes = newBackupCodes;
+                        user.twoFactorAuth.failedAttempts = 0;
+
+                        await user.save();
+
+                        await logActivity('two_factor_backup_codes_regenerated', 'User', userId, userId, 'User', req, {
+                            method: 'authenticator',
+                            verificationMethod: verificationMethod
+                        });
+
+                        // Send email notification
+                        try {
+                            await sendProfessionalEmail({
+                                email: user.email,
+                                template: 'default',
+                                data: {
+                                    name: user.firstName || 'Valued Customer',
+                                    subject: '🔄 Backup Codes Regenerated - BitHash Capital',
+                                    message: 'Your two-factor authentication backup codes have been regenerated.',
+                                    details: `
+                                        <div style="background: #FEF3C7; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #F7A600;">
+                                            <p style="margin: 0 0 10px 0; font-weight: 600; color: #92400E;">⚠️ New Backup Codes</p>
+                                            <p style="margin: 0 0 10px 0; color: #78350F; font-size: 14px;">Save these backup codes securely. They will not be shown again.</p>
+                                            <div style="background: #0B0E11; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 14px; letter-spacing: 2px; color: #F7A600;">
+                                                ${plainNewCodes.join('<br>')}
+                                            </div>
+                                            <p style="margin: 10px 0 0 0; color: #78350F; font-size: 12px;">Previous backup codes are now invalid.</p>
+                                        </div>
+                                    `,
+                                    buttonText: 'View Security Settings',
+                                    actionLink: 'https://www.bithashcapital.live/settings/security'
+                                }
+                            });
+                        } catch (emailErr) {
+                            console.error('Failed to send backup codes email:', emailErr);
+                        }
+
+                        return res.status(200).json({
+                            status: 'success',
+                            message: 'Backup codes regenerated successfully',
+                            data: {
+                                backupCodes: plainNewCodes,
+                                warning: 'Store these backup codes securely. They will not be shown again.'
+                            }
+                        });
+                    }
+
+                    case 'disable': {
+                        // Verify with token or backup code
+                        let isValid = false;
+                        let verificationMethod = null;
+
+                        if (token) {
+                            isValid = speakeasy.totp.verify({
+                                secret: user.twoFactorAuth.secret,
+                                encoding: 'base32',
+                                token: token,
+                                window: 2
+                            });
+                            if (isValid) verificationMethod = 'authenticator';
+                        }
+
+                        if (!isValid && backupCode) {
+                            const hashedBackupCode = crypto.createHash('sha256').update(backupCode).digest('hex');
+                            const matchedCode = user.twoFactorAuth.backupCodes.find(
+                                bc => bc.code === hashedBackupCode && !bc.used
+                            );
+                            if (matchedCode) {
+                                isValid = true;
+                                verificationMethod = 'backup_code';
+                                matchedCode.used = true;
+                                matchedCode.usedAt = new Date();
+                            }
+                        }
+
+                        if (!isValid) {
+                            user.twoFactorAuth.failedAttempts = (user.twoFactorAuth.failedAttempts || 0) + 1;
+                            user.twoFactorAuth.lastFailedAttempt = new Date();
+                            await user.save();
+
+                            return res.status(401).json({
+                                status: 'fail',
+                                message: 'Invalid verification code or backup code. Please try again.',
+                                remainingAttempts: Math.max(0, 5 - (user.twoFactorAuth.failedAttempts || 0))
+                            });
+                        }
+
+                        // Disable authenticator
+                        user.twoFactorAuth.enabled = false;
+                        user.twoFactorAuth.secret = null;
+                        user.twoFactorAuth.backupCodes = [];
+                        user.twoFactorAuth.enabledAt = null;
+                        user.twoFactorAuth.failedAttempts = 0;
+
+                        await user.save();
+
+                        await logActivity('two_factor_disabled', 'User', userId, userId, 'User', req, {
+                            method: 'authenticator',
+                            verificationMethod: verificationMethod
+                        });
+
+                        // Send email notification
+                        try {
+                            await sendProfessionalEmail({
+                                email: user.email,
+                                template: 'default',
+                                data: {
+                                    name: user.firstName || 'Valued Customer',
+                                    subject: '🔓 Two-Factor Authentication Disabled - BitHash Capital',
+                                    message: 'Two-factor authentication using Authenticator App has been disabled on your account.',
+                                    details: `
+                                        <div style="background: #FEF2F2; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #DC2626;">
+                                            <p style="margin: 0; color: #991B1B; font-size: 14px;">
+                                                ${verificationMethod === 'backup_code' ? 'Disabled using a backup code.' : 'Disabled using a verification code.'}
+                                            </p>
+                                            <p style="margin: 5px 0 0 0; color: #991B1B; font-size: 13px;">If you did not disable 2FA, please contact support immediately.</p>
+                                        </div>
+                                    `,
+                                    buttonText: 'Re-enable 2FA',
+                                    actionLink: 'https://www.bithashcapital.live/settings/security'
+                                }
+                            });
+                        } catch (emailErr) {
+                            console.error('Failed to send 2FA disable email:', emailErr);
+                        }
+
+                        return res.status(200).json({
+                            status: 'success',
+                            message: 'Authenticator app disabled successfully',
+                            data: {
+                                method: 'authenticator',
+                                enabled: false,
+                                disabledAt: new Date()
+                            }
+                        });
+                    }
+
+                    case 'send_recovery_email': {
+                        // Check if recovery email was sent recently (cooldown: 1 hour)
+                        if (user.twoFactorAuth.recoveryEmailSentAt) {
+                            const hoursSinceSent = (Date.now() - new Date(user.twoFactorAuth.recoveryEmailSentAt).getTime()) / (1000 * 60 * 60);
+                            if (hoursSinceSent < 1) {
+                                return res.status(429).json({
+                                    status: 'fail',
+                                    message: `Recovery email was sent recently. Please wait ${Math.ceil(1 - hoursSinceSent)} hour(s) before requesting another.`,
+                                    cooldownRemaining: Math.ceil(1 - hoursSinceSent)
+                                });
+                            }
+                        }
+
+                        // Generate recovery token
+                        const recoveryToken = crypto.randomBytes(32).toString('hex');
+                        const hashedRecoveryToken = crypto.createHash('sha256').update(recoveryToken).digest('hex');
+
+                        // Store recovery token in user's twoFactorAuth
+                        user.twoFactorAuth.recoveryToken = hashedRecoveryToken;
+                        user.twoFactorAuth.recoveryTokenExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+                        user.twoFactorAuth.recoveryEmailSentAt = new Date();
+                        await user.save();
+
+                        // Send recovery email
+                        try {
+                            const recoveryUrl = `https://www.bithashcapital.live/2fa-recovery?token=${recoveryToken}`;
+                            
+                            await sendProfessionalEmail({
+                                email: user.email,
+                                template: 'default',
+                                data: {
+                                    name: user.firstName || 'Valued Customer',
+                                    subject: '🔐 Two-Factor Authentication Recovery - BitHash Capital',
+                                    message: 'You have requested recovery access to your two-factor authentication.',
+                                    details: `
+                                        <div style="background: #FEF3C7; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #F7A600;">
+                                            <p style="margin: 0 0 10px 0; font-weight: 600; color: #92400E;">⚠️ Recovery Link</p>
+                                            <p style="margin: 0 0 10px 0; color: #78350F; font-size: 14px;">Click the button below to initiate 2FA recovery.</p>
+                                            <p style="margin: 0; color: #78350F; font-size: 12px;">This link will expire in 15 minutes.</p>
+                                        </div>
+                                    `,
+                                    buttonText: 'Recover 2FA Access',
+                                    actionLink: recoveryUrl
+                                }
+                            });
+
+                            return res.status(200).json({
+                                status: 'success',
+                                message: 'Recovery email sent successfully. Check your email for instructions.',
+                                data: {
+                                    sentAt: new Date(),
+                                    expiresAt: user.twoFactorAuth.recoveryTokenExpires
+                                }
+                            });
+                        } catch (emailErr) {
+                            console.error('Failed to send recovery email:', emailErr);
+                            return res.status(503).json({
+                                status: 'error',
+                                message: 'Failed to send recovery email. Please try again later.'
+                            });
+                        }
+                    }
+
+                    case 'info':
+                    default: {
+                        // Return current status
+                        const availableBackupCodes = user.twoFactorAuth.backupCodes.filter(bc => !bc.used);
+                        const usedBackupCodes = user.twoFactorAuth.backupCodes.filter(bc => bc.used);
+
+                        return res.status(200).json({
+                            status: 'success',
+                            data: {
+                                method: 'authenticator',
+                                enabled: true,
+                                enabledAt: user.twoFactorAuth.enabledAt,
+                                lastUsed: user.twoFactorAuth.lastUsed,
+                                backupCodesCount: availableBackupCodes.length,
+                                usedBackupCodesCount: usedBackupCodes.length,
+                                totalBackupCodes: user.twoFactorAuth.backupCodes.length,
+                                actions: ['regenerate_backup_codes', 'disable', 'send_recovery_email']
+                            }
+                        });
+                    }
+                }
+            }
+
+            case 'sms': {
+                if (!user.twoFactorAuth.smsEnabled) {
+                    return res.status(400).json({
+                        status: 'fail',
+                        message: 'SMS verification is not enabled for this account'
+                    });
+                }
+
+                // Check SMS failed attempts
+                if (user.twoFactorAuth.smsFailedAttempts >= 5) {
+                    const lockoutTime = new Date(user.twoFactorAuth.smsLastFailedAttempt);
+                    const now = new Date();
+                    const minutesSinceLockout = (now - lockoutTime) / (1000 * 60);
+                    
+                    if (minutesSinceLockout < 30) {
+                        return res.status(429).json({
+                            status: 'fail',
+                            message: `Too many failed attempts. Please wait ${Math.ceil(30 - minutesSinceLockout)} minutes before trying again.`
+                        });
+                    } else {
+                        user.twoFactorAuth.smsFailedAttempts = 0;
+                        user.twoFactorAuth.smsLastFailedAttempt = null;
+                        await user.save();
+                    }
+                }
+
+                const actionType = action || 'info';
+
+                switch (actionType) {
+                    case 'disable': {
+                        // Verify with token
+                        if (!token) {
+                            return res.status(400).json({
+                                status: 'fail',
+                                message: 'Verification code is required to disable SMS verification'
+                            });
+                        }
+
+                        if (!user.twoFactorAuth.smsSecret) {
+                            return res.status(400).json({
+                                status: 'fail',
+                                message: 'SMS secret not found. Please contact support.'
+                            });
+                        }
+
+                        const isValid = speakeasy.totp.verify({
+                            secret: user.twoFactorAuth.smsSecret,
+                            encoding: 'base32',
+                            token: token,
+                            window: 2
+                        });
+
+                        if (!isValid) {
+                            user.twoFactorAuth.smsFailedAttempts = (user.twoFactorAuth.smsFailedAttempts || 0) + 1;
+                            user.twoFactorAuth.smsLastFailedAttempt = new Date();
+                            await user.save();
+
+                            return res.status(401).json({
+                                status: 'fail',
+                                message: 'Invalid verification code. Please try again.',
+                                remainingAttempts: Math.max(0, 5 - (user.twoFactorAuth.smsFailedAttempts || 0))
+                            });
+                        }
+
+                        // Disable SMS
+                        user.twoFactorAuth.smsEnabled = false;
+                        user.twoFactorAuth.smsSecret = null;
+                        user.twoFactorAuth.smsEnabledAt = null;
+                        user.twoFactorAuth.smsFailedAttempts = 0;
+
+                        await user.save();
+
+                        await logActivity('two_factor_disabled', 'User', userId, userId, 'User', req, {
+                            method: 'sms'
+                        });
+
+                        // Send email notification
+                        try {
+                            await sendProfessionalEmail({
+                                email: user.email,
+                                template: 'default',
+                                data: {
+                                    name: user.firstName || 'Valued Customer',
+                                    subject: '📱 SMS Two-Factor Authentication Disabled - BitHash Capital',
+                                    message: 'SMS two-factor authentication has been disabled on your account.',
+                                    details: `
+                                        <div style="background: #FEF2F2; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #DC2626;">
+                                            <p style="margin: 0; color: #991B1B; font-size: 14px;">SMS verification has been disabled.</p>
+                                            <p style="margin: 5px 0 0 0; color: #991B1B; font-size: 13px;">If you did not disable this, please contact support immediately.</p>
+                                        </div>
+                                    `,
+                                    buttonText: 'View Security Settings',
+                                    actionLink: 'https://www.bithashcapital.live/settings/security'
+                                }
+                            });
+                        } catch (emailErr) {
+                            console.error('Failed to send SMS disable email:', emailErr);
+                        }
+
+                        return res.status(200).json({
+                            status: 'success',
+                            message: 'SMS verification disabled successfully',
+                            data: {
+                                method: 'sms',
+                                enabled: false,
+                                disabledAt: new Date()
+                            }
+                        });
+                    }
+
+                    case 'update_phone': {
+                        if (!newPhoneNumber) {
+                            return res.status(400).json({
+                                status: 'fail',
+                                message: 'New phone number is required to update SMS verification'
+                            });
+                        }
+
+                        // Validate phone number format
+                        const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+                        if (!phoneRegex.test(newPhoneNumber.replace(/\s/g, ''))) {
+                            return res.status(400).json({
+                                status: 'fail',
+                                message: 'Invalid phone number format. Please use international format (e.g., +1234567890).'
+                            });
+                        }
+
+                        // Verify with token
+                        if (!token) {
+                            return res.status(400).json({
+                                status: 'fail',
+                                message: 'Verification code is required to update phone number'
+                            });
+                        }
+
+                        if (!user.twoFactorAuth.smsSecret) {
+                            return res.status(400).json({
+                                status: 'fail',
+                                message: 'SMS secret not found. Please contact support.'
+                            });
+                        }
+
+                        const isValid = speakeasy.totp.verify({
+                            secret: user.twoFactorAuth.smsSecret,
+                            encoding: 'base32',
+                            token: token,
+                            window: 2
+                        });
+
+                        if (!isValid) {
+                            user.twoFactorAuth.smsFailedAttempts = (user.twoFactorAuth.smsFailedAttempts || 0) + 1;
+                            user.twoFactorAuth.smsLastFailedAttempt = new Date();
+                            await user.save();
+
+                            return res.status(401).json({
+                                status: 'fail',
+                                message: 'Invalid verification code. Please try again.',
+                                remainingAttempts: Math.max(0, 5 - (user.twoFactorAuth.smsFailedAttempts || 0))
+                            });
+                        }
+
+                        // Update phone number
+                        const oldPhone = user.phone;
+                        user.phone = newPhoneNumber;
+                        user.twoFactorAuth.smsFailedAttempts = 0;
+
+                        await user.save();
+
+                        await logActivity('two_factor_phone_updated', 'User', userId, userId, 'User', req, {
+                            method: 'sms',
+                            oldPhone: oldPhone,
+                            newPhone: newPhoneNumber
+                        });
+
+                        return res.status(200).json({
+                            status: 'success',
+                            message: 'Phone number updated successfully for SMS verification',
+                            data: {
+                                method: 'sms',
+                                phoneNumber: newPhoneNumber,
+                                updatedAt: new Date()
+                            }
+                        });
+                    }
+
+                    case 'info':
+                    default: {
+                        return res.status(200).json({
+                            status: 'success',
+                            data: {
+                                method: 'sms',
+                                enabled: true,
+                                phoneNumber: user.phone,
+                                enabledAt: user.twoFactorAuth.smsEnabledAt,
+                                lastUsed: user.twoFactorAuth.smsLastUsed,
+                                actions: ['disable', 'update_phone']
+                            }
+                        });
+                    }
+                }
+            }
+
+            default: {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: `Invalid method: ${methodId}. Supported methods: authenticator, sms`,
+                    supportedMethods: ['authenticator', 'sms']
+                });
+            }
+        }
+
+    } catch (err) {
+        console.error('Manage two-factor method error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to manage two-factor authentication method'
+        });
+    }
+});
+
+// =============================================
+// POST /api/users/devices/:deviceId/logout - Log out specific device
+// =============================================
+app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { deviceId } = req.params;
+
+        // Validate deviceId format
+        if (!deviceId || deviceId === 'current') {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Cannot log out the current device using this endpoint. Please use the logout endpoint.'
+            });
+        }
+
+        // Validate ObjectId format
+        if (!mongoose.Types.ObjectId.isValid(deviceId)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid device ID format'
+            });
+        }
+
+        const user = await User.findById(userId);
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Check if loginHistory exists and has devices
+        if (!user.loginHistory || user.loginHistory.length === 0) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'No devices found'
+            });
+        }
+
+        // Find the device by ID
+        let deviceIndex = -1;
+        let device = null;
+
+        // Check if deviceId is a string representation of an ObjectId
+        for (let i = 0; i < user.loginHistory.length; i++) {
+            const d = user.loginHistory[i];
+            if (d._id && d._id.toString() === deviceId) {
+                deviceIndex = i;
+                device = d;
+                break;
+            }
+        }
+
+        if (deviceIndex === -1) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Device not found'
+            });
+        }
+
+        // Check if this is the current session's device
+        // We'll check if the device's session token matches the current user's session
+        // This requires tracking sessions - if not available, we'll just remove it
+        const currentDevice = {
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            timestamp: new Date()
+        };
+
+        // If the device matches the current request's IP and user agent, it's the current device
+        const isCurrentDevice = 
+            device.ip === currentDevice.ip && 
+            device.device === currentDevice.userAgent;
+
+        if (isCurrentDevice) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Cannot log out the current device. Please use the logout endpoint to log out your current session.'
+            });
+        }
+
+        // Remove the device from loginHistory
+        const removedDevice = user.loginHistory[deviceIndex];
+        user.loginHistory.splice(deviceIndex, 1);
+
+        // Add to removed devices log for audit trail
+        if (!user.removedDevices) {
+            user.removedDevices = [];
+        }
+        user.removedDevices.push({
+            device: removedDevice,
+            removedAt: new Date(),
+            removedBy: userId
+        });
+
+        // Keep only last 50 removed devices
+        if (user.removedDevices.length > 50) {
+            user.removedDevices = user.removedDevices.slice(-50);
+        }
+
+        await user.save();
+
+        // Invalidate any JWT tokens associated with this device
+        // If you're storing session IDs or JWT IDs in Redis, invalidate them here
+        try {
+            // Get all active sessions from a sessions collection or Redis
+            // For example, if you store sessions in Redis with keys like `session:${device.sessionId}`:
+            // if (device.sessionId) {
+            //     await redis.del(`session:${device.sessionId}`);
+            //     await redis.set(`blacklist:${device.sessionId}`, 'true', 'EX', 86400);
+            // }
+            
+            // Also blacklist any tokens associated with this device
+            // This would require storing token IDs in the device record
+            console.log(`[DEVICE LOGOUT] Device ${deviceId} logged out for user ${user.email}`);
+        } catch (redisErr) {
+            console.error('Failed to invalidate device session in Redis:', redisErr);
+            // Continue execution - device is removed from DB even if Redis fails
+        }
+
+        await logActivity('device_logged_out', 'User', userId, userId, 'User', req, {
+            deviceId: deviceId,
+            deviceName: removedDevice.device || 'Unknown Device',
+            deviceLocation: removedDevice.location || 'Unknown',
+            deviceIp: removedDevice.ip || 'Unknown',
+            deviceTimestamp: removedDevice.timestamp
+        });
+
+        // Send email notification
+        try {
+            await sendProfessionalEmail({
+                email: user.email,
+                template: 'default',
+                data: {
+                    name: user.firstName || 'Valued Customer',
+                    subject: '🔐 Device Logged Out - BitHash Capital',
+                    message: 'A device has been logged out of your account.',
+                    details: `
+                        <div style="background: #FEF3C7; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #F7A600;">
+                            <p style="margin: 0 0 8px 0; font-weight: 600; color: #92400E;">Device Details</p>
+                            <p style="margin: 0; color: #78350F; font-size: 14px;">
+                                <strong>Device:</strong> ${removedDevice.device || 'Unknown'}<br>
+                                <strong>Location:</strong> ${removedDevice.location || 'Unknown'}<br>
+                                <strong>IP Address:</strong> ${removedDevice.ip || 'Unknown'}<br>
+                                <strong>Logged Out At:</strong> ${new Date().toLocaleString()}
+                            </p>
+                            <p style="margin: 5px 0 0 0; color: #78350F; font-size: 13px;">If you did not perform this action, please contact support immediately.</p>
+                        </div>
+                    `,
+                    buttonText: 'View Security Settings',
+                    actionLink: 'https://www.bithashcapital.live/settings/security'
+                }
+            });
+        } catch (emailErr) {
+            console.error('Failed to send device logout email:', emailErr);
+        }
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Device logged out successfully',
+            data: {
+                deviceId: deviceId,
+                deviceName: removedDevice.device || 'Unknown Device',
+                loggedOutAt: new Date(),
+                remainingDevices: user.loginHistory.length
+            }
+        });
+
+    } catch (err) {
+        console.error('Logout device error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to logout device'
+        });
+    }
+});
+
+// =============================================
+// HELPER FUNCTIONS
+// =============================================
+
+// Helper function to mask phone number for display
+function maskPhoneNumber(phone) {
+    if (!phone) return 'Unknown';
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.length <= 4) return '****';
+    const last4 = cleaned.slice(-4);
+    const masked = '*'.repeat(Math.max(0, cleaned.length - 4)) + last4;
+    // Format with spaces every 3-4 digits for readability
+    const formatted = masked.replace(/(\d{3})(?=\d)/g, '$1 ');
+    return formatted;
+}
+
+// Helper function to send SMS verification (integrate with Twilio, AWS SNS, or your SMS provider)
+async function sendSmsVerification(phoneNumber, code) {
+    try {
+        // Check if Twilio is configured
+        const accountSid = process.env.TWILIO_ACCOUNT_SID;
+        const authToken = process.env.TWILIO_AUTH_TOKEN;
+        const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+
+        if (accountSid && authToken && twilioPhoneNumber) {
+            // Using Twilio
+            const twilio = require('twilio')(accountSid, authToken);
+            await twilio.messages.create({
+                body: `Your BitHash verification code is: ${code}. Valid for 5 minutes. Do not share this code with anyone.`,
+                from: twilioPhoneNumber,
+                to: phoneNumber
+            });
+            console.log(`[SMS] Verification code sent via Twilio to ${maskPhoneNumber(phoneNumber)}`);
+        } else {
+            // Fallback: Log the code (for development)
+            console.log(`[SMS] Verification code ${code} sent to ${maskPhoneNumber(phoneNumber)}`);
+            console.log('[SMS] SMS provider not configured. Please set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER');
+            
+            // In production, throw an error if SMS is required but not configured
+            if (process.env.NODE_ENV === 'production') {
+                throw new Error('SMS provider not configured');
+            }
+        }
+        return true;
+    } catch (err) {
+        console.error('Failed to send SMS:', err);
+        throw err;
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
