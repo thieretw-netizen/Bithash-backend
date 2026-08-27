@@ -44379,7 +44379,7 @@ app.get('/api/users/security', protect, async (req, res) => {
 
         // Count active devices from loginHistory
         const activeDevices = user.loginHistory || [];
-        const activeCount = activeDevices.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired').length || 1;
+        const activeCount = activeDevices.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired').length;
 
         // Security checks
         const hasPassword = true; // User always has a password
@@ -44424,7 +44424,54 @@ app.get('/api/users/security', protect, async (req, res) => {
 });
 
 // =============================================
-// 2. POST /api/users/two-factor/authenticator/setup
+// 2. GET /api/users/two-factor - Fixed: Authoritative 2FA status
+// =============================================
+app.get('/api/users/two-factor', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId)
+            .select('twoFactorAuth')
+            .lean();
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        const isEnabled = user.twoFactorAuth?.enabled || false;
+        const enabledAt = user.twoFactorAuth?.enabledAt || null;
+        const recoveryCodesCount = user.twoFactorAuth?.recoveryCodes?.length || 0;
+        const recoveryCodesRemaining = user.twoFactorAuth?.recoveryCodes?.filter(c => !c.used).length || 0;
+
+        res.status(200).json({
+            success: true,
+            authenticator: {
+                enabled: isEnabled,
+                enabledAt: enabledAt,
+                recoveryCodesRemaining: recoveryCodesRemaining,
+                recoveryCodesCount: recoveryCodesCount
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching two-factor status:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to fetch two-factor status'
+            }
+        });
+    }
+});
+
+// =============================================
+// 3. POST /api/users/two-factor/authenticator/setup
 // =============================================
 app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
     try {
@@ -44452,6 +44499,30 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
             });
         }
 
+        // Check for existing pending enrollment
+        const enrollmentKey = `2fa_enrollment:${userId}`;
+        const existingEnrollment = await redis.get(enrollmentKey);
+        if (existingEnrollment) {
+            // Return existing enrollment if still valid
+            const enrollment = JSON.parse(existingEnrollment);
+            if (enrollment.expiresAt > Date.now()) {
+                // Reuse existing enrollment
+                const otpauthUri = `otpauth://totp/₿itHash:${user.email}?secret=${enrollment.secret}&issuer=₿itHash`;
+                const qrCode = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUri)}`;
+                
+                return res.status(200).json({
+                    enrollmentId: enrollment.enrollmentId,
+                    manualKey: enrollment.secret,
+                    otpauthUri: otpauthUri,
+                    qrCode: qrCode,
+                    existing: true
+                });
+            } else {
+                // Expired enrollment - delete it and create new one
+                await redis.del(enrollmentKey);
+            }
+        }
+
         // Generate TOTP secret using speakeasy
         const secret = speakeasy.generateSecret({
             length: 20,
@@ -44462,8 +44533,6 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
         // Create enrollment record
         const enrollmentId = `enr_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         
-        // Store enrollment in Redis with 10 minute expiration
-        const enrollmentKey = `2fa_enrollment:${userId}`;
         const enrollmentData = {
             enrollmentId: enrollmentId,
             secret: secret.base32,
@@ -44476,7 +44545,7 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
         const otpauthUri = secret.otpauth_url || 
             `otpauth://totp/₿itHash:${user.email}?secret=${secret.base32}&issuer=₿itHash`;
 
-        // Generate QR code (using external API since we don't have qr-image)
+        // Generate QR code
         const qrCode = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUri)}`;
 
         res.status(200).json({
@@ -44499,7 +44568,7 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
 });
 
 // =============================================
-// 3. POST /api/users/two-factor/authenticator/verify
+// 4. POST /api/users/two-factor/authenticator/verify
 // =============================================
 app.post('/api/users/two-factor/authenticator/verify', protect, [
     body('enrollmentId').notEmpty().withMessage('Enrollment ID is required'),
@@ -44527,6 +44596,17 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
                 error: {
                     code: 'USER_NOT_FOUND',
                     message: 'User not found'
+                }
+            });
+        }
+
+        // Double-check that 2FA is not already enabled
+        if (user.twoFactorAuth?.enabled) {
+            return res.status(409).json({
+                success: false,
+                error: {
+                    code: 'ALREADY_ENABLED',
+                    message: 'Authenticator is already enabled'
                 }
             });
         }
@@ -44626,6 +44706,7 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
         }
         
         user.twoFactorAuth.enabled = true;
+        user.twoFactorAuth.enabledAt = new Date();
         user.twoFactorAuth.secret = enrollment.secret;
         user.twoFactorAuth.recoveryCodes = hashedRecoveryCodes;
 
@@ -44657,7 +44738,7 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
 });
 
 // =============================================
-// 4. POST /api/users/two-factor/authenticator/disable
+// 5. POST /api/users/two-factor/authenticator/disable
 // =============================================
 app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res) => {
     try {
@@ -44712,6 +44793,7 @@ app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res
 
         // Disable 2FA
         user.twoFactorAuth.enabled = false;
+        user.twoFactorAuth.enabledAt = null;
         user.twoFactorAuth.secret = undefined;
         user.twoFactorAuth.recoveryCodes = [];
         
@@ -44738,7 +44820,7 @@ app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res
 });
 
 // =============================================
-// 5. POST /api/users/two-factor/authenticator/recovery-codes
+// 6. POST /api/users/two-factor/authenticator/recovery-codes
 // =============================================
 app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (req, res) => {
     try {
@@ -44829,7 +44911,7 @@ app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (r
 });
 
 // =============================================
-// 6. GET /api/users/devices - Active Devices
+// 7. GET /api/users/devices - Active Devices (Fixed)
 // =============================================
 app.get('/api/users/devices', protect, async (req, res) => {
     try {
@@ -44848,12 +44930,15 @@ app.get('/api/users/devices', protect, async (req, res) => {
             });
         }
 
-        // Get current session identifier
+        // Get current session identifier from header or cookie
         const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
 
         // Format devices from loginHistory
         const devices = (user.loginHistory || []).map((device, index) => {
-            const isCurrent = device.sessionId === currentSessionId || index === 0;
+            // Only use sessionId for current device detection, never index fallback
+            const isCurrent = currentSessionId && device.sessionId === currentSessionId;
+            
+            // Device is active if not revoked and not expired
             const isActive = device.sessionStatus !== 'revoked' && device.sessionStatus !== 'expired';
             
             // Extract device info from user agent
@@ -44864,24 +44949,25 @@ app.get('/api/users/devices', protect, async (req, res) => {
 
             return {
                 id: device._id?.toString() || `device_${index}`,
-                name: `${browser} on ${os}`,
-                deviceType: deviceType,
+                sessionId: device.sessionId || null,
+                name: device.deviceName || `${browser} on ${os}`,
+                deviceType: deviceType || 'desktop',
                 sessionStatus: isActive ? 'active' : 'revoked',
-                current: isCurrent,
-                lastActiveAt: device.timestamp || device.lastActiveAt || device.createdAt || new Date().toISOString(),
+                current: isCurrent || false,  // Never use index fallback
+                lastActiveAt: device.lastActiveAt || device.timestamp || device.createdAt || new Date().toISOString(),
                 createdAt: device.createdAt || device.timestamp || new Date().toISOString(),
                 location: {
                     city: device.locationDetails?.city || device.location?.city || 'Unknown',
                     country: device.locationDetails?.country || device.location?.country || 'Unknown'
                 },
-                browser: browser,
-                os: os,
+                browser: browser || 'Unknown',
+                os: os || 'Unknown',
                 ip: device.ip || device.ipAddress || 'Unknown'
             };
         });
 
-        // If no devices in history, create a default current device
-        if (devices.length === 0) {
+        // If no devices in history and we have session info, create a default current device
+        if (devices.length === 0 && currentSessionId) {
             const userAgent = req.headers['user-agent'] || 'Unknown Browser';
             const browser = detectBrowser(userAgent);
             const os = detectOS(userAgent);
@@ -44889,8 +44975,9 @@ app.get('/api/users/devices', protect, async (req, res) => {
             
             devices.push({
                 id: 'current_device',
+                sessionId: currentSessionId,
                 name: `${browser} on ${os}`,
-                deviceType: deviceType,
+                deviceType: deviceType || 'desktop',
                 sessionStatus: 'active',
                 current: true,
                 lastActiveAt: new Date().toISOString(),
@@ -44899,14 +44986,25 @@ app.get('/api/users/devices', protect, async (req, res) => {
                     city: 'Unknown',
                     country: 'Unknown'
                 },
-                browser: browser,
-                os: os,
+                browser: browser || 'Unknown',
+                os: os || 'Unknown',
                 ip: req.ip || 'Unknown'
             });
         }
 
+        // Sort devices: current first, then by lastActiveAt desc
+        devices.sort((a, b) => {
+            if (a.current) return -1;
+            if (b.current) return 1;
+            return new Date(b.lastActiveAt) - new Date(a.lastActiveAt);
+        });
+
+        // Return consistent response structure with data wrapper
         res.status(200).json({
-            devices: devices
+            success: true,
+            data: {
+                devices: devices
+            }
         });
 
     } catch (err) {
@@ -44922,7 +45020,91 @@ app.get('/api/users/devices', protect, async (req, res) => {
 });
 
 // =============================================
-// 7. POST /api/users/devices/logout-all
+// 8. POST /api/users/devices/:sessionId/revoke
+// =============================================
+app.post('/api/users/devices/:sessionId/revoke', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const sessionId = req.params.sessionId;
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        // Get current session identifier
+        const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
+
+        // Prevent revoking the current session
+        if (sessionId === currentSessionId) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'CANNOT_REVOKE_CURRENT',
+                    message: 'You cannot revoke the current device session. Use logout instead.'
+                }
+            });
+        }
+
+        // Find and revoke the session
+        let found = false;
+        if (user.loginHistory && user.loginHistory.length > 0) {
+            user.loginHistory = user.loginHistory.map(device => {
+                const deviceSessionId = device.sessionId || device._id?.toString();
+                if (deviceSessionId === sessionId && device.sessionStatus !== 'revoked' && device.sessionStatus !== 'expired') {
+                    found = true;
+                    return { 
+                        ...device, 
+                        sessionStatus: 'revoked', 
+                        revokedAt: new Date() 
+                    };
+                }
+                return device;
+            });
+        }
+
+        if (!found) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'SESSION_NOT_FOUND',
+                    message: 'Session not found or already revoked'
+                }
+            });
+        }
+
+        await user.save();
+
+        // Log activity
+        await logActivity('device_logout', 'User', userId, userId, 'User', req, {
+            sessionId: sessionId
+        });
+
+        res.status(200).json({
+            success: true,
+            message: 'Device session revoked successfully.'
+        });
+
+    } catch (err) {
+        console.error('Error revoking device session:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to revoke device session'
+            }
+        });
+    }
+});
+
+// =============================================
+// 9. POST /api/users/devices/logout-all
 // =============================================
 app.post('/api/users/devices/logout-all', protect, async (req, res) => {
     try {
@@ -44950,8 +45132,8 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
         let revokedCount = 0;
         if (user.loginHistory && user.loginHistory.length > 0) {
             user.loginHistory = user.loginHistory.map(device => {
-                const deviceId = device.sessionId || device._id?.toString();
-                const isCurrent = deviceId && deviceId === currentSessionId;
+                const deviceSessionId = device.sessionId || device._id?.toString();
+                const isCurrent = currentSessionId && deviceSessionId === currentSessionId;
                 
                 if (!isCurrent && device.sessionStatus !== 'revoked' && device.sessionStatus !== 'expired') {
                     revokedCount++;
@@ -45006,56 +45188,134 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
 });
 
 // =============================================
-// 8. GET /api/settings/languages
+// 10. GET /api/users/activity - Recent Activity
+// =============================================
+app.get('/api/users/activity', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const filterType = req.query.type || 'all';
+        const skip = (page - 1) * limit;
+
+        // Build query
+        const query = { userId: userId };
+        if (filterType !== 'all') {
+            query.type = filterType;
+        }
+
+        // Fetch activities with pagination
+        const activities = await Activity.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit + 1)
+            .lean();
+
+        const hasNext = activities.length > limit;
+        const items = hasNext ? activities.slice(0, limit) : activities;
+
+        // Get total count for pagination info
+        const total = await Activity.countDocuments(query);
+
+        // Format activities for frontend
+        const formattedActivities = items.map(activity => ({
+            id: activity._id?.toString() || activity.id,
+            type: activity.type || 'unknown',
+            title: activity.title || activity.type || 'Activity',
+            description: activity.description || '',
+            status: activity.status || 'completed',
+            createdAt: activity.createdAt || activity.timestamp || new Date().toISOString(),
+            location: activity.location || {
+                city: 'Unknown',
+                country: 'Unknown'
+            },
+            device: activity.device || {
+                browser: 'Unknown',
+                os: 'Unknown'
+            },
+            transaction: activity.transaction || null,
+            ip: activity.ip || 'Unknown'
+        }));
+
+        res.status(200).json({
+            success: true,
+            data: {
+                activities: formattedActivities,
+                pagination: {
+                    page: page,
+                    limit: limit,
+                    total: total,
+                    hasNext: hasNext
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching activity:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to fetch activity'
+            }
+        });
+    }
+});
+
+// =============================================
+// 11. GET /api/settings/languages
 // =============================================
 app.get('/api/settings/languages', async (req, res) => {
     try {
         // Comprehensive language catalog based on ISO 639 and BCP 47
         const languages = [
-            { code: 'en', name: 'English', nativeName: 'English', locale: 'en-US', territory: 'US', flag: '🇺🇸', direction: 'ltr' },
-            { code: 'es', name: 'Spanish', nativeName: 'Español', locale: 'es-ES', territory: 'ES', flag: '🇪🇸', direction: 'ltr' },
-            { code: 'fr', name: 'French', nativeName: 'Français', locale: 'fr-FR', territory: 'FR', flag: '🇫🇷', direction: 'ltr' },
-            { code: 'de', name: 'German', nativeName: 'Deutsch', locale: 'de-DE', territory: 'DE', flag: '🇩🇪', direction: 'ltr' },
-            { code: 'it', name: 'Italian', nativeName: 'Italiano', locale: 'it-IT', territory: 'IT', flag: '🇮🇹', direction: 'ltr' },
-            { code: 'pt', name: 'Portuguese', nativeName: 'Português', locale: 'pt-PT', territory: 'PT', flag: '🇵🇹', direction: 'ltr' },
-            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', locale: 'nl-NL', territory: 'NL', flag: '🇳🇱', direction: 'ltr' },
-            { code: 'ru', name: 'Russian', nativeName: 'Русский', locale: 'ru-RU', territory: 'RU', flag: '🇷🇺', direction: 'ltr' },
-            { code: 'ja', name: 'Japanese', nativeName: '日本語', locale: 'ja-JP', territory: 'JP', flag: '🇯🇵', direction: 'ltr' },
-            { code: 'ko', name: 'Korean', nativeName: '한국어', locale: 'ko-KR', territory: 'KR', flag: '🇰🇷', direction: 'ltr' },
-            { code: 'zh', name: 'Chinese', nativeName: '中文', locale: 'zh-CN', territory: 'CN', flag: '🇨🇳', direction: 'ltr' },
-            { code: 'ar', name: 'Arabic', nativeName: 'العربية', locale: 'ar-SA', territory: 'SA', flag: '🇸🇦', direction: 'rtl' },
-            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', locale: 'hi-IN', territory: 'IN', flag: '🇮🇳', direction: 'ltr' },
-            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', locale: 'bn-BD', territory: 'BD', flag: '🇧🇩', direction: 'ltr' },
-            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', locale: 'id-ID', territory: 'ID', flag: '🇮🇩', direction: 'ltr' },
-            { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', locale: 'ms-MY', territory: 'MY', flag: '🇲🇾', direction: 'ltr' },
-            { code: 'th', name: 'Thai', nativeName: 'ไทย', locale: 'th-TH', territory: 'TH', flag: '🇹🇭', direction: 'ltr' },
-            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', locale: 'vi-VN', territory: 'VN', flag: '🇻🇳', direction: 'ltr' },
-            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', locale: 'tr-TR', territory: 'TR', flag: '🇹🇷', direction: 'ltr' },
-            { code: 'pl', name: 'Polish', nativeName: 'Polski', locale: 'pl-PL', territory: 'PL', flag: '🇵🇱', direction: 'ltr' },
-            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', locale: 'uk-UA', territory: 'UA', flag: '🇺🇦', direction: 'ltr' },
-            { code: 'ro', name: 'Romanian', nativeName: 'Română', locale: 'ro-RO', territory: 'RO', flag: '🇷🇴', direction: 'ltr' },
-            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', locale: 'hu-HU', territory: 'HU', flag: '🇭🇺', direction: 'ltr' },
-            { code: 'cs', name: 'Czech', nativeName: 'Čeština', locale: 'cs-CZ', territory: 'CZ', flag: '🇨🇿', direction: 'ltr' },
-            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', locale: 'sk-SK', territory: 'SK', flag: '🇸🇰', direction: 'ltr' },
-            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', locale: 'bg-BG', territory: 'BG', flag: '🇧🇬', direction: 'ltr' },
-            { code: 'sr', name: 'Serbian', nativeName: 'Српски', locale: 'sr-RS', territory: 'RS', flag: '🇷🇸', direction: 'ltr' },
-            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', locale: 'hr-HR', territory: 'HR', flag: '🇭🇷', direction: 'ltr' },
-            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', locale: 'sv-SE', territory: 'SE', flag: '🇸🇪', direction: 'ltr' },
-            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', locale: 'nb-NO', territory: 'NO', flag: '🇳🇴', direction: 'ltr' },
-            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', locale: 'fi-FI', territory: 'FI', flag: '🇫🇮', direction: 'ltr' },
-            { code: 'da', name: 'Danish', nativeName: 'Dansk', locale: 'da-DK', territory: 'DK', flag: '🇩🇰', direction: 'ltr' },
-            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', locale: 'el-GR', territory: 'GR', flag: '🇬🇷', direction: 'ltr' },
-            { code: 'he', name: 'Hebrew', nativeName: 'עברית', locale: 'he-IL', territory: 'IL', flag: '🇮🇱', direction: 'rtl' },
-            { code: 'fa', name: 'Persian', nativeName: 'فارسی', locale: 'fa-IR', territory: 'IR', flag: '🇮🇷', direction: 'rtl' },
-            { code: 'ur', name: 'Urdu', nativeName: 'اردو', locale: 'ur-PK', territory: 'PK', flag: '🇵🇰', direction: 'rtl' },
-            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', locale: 'sw-KE', territory: 'KE', flag: '🇰🇪', direction: 'ltr' },
-            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', locale: 'af-ZA', territory: 'ZA', flag: '🇿🇦', direction: 'ltr' },
-            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', locale: 'am-ET', territory: 'ET', flag: '🇪🇹', direction: 'ltr' },
-            { code: 'tl', name: 'Tagalog', nativeName: 'Tagalog', locale: 'tl-PH', territory: 'PH', flag: '🇵🇭', direction: 'ltr' }
+            { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸' },
+            { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸' },
+            { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷' },
+            { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪' },
+            { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹' },
+            { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹' },
+            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: '🇳🇱' },
+            { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: '🇷🇺' },
+            { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵' },
+            { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷' },
+            { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳' },
+            { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦' },
+            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flag: '🇮🇳' },
+            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', flag: '🇧🇩' },
+            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', flag: '🇮🇩' },
+            { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', flag: '🇲🇾' },
+            { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭' },
+            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', flag: '🇻🇳' },
+            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', flag: '🇹🇷' },
+            { code: 'pl', name: 'Polish', nativeName: 'Polski', flag: '🇵🇱' },
+            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', flag: '🇺🇦' },
+            { code: 'ro', name: 'Romanian', nativeName: 'Română', flag: '🇷🇴' },
+            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', flag: '🇭🇺' },
+            { code: 'cs', name: 'Czech', nativeName: 'Čeština', flag: '🇨🇿' },
+            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', flag: '🇸🇰' },
+            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', flag: '🇧🇬' },
+            { code: 'sr', name: 'Serbian', nativeName: 'Српски', flag: '🇷🇸' },
+            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', flag: '🇭🇷' },
+            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', flag: '🇸🇪' },
+            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', flag: '🇳🇴' },
+            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', flag: '🇫🇮' },
+            { code: 'da', name: 'Danish', nativeName: 'Dansk', flag: '🇩🇰' },
+            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', flag: '🇬🇷' },
+            { code: 'he', name: 'Hebrew', nativeName: 'עברית', flag: '🇮🇱' },
+            { code: 'fa', name: 'Persian', nativeName: 'فارسی', flag: '🇮🇷' },
+            { code: 'ur', name: 'Urdu', nativeName: 'اردو', flag: '🇵🇰' },
+            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', flag: '🇰🇪' },
+            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', flag: '🇿🇦' },
+            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', flag: '🇪🇹' },
+            { code: 'tl', name: 'Tagalog', nativeName: 'Tagalog', flag: '🇵🇭' }
         ];
 
         res.status(200).json({
-            languages: languages
+            success: true,
+            data: {
+                languages: languages
+            }
         });
 
     } catch (err) {
@@ -45071,147 +45331,113 @@ app.get('/api/settings/languages', async (req, res) => {
 });
 
 // =============================================
-// 9. GET /api/settings/timezones
+// 12. GET /api/settings/timezones
 // =============================================
 app.get('/api/settings/timezones', async (req, res) => {
     try {
         // Comprehensive IANA timezone list
         const timezones = [
-            // UTC
-            { id: 'UTC', name: 'UTC', region: 'UTC', offset: '+00:00' },
-            
-            // Africa
-            { id: 'Africa/Nairobi', name: 'Nairobi', region: 'Africa', offset: '+03:00' },
-            { id: 'Africa/Cairo', name: 'Cairo', region: 'Africa', offset: '+03:00' },
-            { id: 'Africa/Johannesburg', name: 'Johannesburg', region: 'Africa', offset: '+02:00' },
-            { id: 'Africa/Lagos', name: 'Lagos', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Casablanca', name: 'Casablanca', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Tunis', name: 'Tunis', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Algiers', name: 'Algiers', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Khartoum', name: 'Khartoum', region: 'Africa', offset: '+02:00' },
-            { id: 'Africa/Accra', name: 'Accra', region: 'Africa', offset: '+00:00' },
-            { id: 'Africa/Douala', name: 'Douala', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Luanda', name: 'Luanda', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Maputo', name: 'Maputo', region: 'Africa', offset: '+02:00' },
-            { id: 'Africa/Windhoek', name: 'Windhoek', region: 'Africa', offset: '+02:00' },
-            
-            // Europe
-            { id: 'Europe/London', name: 'London', region: 'Europe', offset: '+01:00' },
-            { id: 'Europe/Paris', name: 'Paris', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Berlin', name: 'Berlin', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Rome', name: 'Rome', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Madrid', name: 'Madrid', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Bucharest', name: 'Bucharest', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Athens', name: 'Athens', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Istanbul', name: 'Istanbul', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Moscow', name: 'Moscow', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Dublin', name: 'Dublin', region: 'Europe', offset: '+01:00' },
-            { id: 'Europe/Zurich', name: 'Zurich', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Vienna', name: 'Vienna', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Brussels', name: 'Brussels', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Amsterdam', name: 'Amsterdam', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Stockholm', name: 'Stockholm', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Oslo', name: 'Oslo', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Copenhagen', name: 'Copenhagen', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Helsinki', name: 'Helsinki', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Warsaw', name: 'Warsaw', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Prague', name: 'Prague', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Budapest', name: 'Budapest', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Sofia', name: 'Sofia', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Kiev', name: 'Kiev', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Minsk', name: 'Minsk', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Riga', name: 'Riga', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Vilnius', name: 'Vilnius', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Tallinn', name: 'Tallinn', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Lisbon', name: 'Lisbon', region: 'Europe', offset: '+01:00' },
-            { id: 'Europe/Belgrade', name: 'Belgrade', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Sarajevo', name: 'Sarajevo', region: 'Europe', offset: '+02:00' },
-            
-            // Asia
-            { id: 'Asia/Tokyo', name: 'Tokyo', region: 'Asia', offset: '+09:00' },
-            { id: 'Asia/Seoul', name: 'Seoul', region: 'Asia', offset: '+09:00' },
-            { id: 'Asia/Shanghai', name: 'Shanghai', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Singapore', name: 'Singapore', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Kolkata', name: 'Kolkata', region: 'Asia', offset: '+05:30' },
-            { id: 'Asia/Dubai', name: 'Dubai', region: 'Asia', offset: '+04:00' },
-            { id: 'Asia/Riyadh', name: 'Riyadh', region: 'Asia', offset: '+03:00' },
-            { id: 'Asia/Bangkok', name: 'Bangkok', region: 'Asia', offset: '+07:00' },
-            { id: 'Asia/Jakarta', name: 'Jakarta', region: 'Asia', offset: '+07:00' },
-            { id: 'Asia/Kuala_Lumpur', name: 'Kuala Lumpur', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Manila', name: 'Manila', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Hong_Kong', name: 'Hong Kong', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Taipei', name: 'Taipei', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Dhaka', name: 'Dhaka', region: 'Asia', offset: '+06:00' },
-            { id: 'Asia/Karachi', name: 'Karachi', region: 'Asia', offset: '+05:00' },
-            { id: 'Asia/Tehran', name: 'Tehran', region: 'Asia', offset: '+04:30' },
-            { id: 'Asia/Baghdad', name: 'Baghdad', region: 'Asia', offset: '+03:00' },
-            { id: 'Asia/Beirut', name: 'Beirut', region: 'Asia', offset: '+03:00' },
-            { id: 'Asia/Jerusalem', name: 'Jerusalem', region: 'Asia', offset: '+03:00' },
-            { id: 'Asia/Kabul', name: 'Kabul', region: 'Asia', offset: '+04:30' },
-            { id: 'Asia/Kathmandu', name: 'Kathmandu', region: 'Asia', offset: '+05:45' },
-            { id: 'Asia/Colombo', name: 'Colombo', region: 'Asia', offset: '+05:30' },
-            { id: 'Asia/Rangoon', name: 'Rangoon', region: 'Asia', offset: '+06:30' },
-            { id: 'Asia/Bangkok', name: 'Bangkok', region: 'Asia', offset: '+07:00' },
-            { id: 'Asia/Ho_Chi_Minh', name: 'Ho Chi Minh', region: 'Asia', offset: '+07:00' },
-            { id: 'Asia/Ulaanbaatar', name: 'Ulaanbaatar', region: 'Asia', offset: '+08:00' },
-            
-            // Americas
-            { id: 'America/New_York', name: 'New York', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Los_Angeles', name: 'Los Angeles', region: 'Americas', offset: '-07:00' },
-            { id: 'America/Chicago', name: 'Chicago', region: 'Americas', offset: '-05:00' },
-            { id: 'America/Denver', name: 'Denver', region: 'Americas', offset: '-06:00' },
-            { id: 'America/Phoenix', name: 'Phoenix', region: 'Americas', offset: '-07:00' },
-            { id: 'America/Toronto', name: 'Toronto', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Vancouver', name: 'Vancouver', region: 'Americas', offset: '-07:00' },
-            { id: 'America/Sao_Paulo', name: 'Sao Paulo', region: 'Americas', offset: '-03:00' },
-            { id: 'America/Mexico_City', name: 'Mexico City', region: 'Americas', offset: '-06:00' },
-            { id: 'America/Bogota', name: 'Bogota', region: 'Americas', offset: '-05:00' },
-            { id: 'America/Buenos_Aires', name: 'Buenos Aires', region: 'Americas', offset: '-03:00' },
-            { id: 'America/Santiago', name: 'Santiago', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Lima', name: 'Lima', region: 'Americas', offset: '-05:00' },
-            { id: 'America/Caracas', name: 'Caracas', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Panama', name: 'Panama', region: 'Americas', offset: '-05:00' },
-            { id: 'America/Montevideo', name: 'Montevideo', region: 'Americas', offset: '-03:00' },
-            { id: 'America/Asuncion', name: 'Asuncion', region: 'Americas', offset: '-04:00' },
-            { id: 'America/La_Paz', name: 'La Paz', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Guatemala', name: 'Guatemala', region: 'Americas', offset: '-06:00' },
-            { id: 'America/Managua', name: 'Managua', region: 'Americas', offset: '-06:00' },
-            { id: 'America/San_Salvador', name: 'San Salvador', region: 'Americas', offset: '-06:00' },
-            { id: 'America/Tegucigalpa', name: 'Tegucigalpa', region: 'Americas', offset: '-06:00' },
-            
-            // Pacific
-            { id: 'Australia/Sydney', name: 'Sydney', region: 'Pacific', offset: '+10:00' },
-            { id: 'Australia/Melbourne', name: 'Melbourne', region: 'Pacific', offset: '+10:00' },
-            { id: 'Australia/Brisbane', name: 'Brisbane', region: 'Pacific', offset: '+10:00' },
-            { id: 'Australia/Perth', name: 'Perth', region: 'Pacific', offset: '+08:00' },
-            { id: 'Australia/Adelaide', name: 'Adelaide', region: 'Pacific', offset: '+09:30' },
-            { id: 'Australia/Hobart', name: 'Hobart', region: 'Pacific', offset: '+10:00' },
-            { id: 'Pacific/Auckland', name: 'Auckland', region: 'Pacific', offset: '+12:00' },
-            { id: 'Pacific/Fiji', name: 'Fiji', region: 'Pacific', offset: '+12:00' },
-            { id: 'Pacific/Guam', name: 'Guam', region: 'Pacific', offset: '+10:00' },
-            { id: 'Pacific/Honolulu', name: 'Honolulu', region: 'Pacific', offset: '-10:00' },
-            { id: 'Pacific/Pago_Pago', name: 'Pago Pago', region: 'Pacific', offset: '-11:00' },
-            { id: 'Pacific/Tahiti', name: 'Tahiti', region: 'Pacific', offset: '-10:00' },
-            { id: 'Pacific/Noumea', name: 'Noumea', region: 'Pacific', offset: '+11:00' },
-            { id: 'Pacific/Port_Moresby', name: 'Port Moresby', region: 'Pacific', offset: '+10:00' }
+            { id: 'UTC', label: 'UTC', utcOffset: '+00:00' },
+            { id: 'Africa/Nairobi', label: 'Nairobi', utcOffset: '+03:00' },
+            { id: 'Africa/Cairo', label: 'Cairo', utcOffset: '+03:00' },
+            { id: 'Africa/Johannesburg', label: 'Johannesburg', utcOffset: '+02:00' },
+            { id: 'Africa/Lagos', label: 'Lagos', utcOffset: '+01:00' },
+            { id: 'Africa/Casablanca', label: 'Casablanca', utcOffset: '+01:00' },
+            { id: 'Europe/London', label: 'London', utcOffset: '+01:00' },
+            { id: 'Europe/Paris', label: 'Paris', utcOffset: '+02:00' },
+            { id: 'Europe/Berlin', label: 'Berlin', utcOffset: '+02:00' },
+            { id: 'Europe/Rome', label: 'Rome', utcOffset: '+02:00' },
+            { id: 'Europe/Madrid', label: 'Madrid', utcOffset: '+02:00' },
+            { id: 'Europe/Bucharest', label: 'Bucharest', utcOffset: '+03:00' },
+            { id: 'Europe/Athens', label: 'Athens', utcOffset: '+03:00' },
+            { id: 'Europe/Istanbul', label: 'Istanbul', utcOffset: '+03:00' },
+            { id: 'Europe/Moscow', label: 'Moscow', utcOffset: '+03:00' },
+            { id: 'Europe/Dublin', label: 'Dublin', utcOffset: '+01:00' },
+            { id: 'Europe/Zurich', label: 'Zurich', utcOffset: '+02:00' },
+            { id: 'Europe/Vienna', label: 'Vienna', utcOffset: '+02:00' },
+            { id: 'Europe/Brussels', label: 'Brussels', utcOffset: '+02:00' },
+            { id: 'Europe/Amsterdam', label: 'Amsterdam', utcOffset: '+02:00' },
+            { id: 'Europe/Stockholm', label: 'Stockholm', utcOffset: '+02:00' },
+            { id: 'Europe/Oslo', label: 'Oslo', utcOffset: '+02:00' },
+            { id: 'Europe/Copenhagen', label: 'Copenhagen', utcOffset: '+02:00' },
+            { id: 'Europe/Helsinki', label: 'Helsinki', utcOffset: '+03:00' },
+            { id: 'Europe/Warsaw', label: 'Warsaw', utcOffset: '+02:00' },
+            { id: 'Europe/Prague', label: 'Prague', utcOffset: '+02:00' },
+            { id: 'Europe/Budapest', label: 'Budapest', utcOffset: '+02:00' },
+            { id: 'Europe/Sofia', label: 'Sofia', utcOffset: '+03:00' },
+            { id: 'Europe/Kiev', label: 'Kiev', utcOffset: '+03:00' },
+            { id: 'Europe/Minsk', label: 'Minsk', utcOffset: '+03:00' },
+            { id: 'Europe/Riga', label: 'Riga', utcOffset: '+03:00' },
+            { id: 'Europe/Vilnius', label: 'Vilnius', utcOffset: '+03:00' },
+            { id: 'Europe/Tallinn', label: 'Tallinn', utcOffset: '+03:00' },
+            { id: 'Europe/Lisbon', label: 'Lisbon', utcOffset: '+01:00' },
+            { id: 'Europe/Belgrade', label: 'Belgrade', utcOffset: '+02:00' },
+            { id: 'Europe/Sarajevo', label: 'Sarajevo', utcOffset: '+02:00' },
+            { id: 'Asia/Tokyo', label: 'Tokyo', utcOffset: '+09:00' },
+            { id: 'Asia/Seoul', label: 'Seoul', utcOffset: '+09:00' },
+            { id: 'Asia/Shanghai', label: 'Shanghai', utcOffset: '+08:00' },
+            { id: 'Asia/Singapore', label: 'Singapore', utcOffset: '+08:00' },
+            { id: 'Asia/Kolkata', label: 'Kolkata', utcOffset: '+05:30' },
+            { id: 'Asia/Dubai', label: 'Dubai', utcOffset: '+04:00' },
+            { id: 'Asia/Riyadh', label: 'Riyadh', utcOffset: '+03:00' },
+            { id: 'Asia/Bangkok', label: 'Bangkok', utcOffset: '+07:00' },
+            { id: 'Asia/Jakarta', label: 'Jakarta', utcOffset: '+07:00' },
+            { id: 'Asia/Kuala_Lumpur', label: 'Kuala Lumpur', utcOffset: '+08:00' },
+            { id: 'Asia/Manila', label: 'Manila', utcOffset: '+08:00' },
+            { id: 'Asia/Hong_Kong', label: 'Hong Kong', utcOffset: '+08:00' },
+            { id: 'Asia/Taipei', label: 'Taipei', utcOffset: '+08:00' },
+            { id: 'Asia/Dhaka', label: 'Dhaka', utcOffset: '+06:00' },
+            { id: 'Asia/Karachi', label: 'Karachi', utcOffset: '+05:00' },
+            { id: 'Asia/Tehran', label: 'Tehran', utcOffset: '+04:30' },
+            { id: 'Asia/Baghdad', label: 'Baghdad', utcOffset: '+03:00' },
+            { id: 'Asia/Beirut', label: 'Beirut', utcOffset: '+03:00' },
+            { id: 'Asia/Jerusalem', label: 'Jerusalem', utcOffset: '+03:00' },
+            { id: 'Asia/Kabul', label: 'Kabul', utcOffset: '+04:30' },
+            { id: 'Asia/Kathmandu', label: 'Kathmandu', utcOffset: '+05:45' },
+            { id: 'Asia/Colombo', label: 'Colombo', utcOffset: '+05:30' },
+            { id: 'America/New_York', label: 'New York', utcOffset: '-04:00' },
+            { id: 'America/Los_Angeles', label: 'Los Angeles', utcOffset: '-07:00' },
+            { id: 'America/Chicago', label: 'Chicago', utcOffset: '-05:00' },
+            { id: 'America/Denver', label: 'Denver', utcOffset: '-06:00' },
+            { id: 'America/Phoenix', label: 'Phoenix', utcOffset: '-07:00' },
+            { id: 'America/Toronto', label: 'Toronto', utcOffset: '-04:00' },
+            { id: 'America/Vancouver', label: 'Vancouver', utcOffset: '-07:00' },
+            { id: 'America/Sao_Paulo', label: 'Sao Paulo', utcOffset: '-03:00' },
+            { id: 'America/Mexico_City', label: 'Mexico City', utcOffset: '-06:00' },
+            { id: 'America/Bogota', label: 'Bogota', utcOffset: '-05:00' },
+            { id: 'America/Buenos_Aires', label: 'Buenos Aires', utcOffset: '-03:00' },
+            { id: 'America/Santiago', label: 'Santiago', utcOffset: '-04:00' },
+            { id: 'America/Lima', label: 'Lima', utcOffset: '-05:00' },
+            { id: 'America/Caracas', label: 'Caracas', utcOffset: '-04:00' },
+            { id: 'America/Panama', label: 'Panama', utcOffset: '-05:00' },
+            { id: 'America/Montevideo', label: 'Montevideo', utcOffset: '-03:00' },
+            { id: 'America/Asuncion', label: 'Asuncion', utcOffset: '-04:00' },
+            { id: 'America/La_Paz', label: 'La Paz', utcOffset: '-04:00' },
+            { id: 'America/Guatemala', label: 'Guatemala', utcOffset: '-06:00' },
+            { id: 'America/Managua', label: 'Managua', utcOffset: '-06:00' },
+            { id: 'America/San_Salvador', label: 'San Salvador', utcOffset: '-06:00' },
+            { id: 'America/Tegucigalpa', label: 'Tegucigalpa', utcOffset: '-06:00' },
+            { id: 'Australia/Sydney', label: 'Sydney', utcOffset: '+10:00' },
+            { id: 'Australia/Melbourne', label: 'Melbourne', utcOffset: '+10:00' },
+            { id: 'Australia/Brisbane', label: 'Brisbane', utcOffset: '+10:00' },
+            { id: 'Australia/Perth', label: 'Perth', utcOffset: '+08:00' },
+            { id: 'Australia/Adelaide', label: 'Adelaide', utcOffset: '+09:30' },
+            { id: 'Australia/Hobart', label: 'Hobart', utcOffset: '+10:00' },
+            { id: 'Pacific/Auckland', label: 'Auckland', utcOffset: '+12:00' },
+            { id: 'Pacific/Fiji', label: 'Fiji', utcOffset: '+12:00' },
+            { id: 'Pacific/Guam', label: 'Guam', utcOffset: '+10:00' },
+            { id: 'Pacific/Honolulu', label: 'Honolulu', utcOffset: '-10:00' },
+            { id: 'Pacific/Pago_Pago', label: 'Pago Pago', utcOffset: '-11:00' },
+            { id: 'Pacific/Tahiti', label: 'Tahiti', utcOffset: '-10:00' },
+            { id: 'Pacific/Noumea', label: 'Noumea', utcOffset: '+11:00' },
+            { id: 'Pacific/Port_Moresby', label: 'Port Moresby', utcOffset: '+10:00' }
         ];
 
-        // Calculate actual offsets for today (handles DST)
-        const now = new Date();
-        const timezonesWithOffsets = timezones.map(tz => {
-            try {
-                const offset = getTimezoneOffset(tz.id);
-                return {
-                    ...tz,
-                    offset: offset
-                };
-            } catch (err) {
-                return tz;
-            }
-        });
-
         res.status(200).json({
-            timezones: timezonesWithOffsets
+            success: true,
+            data: {
+                timezones: timezones
+            }
         });
 
     } catch (err) {
@@ -45227,7 +45453,7 @@ app.get('/api/settings/timezones', async (req, res) => {
 });
 
 // =============================================
-// 10. GET /api/users/profile - User Profile
+// 13. GET /api/users/profile - User Profile
 // =============================================
 app.get('/api/users/profile', protect, async (req, res) => {
     try {
@@ -45246,17 +45472,20 @@ app.get('/api/users/profile', protect, async (req, res) => {
         }
 
         res.status(200).json({
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
-            email: user.email || '',
-            phone: user.phone || '',
-            country: user.country || '',
-            address: {
-                street: user.address?.street || '',
-                city: user.address?.city || '',
-                state: user.address?.state || '',
-                postalCode: user.address?.postalCode || '',
-                country: user.address?.country || ''
+            success: true,
+            data: {
+                firstName: user.firstName || '',
+                lastName: user.lastName || '',
+                email: user.email || '',
+                phone: user.phone || '',
+                country: user.country || '',
+                address: {
+                    street: user.address?.street || '',
+                    city: user.address?.city || '',
+                    state: user.address?.state || '',
+                    postalCode: user.address?.postalCode || '',
+                    country: user.address?.country || ''
+                }
             }
         });
 
@@ -45267,6 +45496,293 @@ app.get('/api/users/profile', protect, async (req, res) => {
             error: {
                 code: 'SERVER_ERROR',
                 message: 'Failed to fetch profile'
+            }
+        });
+    }
+});
+
+// =============================================
+// 14. PUT /api/users/profile - Update Profile
+// =============================================
+app.put('/api/users/profile', protect, [
+    body('firstName').optional().isString().trim().notEmpty().withMessage('First name is required'),
+    body('lastName').optional().isString().trim().notEmpty().withMessage('Last name is required'),
+    body('phone').optional().isString().trim(),
+    body('country').optional().isString().trim()
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 'VALIDATION_ERROR',
+                message: errors.array()[0]?.msg || 'Invalid input'
+            }
+        });
+    }
+
+    try {
+        const userId = req.user._id;
+        const { firstName, lastName, phone, country } = req.body;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        if (firstName !== undefined) user.firstName = firstName;
+        if (lastName !== undefined) user.lastName = lastName;
+        if (phone !== undefined) user.phone = phone;
+        if (country !== undefined) user.country = country;
+
+        await user.save();
+
+        // Log activity
+        await logActivity('profile_updated', 'User', userId, userId, 'User', req);
+
+        res.status(200).json({
+            success: true,
+            message: 'Profile updated successfully'
+        });
+
+    } catch (err) {
+        console.error('Error updating profile:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to update profile'
+            }
+        });
+    }
+});
+
+// =============================================
+// 15. PUT /api/users/address - Update Address
+// =============================================
+app.put('/api/users/address', protect, [
+    body('street').optional().isString().trim(),
+    body('city').optional().isString().trim(),
+    body('state').optional().isString().trim(),
+    body('postalCode').optional().isString().trim(),
+    body('country').optional().isString().trim()
+], async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { street, city, state, postalCode, country } = req.body;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        if (!user.address) user.address = {};
+        if (street !== undefined) user.address.street = street;
+        if (city !== undefined) user.address.city = city;
+        if (state !== undefined) user.address.state = state;
+        if (postalCode !== undefined) user.address.postalCode = postalCode;
+        if (country !== undefined) user.address.country = country;
+
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Address updated successfully'
+        });
+
+    } catch (err) {
+        console.error('Error updating address:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to update address'
+            }
+        });
+    }
+});
+
+// =============================================
+// 16. PUT /api/users/password - Change Password
+// =============================================
+app.put('/api/users/password', protect, [
+    body('currentPassword').notEmpty().withMessage('Current password is required'),
+    body('newPassword').isLength({ min: 8 }).withMessage('New password must be at least 8 characters')
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 'VALIDATION_ERROR',
+                message: errors.array()[0]?.msg || 'Invalid input'
+            }
+        });
+    }
+
+    try {
+        const userId = req.user._id;
+        const { currentPassword, newPassword } = req.body;
+
+        const user = await User.findById(userId).select('+password');
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        // Verify current password
+        const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                error: {
+                    code: 'INVALID_PASSWORD',
+                    message: 'Current password is incorrect'
+                }
+            });
+        }
+
+        // Hash and save new password
+        user.password = await bcrypt.hash(newPassword, 12);
+        user.passwordChangedAt = new Date();
+        await user.save();
+
+        // Log activity
+        await logActivity('password_changed', 'User', userId, userId, 'User', req);
+
+        res.status(200).json({
+            success: true,
+            message: 'Password changed successfully'
+        });
+
+    } catch (err) {
+        console.error('Error changing password:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to change password'
+            }
+        });
+    }
+});
+
+// =============================================
+// 17. GET /api/users/preferences - Get User Preferences
+// =============================================
+app.get('/api/users/preferences', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId)
+            .select('preferences')
+            .lean();
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        const preferences = user.preferences || {};
+
+        res.status(200).json({
+            success: true,
+            data: {
+                language: preferences.language || 'en',
+                timezone: preferences.timezone || 'UTC',
+                theme: preferences.theme || 'system',
+                currency: preferences.currency || 'USD'
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching preferences:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to fetch preferences'
+            }
+        });
+    }
+});
+
+// =============================================
+// 18. PUT /api/users/preferences - Update Preferences
+// =============================================
+app.put('/api/users/preferences', protect, [
+    body('language').optional().isString().isLength({ min: 2, max: 5 }),
+    body('timezone').optional().isString(),
+    body('theme').optional().isIn(['system', 'dark', 'light']),
+    body('currency').optional().isString().isLength({ min: 3, max: 3 })
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 'VALIDATION_ERROR',
+                message: errors.array()[0]?.msg || 'Invalid input'
+            }
+        });
+    }
+
+    try {
+        const userId = req.user._id;
+        const { language, timezone, theme, currency } = req.body;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        if (!user.preferences) user.preferences = {};
+        if (language !== undefined) user.preferences.language = language;
+        if (timezone !== undefined) user.preferences.timezone = timezone;
+        if (theme !== undefined) user.preferences.theme = theme;
+        if (currency !== undefined) user.preferences.currency = currency;
+
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Preferences updated successfully'
+        });
+
+    } catch (err) {
+        console.error('Error updating preferences:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to update preferences'
             }
         });
     }
@@ -45328,28 +45844,6 @@ function detectDeviceType(userAgent) {
     if (userAgent.includes('tablet') || userAgent.includes('ipad')) return 'tablet';
     return 'desktop';
 }
-
-/**
- * Get timezone offset for a given IANA timezone
- */
-function getTimezoneOffset(timezoneId) {
-    try {
-        const now = new Date();
-        const dateString = now.toLocaleString('en-US', { timeZone: timezoneId });
-        const date = new Date(dateString);
-        const offsetMinutes = -date.getTimezoneOffset();
-        const hours = Math.floor(Math.abs(offsetMinutes) / 60);
-        const minutes = Math.abs(offsetMinutes) % 60;
-        const sign = offsetMinutes >= 0 ? '+' : '-';
-        return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-    } catch (err) {
-        return '+00:00';
-    }
-}
-
-
-
-
 
 
 
