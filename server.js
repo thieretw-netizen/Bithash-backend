@@ -44474,7 +44474,7 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
 
         // Generate OTP Auth URI
         const otpauthUri = secret.otpauth_url || 
-            `otpauth://totp/BitHash:${user.email}?secret=${secret.base32}&issuer=BitHash`;
+            `otpauth://totp/₿itHash:${user.email}?secret=${secret.base32}&issuer=₿itHash`;
 
         // Generate QR code (using external API since we don't have qr-image)
         const qrCode = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUri)}`;
