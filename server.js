@@ -6726,6 +6726,10 @@ const initializePlans = async () => {
 initializeAdmin();
 initializePlans();
 
+
+
+
+
 const protect = async (req, res, next) => {
   try {
     let token;
@@ -6766,11 +6770,32 @@ const protect = async (req, res, next) => {
       });
     }
 
-    if (currentUser.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Two-factor authentication required'
-      });
+    // ✅ FIX: Only require 2FA for sensitive operations, NOT for all requests
+    if (currentUser.twoFactorAuth?.enabled) {
+      // Define which routes require 2FA verification
+      const sensitiveRoutes = [
+        '/api/withdrawals',
+        '/api/withdrawals/spot',
+        '/api/withdrawals/bank',
+        '/api/withdrawals/btc',
+        '/api/transactions/transfer',
+        '/api/admin',
+        '/api/payments',
+        '/api/loans/apply',
+        '/api/loans/repay',
+        '/api/convert'
+      ];
+      
+      // Check if the current request path requires 2FA
+      const requires2FA = sensitiveRoutes.some(route => req.path.startsWith(route));
+      
+      if (requires2FA && !req.headers['x-2fa-verified']) {
+        return res.status(401).json({
+          status: 'fail',
+          message: 'Two-factor authentication required',
+          requires2FA: true  // ← This flag tells frontend to show 2FA modal
+        });
+      }
     }
 
     req.user = currentUser;
@@ -6782,6 +6807,11 @@ const protect = async (req, res, next) => {
     });
   }
 };
+
+
+
+
+
 
 const adminProtect = async (req, res, next) => {
   try {
