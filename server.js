@@ -44357,13 +44357,73 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
+// =============================================
+// 1. GET /api/users/security - Security Overview (FIXED)
+// =============================================
+app.get('/api/users/security', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId)
+            .select('twoFactorAuth passwordChangedAt loginHistory')
+            .lean();
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        // Count active devices from loginHistory - no fallback to 1
+        const activeDevices = user.loginHistory || [];
+        const activeCount = activeDevices.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired').length;
+
+        const hasPassword = true;
+        const hasAuthenticator = user.twoFactorAuth?.enabled || false;
+
+        let securityLevel = 'weak';
+        let statusMessage = 'Your security configuration needs improvement.';
+
+        if (hasPassword && hasAuthenticator) {
+            securityLevel = 'strong';
+            statusMessage = 'Your security configuration is up to date.';
+        } else if (hasPassword) {
+            securityLevel = 'medium';
+            statusMessage = 'Enable two-factor authentication to strengthen your account security.';
+        }
+
+        res.status(200).json({
+            securityLevel: securityLevel,
+            statusMessage: statusMessage,
+            password: {
+                enabled: hasPassword
+            },
+            authenticator: {
+                enabled: hasAuthenticator,
+                enabledAt: user.twoFactorAuth?.enabledAt || null
+            },
+            devices: {
+                activeCount: activeCount
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching security overview:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to fetch security overview'
+            }
+        });
+    }
+});
 
 // =============================================
-// BACKEND ENDPOINTS - COMPLETE REWRITE
-// =============================================
-
-// =============================================
-// 1. GET /api/users/two-factor - TWO FACTOR AUTH STATUS
+// 2. GET /api/users/two-factor - TWO-FACTOR STATUS (NEW)
 // =============================================
 app.get('/api/users/two-factor', protect, async (req, res) => {
     try {
@@ -44383,31 +44443,30 @@ app.get('/api/users/two-factor', protect, async (req, res) => {
         }
 
         const isEnabled = user.twoFactorAuth?.enabled || false;
-        
+
         res.status(200).json({
             success: true,
             authenticator: {
                 enabled: isEnabled,
-                enabledAt: isEnabled ? user.twoFactorAuth?.enabledAt || null : null,
-                recoveryCodesRemaining: isEnabled && user.twoFactorAuth?.recoveryCodes ? 
-                    user.twoFactorAuth.recoveryCodes.filter(c => !c.used).length : 0
+                enabledAt: isEnabled ? (user.twoFactorAuth?.enabledAt || null) : null,
+                recoveryCodesRemaining: isEnabled ? (user.twoFactorAuth?.recoveryCodes?.length || 0) : 0
             }
         });
 
     } catch (err) {
-        console.error('Error fetching 2FA status:', err);
+        console.error('Error fetching two-factor status:', err);
         res.status(500).json({
             success: false,
             error: {
                 code: 'SERVER_ERROR',
-                message: 'Failed to fetch two-factor authentication status'
+                message: 'Failed to fetch two-factor status'
             }
         });
     }
 });
 
 // =============================================
-// 2. POST /api/users/two-factor/authenticator/setup
+// 3. POST /api/users/two-factor/authenticator/setup - with 409 ALREADY_ENABLED
 // =============================================
 app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
     try {
@@ -44424,6 +44483,7 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
             });
         }
 
+        // If authenticator is already enabled - return 409 ALREADY_ENABLED
         if (user.twoFactorAuth?.enabled) {
             return res.status(409).json({
                 success: false,
@@ -44434,12 +44494,27 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
             });
         }
 
+        // Check for existing pending enrollment
         const enrollmentKey = `2fa_enrollment:${userId}`;
         const existingEnrollment = await redis.get(enrollmentKey);
+
+        // If there's an existing enrollment, reuse it or clean it up
         if (existingEnrollment) {
+            const enrollment = JSON.parse(existingEnrollment);
+            // If enrollment hasn't expired, return it
+            if (enrollment.expiresAt > Date.now()) {
+                return res.status(200).json({
+                    enrollmentId: enrollment.enrollmentId,
+                    manualKey: enrollment.secret,
+                    otpauthUri: `otpauth://totp/₿itHash:${user.email}?secret=${enrollment.secret}&issuer=₿itHash`,
+                    qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`otpauth://totp/₿itHash:${user.email}?secret=${enrollment.secret}&issuer=₿itHash`)}`
+                });
+            }
+            // Expired - delete it
             await redis.del(enrollmentKey);
         }
 
+        // Generate TOTP secret
         const secret = speakeasy.generateSecret({
             length: 20,
             name: 'BitHash',
@@ -44447,22 +44522,21 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
         });
 
         const enrollmentId = `enr_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        
+
         const enrollmentData = {
             enrollmentId: enrollmentId,
             secret: secret.base32,
             expiresAt: Date.now() + 10 * 60 * 1000
         };
-        
+
         await redis.setex(enrollmentKey, 600, JSON.stringify(enrollmentData));
 
-        const otpauthUri = secret.otpauth_url || 
+        const otpauthUri = secret.otpauth_url ||
             `otpauth://totp/₿itHash:${user.email}?secret=${secret.base32}&issuer=₿itHash`;
 
         const qrCode = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUri)}`;
 
         res.status(200).json({
-            success: true,
             enrollmentId: enrollmentId,
             manualKey: secret.base32,
             otpauthUri: otpauthUri,
@@ -44482,7 +44556,7 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
 });
 
 // =============================================
-// 3. POST /api/users/two-factor/authenticator/verify
+// 4. POST /api/users/two-factor/authenticator/verify
 // =============================================
 app.post('/api/users/two-factor/authenticator/verify', protect, [
     body('enrollmentId').notEmpty().withMessage('Enrollment ID is required'),
@@ -44514,9 +44588,21 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
+        // Check if already enabled
+        if (user.twoFactorAuth?.enabled) {
+            return res.status(409).json({
+                success: false,
+                error: {
+                    code: 'ALREADY_ENABLED',
+                    message: 'Authenticator is already enabled'
+                }
+            });
+        }
+
+        // Get enrollment from Redis
         const enrollmentKey = `2fa_enrollment:${userId}`;
         const enrollmentData = await redis.get(enrollmentKey);
-        
+
         if (!enrollmentData) {
             return res.status(400).json({
                 success: false,
@@ -44550,10 +44636,11 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
+        // Rate limiting
         const attemptsKey = `2fa_attempts:${userId}`;
         const attempts = await redis.incr(attemptsKey);
         await redis.expire(attemptsKey, 300);
-        
+
         if (attempts > 5) {
             await redis.del(enrollmentKey);
             await redis.del(attemptsKey);
@@ -44566,6 +44653,7 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
+        // Verify TOTP
         const isValid = speakeasy.totp.verify({
             secret: enrollment.secret,
             encoding: 'base32',
@@ -44583,34 +44671,38 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
+        // Generate recovery codes
         const recoveryCodes = [];
         const hashedRecoveryCodes = [];
-        
+
         for (let i = 0; i < 8; i++) {
             const segment1 = generateRecoverySegment();
             const segment2 = generateRecoverySegment();
-            const code = `${segment1}-${segment2}`;
-            recoveryCodes.push(code);
+            const codeStr = `${segment1}-${segment2}`;
+            recoveryCodes.push(codeStr);
             hashedRecoveryCodes.push({
-                hash: crypto.createHash('sha256').update(code).digest('hex'),
+                hash: crypto.createHash('sha256').update(codeStr).digest('hex'),
                 used: false
             });
         }
 
+        // Enable 2FA with proper timestamp
         if (!user.twoFactorAuth) {
             user.twoFactorAuth = { enabled: false };
         }
-        
+
         user.twoFactorAuth.enabled = true;
         user.twoFactorAuth.secret = enrollment.secret;
-        user.twoFactorAuth.enabledAt = new Date();
         user.twoFactorAuth.recoveryCodes = hashedRecoveryCodes;
+        user.twoFactorAuth.enabledAt = new Date();
 
         await user.save();
 
+        // Clean up Redis
         await redis.del(enrollmentKey);
         await redis.del(attemptsKey);
 
+        // Log activity
         await logActivity('authenticator_enabled', 'User', userId, userId, 'User', req);
 
         res.status(200).json({
@@ -44632,27 +44724,13 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
 });
 
 // =============================================
-// 4. POST /api/users/two-factor/authenticator/disable
+// 5. POST /api/users/two-factor/authenticator/disable
 // =============================================
-app.post('/api/users/two-factor/authenticator/disable', protect, [
-    body('password').notEmpty().withMessage('Password is required')
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'VALIDATION_ERROR',
-                message: errors.array()[0]?.msg || 'Invalid input'
-            }
-        });
-    }
-
+app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res) => {
     try {
         const userId = req.user._id;
-        const { password } = req.body;
-        
         const user = await User.findById(userId);
+
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -44673,9 +44751,20 @@ app.post('/api/users/two-factor/authenticator/disable', protect, [
             });
         }
 
+        const { password } = req.body;
+        if (!password) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'PASSWORD_REQUIRED',
+                    message: 'Password required to disable authenticator'
+                }
+            });
+        }
+
         const userWithPassword = await User.findById(userId).select('+password');
         const isPasswordValid = await bcrypt.compare(password, userWithPassword.password);
-        
+
         if (!isPasswordValid) {
             return res.status(401).json({
                 success: false,
@@ -44686,11 +44775,12 @@ app.post('/api/users/two-factor/authenticator/disable', protect, [
             });
         }
 
+        // Disable 2FA - preserve enabledAt for audit
         user.twoFactorAuth.enabled = false;
         user.twoFactorAuth.secret = undefined;
         user.twoFactorAuth.recoveryCodes = [];
-        user.twoFactorAuth.enabledAt = undefined;
-        
+        // Keep enabledAt for audit purposes
+
         await user.save();
 
         await logActivity('authenticator_disabled', 'User', userId, userId, 'User', req);
@@ -44713,27 +44803,13 @@ app.post('/api/users/two-factor/authenticator/disable', protect, [
 });
 
 // =============================================
-// 5. POST /api/users/two-factor/authenticator/recovery-codes
+// 6. POST /api/users/two-factor/authenticator/recovery-codes
 // =============================================
-app.post('/api/users/two-factor/authenticator/recovery-codes', protect, [
-    body('password').notEmpty().withMessage('Password is required')
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'VALIDATION_ERROR',
-                message: errors.array()[0]?.msg || 'Invalid input'
-            }
-        });
-    }
-
+app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (req, res) => {
     try {
         const userId = req.user._id;
-        const { password } = req.body;
-        
         const user = await User.findById(userId);
+
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -44754,9 +44830,20 @@ app.post('/api/users/two-factor/authenticator/recovery-codes', protect, [
             });
         }
 
+        const { password } = req.body;
+        if (!password) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'PASSWORD_REQUIRED',
+                    message: 'Password required to regenerate recovery codes'
+                }
+            });
+        }
+
         const userWithPassword = await User.findById(userId).select('+password');
         const isPasswordValid = await bcrypt.compare(password, userWithPassword.password);
-        
+
         if (!isPasswordValid) {
             return res.status(401).json({
                 success: false,
@@ -44767,16 +44854,17 @@ app.post('/api/users/two-factor/authenticator/recovery-codes', protect, [
             });
         }
 
+        // Generate new recovery codes
         const recoveryCodes = [];
         const hashedRecoveryCodes = [];
-        
+
         for (let i = 0; i < 8; i++) {
             const segment1 = generateRecoverySegment();
             const segment2 = generateRecoverySegment();
-            const code = `${segment1}-${segment2}`;
-            recoveryCodes.push(code);
+            const codeStr = `${segment1}-${segment2}`;
+            recoveryCodes.push(codeStr);
             hashedRecoveryCodes.push({
-                hash: crypto.createHash('sha256').update(code).digest('hex'),
+                hash: crypto.createHash('sha256').update(codeStr).digest('hex'),
                 used: false
             });
         }
@@ -44804,71 +44892,7 @@ app.post('/api/users/two-factor/authenticator/recovery-codes', protect, [
 });
 
 // =============================================
-// 6. GET /api/users/security - SECURITY OVERVIEW
-// =============================================
-app.get('/api/users/security', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const user = await User.findById(userId)
-            .select('twoFactorAuth passwordChangedAt loginHistory')
-            .lean();
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            });
-        }
-
-        const activeDevices = user.loginHistory || [];
-        const activeCount = activeDevices.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired').length;
-
-        const hasPassword = true;
-        const hasAuthenticator = user.twoFactorAuth?.enabled || false;
-        
-        let securityLevel = 'weak';
-        let statusMessage = 'Your security configuration needs improvement.';
-        
-        if (hasPassword && hasAuthenticator) {
-            securityLevel = 'strong';
-            statusMessage = 'Your security configuration is up to date.';
-        } else if (hasPassword) {
-            securityLevel = 'medium';
-            statusMessage = 'Enable two-factor authentication to strengthen your account security.';
-        }
-
-        res.status(200).json({
-            success: true,
-            securityLevel: securityLevel,
-            statusMessage: statusMessage,
-            password: {
-                enabled: hasPassword
-            },
-            authenticator: {
-                enabled: hasAuthenticator
-            },
-            devices: {
-                activeCount: activeCount
-            }
-        });
-
-    } catch (err) {
-        console.error('Error fetching security overview:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to fetch security overview'
-            }
-        });
-    }
-});
-
-// =============================================
-// 7. GET /api/users/devices - ACTIVE DEVICES
+// 7. GET /api/users/devices - Active Devices (FIXED)
 // =============================================
 app.get('/api/users/devices', protect, async (req, res) => {
     try {
@@ -44887,15 +44911,14 @@ app.get('/api/users/devices', protect, async (req, res) => {
             });
         }
 
+        // Get current session identifier from header
         const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
 
+        // Format devices from loginHistory
         const devices = (user.loginHistory || []).map((device, index) => {
-            const isCurrent = device.sessionId && currentSessionId ? 
-                device.sessionId === currentSessionId : 
-                false;
-            
+            const isCurrent = device.sessionId === currentSessionId;
             const isActive = device.sessionStatus !== 'revoked' && device.sessionStatus !== 'expired';
-            
+
             const userAgent = device.device || device.userAgent || '';
             const browser = detectBrowser(userAgent);
             const os = detectOS(userAgent);
@@ -44920,49 +44943,14 @@ app.get('/api/users/devices', protect, async (req, res) => {
             };
         });
 
-        if (devices.length === 0) {
-            const userAgent = req.headers['user-agent'] || 'Unknown Browser';
-            const browser = detectBrowser(userAgent);
-            const os = detectOS(userAgent);
-            const deviceType = detectDeviceType(userAgent);
-            
-            const sessionId = currentSessionId || `session_${Date.now()}`;
-            
-            devices.push({
-                id: 'current_device',
-                sessionId: sessionId,
-                name: `${browser} on ${os}`,
-                deviceType: deviceType,
-                sessionStatus: 'active',
-                current: true,
-                lastActiveAt: new Date().toISOString(),
-                createdAt: new Date().toISOString(),
-                location: {
-                    city: 'Unknown',
-                    country: 'Unknown'
-                },
-                browser: browser,
-                os: os,
-                ip: req.ip || 'Unknown'
-            });
-        }
-
-        const hasCurrent = devices.some(d => d.current === true);
-        if (!hasCurrent && devices.length > 0) {
-            const sorted = [...devices].sort((a, b) => 
-                new Date(b.lastActiveAt) - new Date(a.lastActiveAt)
-            );
-            const mostRecent = sorted.find(d => d.sessionStatus !== 'revoked');
-            if (mostRecent) {
-                mostRecent.current = true;
-            } else if (sorted.length > 0) {
-                sorted[0].current = true;
-            }
-        }
+        // CRITICAL FIX: No fake fallback device
+        // If no devices in history, return empty array
+        // The frontend will handle empty state
 
         res.status(200).json({
-            success: true,
-            devices: devices
+            data: {
+                devices: devices
+            }
         });
 
     } catch (err) {
@@ -44978,603 +44966,55 @@ app.get('/api/users/devices', protect, async (req, res) => {
 });
 
 // =============================================
-// 8. POST /api/users/devices/:sessionId/revoke
-// =============================================
-app.post('/api/users/devices/:sessionId/revoke', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const { sessionId } = req.params;
-        
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            });
-        }
-
-        const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
-
-        if (sessionId === currentSessionId) {
-            return res.status(400).json({
-                success: false,
-                error: {
-                    code: 'CANNOT_REVOKE_CURRENT',
-                    message: 'Cannot revoke the current session'
-                }
-            });
-        }
-
-        let deviceFound = false;
-        if (user.loginHistory && user.loginHistory.length > 0) {
-            user.loginHistory = user.loginHistory.map(device => {
-                const deviceSessionId = device.sessionId || device._id?.toString();
-                if (deviceSessionId === sessionId && device.sessionStatus !== 'revoked') {
-                    deviceFound = true;
-                    return { 
-                        ...device, 
-                        sessionStatus: 'revoked', 
-                        revokedAt: new Date() 
-                    };
-                }
-                return device;
-            });
-        }
-
-        if (!deviceFound) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'DEVICE_NOT_FOUND',
-                    message: 'Device not found or already revoked'
-                }
-            });
-        }
-
-        await user.save();
-
-        await logActivity('device_logout', 'User', userId, userId, 'User', req, {
-            sessionId: sessionId
-        });
-
-        res.status(200).json({
-            success: true,
-            message: 'Device session revoked successfully'
-        });
-
-    } catch (err) {
-        console.error('Error revoking device:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to revoke device'
-            }
-        });
-    }
-});
-
-// =============================================
-// 9. POST /api/users/devices/logout-all
-// =============================================
-app.post('/api/users/devices/logout-all', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const user = await User.findById(userId);
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            });
-        }
-
-        const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
-
-        const activeDevices = user.loginHistory?.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired') || [];
-        const totalActive = activeDevices.length;
-
-        let revokedCount = 0;
-        if (user.loginHistory && user.loginHistory.length > 0) {
-            user.loginHistory = user.loginHistory.map(device => {
-                const deviceId = device.sessionId || device._id?.toString();
-                const isCurrent = deviceId && deviceId === currentSessionId;
-                
-                if (!isCurrent && device.sessionStatus !== 'revoked' && device.sessionStatus !== 'expired') {
-                    revokedCount++;
-                    return { 
-                        ...device, 
-                        sessionStatus: 'revoked', 
-                        revokedAt: new Date() 
-                    };
-                }
-                return device;
-            });
-        }
-
-        await user.save();
-
-        if (revokedCount > 0) {
-            const currentToken = req.headers.authorization?.split(' ')[1];
-            if (currentToken) {
-                try {
-                    const decoded = verifyJWT(currentToken);
-                    const tokenExpiry = new Date(decoded.exp * 1000);
-                    await redis.set(`blacklist:${currentToken}`, 'true', 'PX', tokenExpiry - Date.now());
-                } catch (err) {
-                    // Token might be invalid, continue
-                }
-            }
-        }
-
-        await logActivity('logout_all_devices', 'User', userId, userId, 'User', req, {
-            revokedCount: revokedCount,
-            totalActiveBefore: totalActive
-        });
-
-        res.status(200).json({
-            success: true,
-            message: 'All other devices have been logged out.',
-            revokedCount: revokedCount
-        });
-
-    } catch (err) {
-        console.error('Error logging out all devices:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to logout all devices'
-            }
-        });
-    }
-});
-
-// =============================================
-// 10. GET /api/users/activity - RECENT ACTIVITY
-// =============================================
-app.get('/api/users/activity', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const page = parseInt(req.query.page) || 1;
-        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-        const filter = req.query.type || 'all';
-        
-        const skip = (page - 1) * limit;
-
-        const query = { userId: userId };
-        if (filter !== 'all') {
-            query.type = filter;
-        }
-
-        const total = await Activity.countDocuments(query);
-        
-        const activities = await Activity.find(query)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .lean();
-
-        const hasMore = skip + activities.length < total;
-
-        const formattedActivities = activities.map(activity => ({
-            id: activity._id.toString(),
-            type: activity.type || 'unknown',
-            title: activity.title || activity.type || 'Activity',
-            description: activity.description || '',
-            status: activity.status || 'completed',
-            createdAt: activity.createdAt || new Date().toISOString(),
-            location: activity.location || { city: 'Unknown', country: 'Unknown' },
-            device: activity.device || { browser: 'Unknown', os: 'Unknown' },
-            transaction: activity.transaction || null,
-            ip: activity.ip || null
-        }));
-
-        res.status(200).json({
-            success: true,
-            data: {
-                activities: formattedActivities,
-                pagination: {
-                    page: page,
-                    limit: limit,
-                    total: total,
-                    hasMore: hasMore
-                }
-            }
-        });
-
-    } catch (err) {
-        console.error('Error fetching activity:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to fetch activity'
-            }
-        });
-    }
-});
-
-// =============================================
-// 11. GET /api/users/profile - USER PROFILE
-// =============================================
-app.get('/api/users/profile', protect, async (req, res) => {
-    try {
-        const user = await User.findById(req.user._id)
-            .select('firstName lastName email phone country address')
-            .lean();
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
-            email: user.email || '',
-            phone: user.phone || '',
-            country: user.country || '',
-            address: {
-                street: user.address?.street || '',
-                city: user.address?.city || '',
-                state: user.address?.state || '',
-                postalCode: user.address?.postalCode || '',
-                country: user.address?.country || ''
-            }
-        });
-
-    } catch (err) {
-        console.error('Error fetching profile:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to fetch profile'
-            }
-        });
-    }
-});
-
-// =============================================
-// 12. PUT /api/users/profile - UPDATE PROFILE
-// =============================================
-app.put('/api/users/profile', protect, [
-    body('firstName').optional().trim().isLength({ min: 1 }).withMessage('First name is required'),
-    body('lastName').optional().trim().isLength({ min: 1 }).withMessage('Last name is required'),
-    body('phone').optional().trim(),
-    body('country').optional().trim()
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'VALIDATION_ERROR',
-                message: errors.array()[0]?.msg || 'Invalid input'
-            }
-        });
-    }
-
-    try {
-        const userId = req.user._id;
-        const { firstName, lastName, phone, country } = req.body;
-
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            });
-        }
-
-        if (firstName) user.firstName = firstName;
-        if (lastName) user.lastName = lastName;
-        if (phone) user.phone = phone;
-        if (country) user.country = country;
-
-        await user.save();
-
-        await logActivity('profile_updated', 'User', userId, userId, 'User', req);
-
-        res.status(200).json({
-            success: true,
-            message: 'Profile updated successfully'
-        });
-
-    } catch (err) {
-        console.error('Error updating profile:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to update profile'
-            }
-        });
-    }
-});
-
-// =============================================
-// 13. PUT /api/users/address - UPDATE ADDRESS
-// =============================================
-app.put('/api/users/address', protect, [
-    body('street').optional().trim(),
-    body('city').optional().trim(),
-    body('state').optional().trim(),
-    body('postalCode').optional().trim(),
-    body('country').optional().trim()
-], async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const { street, city, state, postalCode, country } = req.body;
-
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            });
-        }
-
-        if (!user.address) {
-            user.address = {};
-        }
-
-        if (street !== undefined) user.address.street = street;
-        if (city !== undefined) user.address.city = city;
-        if (state !== undefined) user.address.state = state;
-        if (postalCode !== undefined) user.address.postalCode = postalCode;
-        if (country !== undefined) user.address.country = country;
-
-        await user.save();
-
-        await logActivity('profile_updated', 'User', userId, userId, 'User', req);
-
-        res.status(200).json({
-            success: true,
-            message: 'Address updated successfully'
-        });
-
-    } catch (err) {
-        console.error('Error updating address:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to update address'
-            }
-        });
-    }
-});
-
-// =============================================
-// 14. PUT /api/users/password - CHANGE PASSWORD
-// =============================================
-app.put('/api/users/password', protect, [
-    body('currentPassword').notEmpty().withMessage('Current password is required'),
-    body('newPassword').isLength({ min: 8 }).withMessage('New password must be at least 8 characters')
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'VALIDATION_ERROR',
-                message: errors.array()[0]?.msg || 'Invalid input'
-            }
-        });
-    }
-
-    try {
-        const userId = req.user._id;
-        const { currentPassword, newPassword } = req.body;
-
-        const user = await User.findById(userId).select('+password');
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            });
-        }
-
-        const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
-        if (!isPasswordValid) {
-            return res.status(401).json({
-                success: false,
-                error: {
-                    code: 'INVALID_PASSWORD',
-                    message: 'Current password is incorrect'
-                }
-            });
-        }
-
-        user.password = await bcrypt.hash(newPassword, 10);
-        user.passwordChangedAt = new Date();
-        await user.save();
-
-        await logActivity('password_changed', 'User', userId, userId, 'User', req);
-
-        res.status(200).json({
-            success: true,
-            message: 'Password changed successfully'
-        });
-
-    } catch (err) {
-        console.error('Error changing password:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to change password'
-            }
-        });
-    }
-});
-
-// =============================================
-// 15. GET /api/users/preferences - USER PREFERENCES
-// =============================================
-app.get('/api/users/preferences', protect, async (req, res) => {
-    try {
-        const user = await User.findById(req.user._id)
-            .select('preferences')
-            .lean();
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            });
-        }
-
-        const preferences = user.preferences || {};
-
-        res.status(200).json({
-            success: true,
-            language: preferences.language || 'en',
-            timezone: preferences.timezone || 'UTC',
-            theme: preferences.theme || 'system',
-            currency: preferences.currency || 'USD'
-        });
-
-    } catch (err) {
-        console.error('Error fetching preferences:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to fetch preferences'
-            }
-        });
-    }
-});
-
-// =============================================
-// 16. PUT /api/users/preferences - UPDATE PREFERENCES
-// =============================================
-app.put('/api/users/preferences', protect, [
-    body('language').optional().isString(),
-    body('timezone').optional().isString(),
-    body('theme').optional().isString(),
-    body('currency').optional().isString()
-], async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const { language, timezone, theme, currency } = req.body;
-
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            });
-        }
-
-        if (!user.preferences) {
-            user.preferences = {};
-        }
-
-        if (language !== undefined) user.preferences.language = language;
-        if (timezone !== undefined) user.preferences.timezone = timezone;
-        if (theme !== undefined) user.preferences.theme = theme;
-        if (currency !== undefined) user.preferences.currency = currency;
-
-        await user.save();
-
-        res.status(200).json({
-            success: true,
-            message: 'Preferences updated successfully'
-        });
-
-    } catch (err) {
-        console.error('Error updating preferences:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to update preferences'
-            }
-        });
-    }
-});
-
-// =============================================
-// 17. GET /api/settings/languages - LANGUAGE LIST
+// 8. GET /api/settings/languages - with flags (FIXED)
 // =============================================
 app.get('/api/settings/languages', async (req, res) => {
     try {
+        // Comprehensive language catalog with proper flags
         const languages = [
-            { code: 'en', name: 'English', nativeName: 'English', flag: '🇬🇧' },
-            { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸' },
-            { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷' },
-            { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪' },
-            { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹' },
-            { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹' },
-            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: '🇳🇱' },
-            { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: '🇷🇺' },
-            { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵' },
-            { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷' },
-            { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳' },
-            { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦' },
-            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flag: '🇮🇳' },
-            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', flag: '🇧🇩' },
-            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', flag: '🇮🇩' },
-            { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', flag: '🇲🇾' },
-            { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭' },
-            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', flag: '🇻🇳' },
-            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', flag: '🇹🇷' },
-            { code: 'pl', name: 'Polish', nativeName: 'Polski', flag: '🇵🇱' },
-            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', flag: '🇺🇦' },
-            { code: 'ro', name: 'Romanian', nativeName: 'Română', flag: '🇷🇴' },
-            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', flag: '🇭🇺' },
-            { code: 'cs', name: 'Czech', nativeName: 'Čeština', flag: '🇨🇿' },
-            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', flag: '🇸🇰' },
-            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', flag: '🇧🇬' },
-            { code: 'sr', name: 'Serbian', nativeName: 'Српски', flag: '🇷🇸' },
-            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', flag: '🇭🇷' },
-            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', flag: '🇸🇪' },
-            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', flag: '🇳🇴' },
-            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', flag: '🇫🇮' },
-            { code: 'da', name: 'Danish', nativeName: 'Dansk', flag: '🇩🇰' },
-            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', flag: '🇬🇷' },
-            { code: 'he', name: 'Hebrew', nativeName: 'עברית', flag: '🇮🇱' },
-            { code: 'fa', name: 'Persian', nativeName: 'فارسی', flag: '🇮🇷' },
-            { code: 'ur', name: 'Urdu', nativeName: 'اردو', flag: '🇵🇰' },
-            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', flag: '🇰🇪' },
-            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', flag: '🇿🇦' },
-            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', flag: '🇪🇹' },
-            { code: 'tl', name: 'Tagalog', nativeName: 'Tagalog', flag: '🇵🇭' }
+            { code: 'en', name: 'English', nativeName: 'English', locale: 'en-US', flag: '🇬🇧', direction: 'ltr' },
+            { code: 'es', name: 'Spanish', nativeName: 'Español', locale: 'es-ES', flag: '🇪🇸', direction: 'ltr' },
+            { code: 'fr', name: 'French', nativeName: 'Français', locale: 'fr-FR', flag: '🇫🇷', direction: 'ltr' },
+            { code: 'de', name: 'German', nativeName: 'Deutsch', locale: 'de-DE', flag: '🇩🇪', direction: 'ltr' },
+            { code: 'it', name: 'Italian', nativeName: 'Italiano', locale: 'it-IT', flag: '🇮🇹', direction: 'ltr' },
+            { code: 'pt', name: 'Portuguese', nativeName: 'Português', locale: 'pt-PT', flag: '🇵🇹', direction: 'ltr' },
+            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', locale: 'nl-NL', flag: '🇳🇱', direction: 'ltr' },
+            { code: 'ru', name: 'Russian', nativeName: 'Русский', locale: 'ru-RU', flag: '🇷🇺', direction: 'ltr' },
+            { code: 'ja', name: 'Japanese', nativeName: '日本語', locale: 'ja-JP', flag: '🇯🇵', direction: 'ltr' },
+            { code: 'ko', name: 'Korean', nativeName: '한국어', locale: 'ko-KR', flag: '🇰🇷', direction: 'ltr' },
+            { code: 'zh', name: 'Chinese', nativeName: '中文', locale: 'zh-CN', flag: '🇨🇳', direction: 'ltr' },
+            { code: 'ar', name: 'Arabic', nativeName: 'العربية', locale: 'ar-SA', flag: '🇸🇦', direction: 'rtl' },
+            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', locale: 'hi-IN', flag: '🇮🇳', direction: 'ltr' },
+            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', locale: 'bn-BD', flag: '🇧🇩', direction: 'ltr' },
+            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', locale: 'id-ID', flag: '🇮🇩', direction: 'ltr' },
+            { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', locale: 'ms-MY', flag: '🇲🇾', direction: 'ltr' },
+            { code: 'th', name: 'Thai', nativeName: 'ไทย', locale: 'th-TH', flag: '🇹🇭', direction: 'ltr' },
+            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', locale: 'vi-VN', flag: '🇻🇳', direction: 'ltr' },
+            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', locale: 'tr-TR', flag: '🇹🇷', direction: 'ltr' },
+            { code: 'pl', name: 'Polish', nativeName: 'Polski', locale: 'pl-PL', flag: '🇵🇱', direction: 'ltr' },
+            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', locale: 'uk-UA', flag: '🇺🇦', direction: 'ltr' },
+            { code: 'ro', name: 'Romanian', nativeName: 'Română', locale: 'ro-RO', flag: '🇷🇴', direction: 'ltr' },
+            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', locale: 'hu-HU', flag: '🇭🇺', direction: 'ltr' },
+            { code: 'cs', name: 'Czech', nativeName: 'Čeština', locale: 'cs-CZ', flag: '🇨🇿', direction: 'ltr' },
+            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', locale: 'sk-SK', flag: '🇸🇰', direction: 'ltr' },
+            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', locale: 'bg-BG', flag: '🇧🇬', direction: 'ltr' },
+            { code: 'sr', name: 'Serbian', nativeName: 'Српски', locale: 'sr-RS', flag: '🇷🇸', direction: 'ltr' },
+            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', locale: 'hr-HR', flag: '🇭🇷', direction: 'ltr' },
+            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', locale: 'sv-SE', flag: '🇸🇪', direction: 'ltr' },
+            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', locale: 'nb-NO', flag: '🇳🇴', direction: 'ltr' },
+            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', locale: 'fi-FI', flag: '🇫🇮', direction: 'ltr' },
+            { code: 'da', name: 'Danish', nativeName: 'Dansk', locale: 'da-DK', flag: '🇩🇰', direction: 'ltr' },
+            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', locale: 'el-GR', flag: '🇬🇷', direction: 'ltr' },
+            { code: 'he', name: 'Hebrew', nativeName: 'עברית', locale: 'he-IL', flag: '🇮🇱', direction: 'rtl' },
+            { code: 'fa', name: 'Persian', nativeName: 'فارسی', locale: 'fa-IR', flag: '🇮🇷', direction: 'rtl' },
+            { code: 'ur', name: 'Urdu', nativeName: 'اردو', locale: 'ur-PK', flag: '🇵🇰', direction: 'rtl' },
+            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', locale: 'sw-KE', flag: '🇰🇪', direction: 'ltr' },
+            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', locale: 'af-ZA', flag: '🇿🇦', direction: 'ltr' },
+            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', locale: 'am-ET', flag: '🇪🇹', direction: 'ltr' },
+            { code: 'tl', name: 'Tagalog', nativeName: 'Tagalog', locale: 'tl-PH', flag: '🇵🇭', direction: 'ltr' }
         ];
 
         res.status(200).json({
-            success: true,
             languages: languages
         });
 
@@ -45591,155 +45031,9 @@ app.get('/api/settings/languages', async (req, res) => {
 });
 
 // =============================================
-// 18. GET /api/settings/timezones - TIMEZONE LIST
-// =============================================
-app.get('/api/settings/timezones', async (req, res) => {
-    try {
-        const timezones = [
-            { id: 'UTC', label: 'UTC', utcOffset: '+00:00' },
-            { id: 'Africa/Nairobi', label: 'Nairobi', utcOffset: '+03:00' },
-            { id: 'Africa/Cairo', label: 'Cairo', utcOffset: '+03:00' },
-            { id: 'Africa/Johannesburg', label: 'Johannesburg', utcOffset: '+02:00' },
-            { id: 'Africa/Lagos', label: 'Lagos', utcOffset: '+01:00' },
-            { id: 'Africa/Casablanca', label: 'Casablanca', utcOffset: '+01:00' },
-            { id: 'Africa/Tunis', label: 'Tunis', utcOffset: '+01:00' },
-            { id: 'Africa/Algiers', label: 'Algiers', utcOffset: '+01:00' },
-            { id: 'Africa/Khartoum', label: 'Khartoum', utcOffset: '+02:00' },
-            { id: 'Africa/Accra', label: 'Accra', utcOffset: '+00:00' },
-            { id: 'Africa/Douala', label: 'Douala', utcOffset: '+01:00' },
-            { id: 'Africa/Luanda', label: 'Luanda', utcOffset: '+01:00' },
-            { id: 'Africa/Maputo', label: 'Maputo', utcOffset: '+02:00' },
-            { id: 'Africa/Windhoek', label: 'Windhoek', utcOffset: '+02:00' },
-            { id: 'Europe/London', label: 'London', utcOffset: '+01:00' },
-            { id: 'Europe/Paris', label: 'Paris', utcOffset: '+02:00' },
-            { id: 'Europe/Berlin', label: 'Berlin', utcOffset: '+02:00' },
-            { id: 'Europe/Rome', label: 'Rome', utcOffset: '+02:00' },
-            { id: 'Europe/Madrid', label: 'Madrid', utcOffset: '+02:00' },
-            { id: 'Europe/Bucharest', label: 'Bucharest', utcOffset: '+03:00' },
-            { id: 'Europe/Athens', label: 'Athens', utcOffset: '+03:00' },
-            { id: 'Europe/Istanbul', label: 'Istanbul', utcOffset: '+03:00' },
-            { id: 'Europe/Moscow', label: 'Moscow', utcOffset: '+03:00' },
-            { id: 'Europe/Dublin', label: 'Dublin', utcOffset: '+01:00' },
-            { id: 'Europe/Zurich', label: 'Zurich', utcOffset: '+02:00' },
-            { id: 'Europe/Vienna', label: 'Vienna', utcOffset: '+02:00' },
-            { id: 'Europe/Brussels', label: 'Brussels', utcOffset: '+02:00' },
-            { id: 'Europe/Amsterdam', label: 'Amsterdam', utcOffset: '+02:00' },
-            { id: 'Europe/Stockholm', label: 'Stockholm', utcOffset: '+02:00' },
-            { id: 'Europe/Oslo', label: 'Oslo', utcOffset: '+02:00' },
-            { id: 'Europe/Copenhagen', label: 'Copenhagen', utcOffset: '+02:00' },
-            { id: 'Europe/Helsinki', label: 'Helsinki', utcOffset: '+03:00' },
-            { id: 'Europe/Warsaw', label: 'Warsaw', utcOffset: '+02:00' },
-            { id: 'Europe/Prague', label: 'Prague', utcOffset: '+02:00' },
-            { id: 'Europe/Budapest', label: 'Budapest', utcOffset: '+02:00' },
-            { id: 'Europe/Sofia', label: 'Sofia', utcOffset: '+03:00' },
-            { id: 'Europe/Kiev', label: 'Kiev', utcOffset: '+03:00' },
-            { id: 'Europe/Minsk', label: 'Minsk', utcOffset: '+03:00' },
-            { id: 'Europe/Riga', label: 'Riga', utcOffset: '+03:00' },
-            { id: 'Europe/Vilnius', label: 'Vilnius', utcOffset: '+03:00' },
-            { id: 'Europe/Tallinn', label: 'Tallinn', utcOffset: '+03:00' },
-            { id: 'Europe/Lisbon', label: 'Lisbon', utcOffset: '+01:00' },
-            { id: 'Europe/Belgrade', label: 'Belgrade', utcOffset: '+02:00' },
-            { id: 'Europe/Sarajevo', label: 'Sarajevo', utcOffset: '+02:00' },
-            { id: 'Asia/Tokyo', label: 'Tokyo', utcOffset: '+09:00' },
-            { id: 'Asia/Seoul', label: 'Seoul', utcOffset: '+09:00' },
-            { id: 'Asia/Shanghai', label: 'Shanghai', utcOffset: '+08:00' },
-            { id: 'Asia/Singapore', label: 'Singapore', utcOffset: '+08:00' },
-            { id: 'Asia/Kolkata', label: 'Kolkata', utcOffset: '+05:30' },
-            { id: 'Asia/Dubai', label: 'Dubai', utcOffset: '+04:00' },
-            { id: 'Asia/Riyadh', label: 'Riyadh', utcOffset: '+03:00' },
-            { id: 'Asia/Bangkok', label: 'Bangkok', utcOffset: '+07:00' },
-            { id: 'Asia/Jakarta', label: 'Jakarta', utcOffset: '+07:00' },
-            { id: 'Asia/Kuala_Lumpur', label: 'Kuala Lumpur', utcOffset: '+08:00' },
-            { id: 'Asia/Manila', label: 'Manila', utcOffset: '+08:00' },
-            { id: 'Asia/Hong_Kong', label: 'Hong Kong', utcOffset: '+08:00' },
-            { id: 'Asia/Taipei', label: 'Taipei', utcOffset: '+08:00' },
-            { id: 'Asia/Dhaka', label: 'Dhaka', utcOffset: '+06:00' },
-            { id: 'Asia/Karachi', label: 'Karachi', utcOffset: '+05:00' },
-            { id: 'Asia/Tehran', label: 'Tehran', utcOffset: '+04:30' },
-            { id: 'Asia/Baghdad', label: 'Baghdad', utcOffset: '+03:00' },
-            { id: 'Asia/Beirut', label: 'Beirut', utcOffset: '+03:00' },
-            { id: 'Asia/Jerusalem', label: 'Jerusalem', utcOffset: '+03:00' },
-            { id: 'Asia/Kabul', label: 'Kabul', utcOffset: '+04:30' },
-            { id: 'Asia/Kathmandu', label: 'Kathmandu', utcOffset: '+05:45' },
-            { id: 'Asia/Colombo', label: 'Colombo', utcOffset: '+05:30' },
-            { id: 'Asia/Rangoon', label: 'Rangoon', utcOffset: '+06:30' },
-            { id: 'Asia/Ho_Chi_Minh', label: 'Ho Chi Minh', utcOffset: '+07:00' },
-            { id: 'Asia/Ulaanbaatar', label: 'Ulaanbaatar', utcOffset: '+08:00' },
-            { id: 'America/New_York', label: 'New York', utcOffset: '-04:00' },
-            { id: 'America/Los_Angeles', label: 'Los Angeles', utcOffset: '-07:00' },
-            { id: 'America/Chicago', label: 'Chicago', utcOffset: '-05:00' },
-            { id: 'America/Denver', label: 'Denver', utcOffset: '-06:00' },
-            { id: 'America/Phoenix', label: 'Phoenix', utcOffset: '-07:00' },
-            { id: 'America/Toronto', label: 'Toronto', utcOffset: '-04:00' },
-            { id: 'America/Vancouver', label: 'Vancouver', utcOffset: '-07:00' },
-            { id: 'America/Sao_Paulo', label: 'Sao Paulo', utcOffset: '-03:00' },
-            { id: 'America/Mexico_City', label: 'Mexico City', utcOffset: '-06:00' },
-            { id: 'America/Bogota', label: 'Bogota', utcOffset: '-05:00' },
-            { id: 'America/Buenos_Aires', label: 'Buenos Aires', utcOffset: '-03:00' },
-            { id: 'America/Santiago', label: 'Santiago', utcOffset: '-04:00' },
-            { id: 'America/Lima', label: 'Lima', utcOffset: '-05:00' },
-            { id: 'America/Caracas', label: 'Caracas', utcOffset: '-04:00' },
-            { id: 'America/Panama', label: 'Panama', utcOffset: '-05:00' },
-            { id: 'America/Montevideo', label: 'Montevideo', utcOffset: '-03:00' },
-            { id: 'America/Asuncion', label: 'Asuncion', utcOffset: '-04:00' },
-            { id: 'America/La_Paz', label: 'La Paz', utcOffset: '-04:00' },
-            { id: 'America/Guatemala', label: 'Guatemala', utcOffset: '-06:00' },
-            { id: 'America/Managua', label: 'Managua', utcOffset: '-06:00' },
-            { id: 'America/San_Salvador', label: 'San Salvador', utcOffset: '-06:00' },
-            { id: 'America/Tegucigalpa', label: 'Tegucigalpa', utcOffset: '-06:00' },
-            { id: 'Australia/Sydney', label: 'Sydney', utcOffset: '+10:00' },
-            { id: 'Australia/Melbourne', label: 'Melbourne', utcOffset: '+10:00' },
-            { id: 'Australia/Brisbane', label: 'Brisbane', utcOffset: '+10:00' },
-            { id: 'Australia/Perth', label: 'Perth', utcOffset: '+08:00' },
-            { id: 'Australia/Adelaide', label: 'Adelaide', utcOffset: '+09:30' },
-            { id: 'Australia/Hobart', label: 'Hobart', utcOffset: '+10:00' },
-            { id: 'Pacific/Auckland', label: 'Auckland', utcOffset: '+12:00' },
-            { id: 'Pacific/Fiji', label: 'Fiji', utcOffset: '+12:00' },
-            { id: 'Pacific/Guam', label: 'Guam', utcOffset: '+10:00' },
-            { id: 'Pacific/Honolulu', label: 'Honolulu', utcOffset: '-10:00' },
-            { id: 'Pacific/Pago_Pago', label: 'Pago Pago', utcOffset: '-11:00' },
-            { id: 'Pacific/Tahiti', label: 'Tahiti', utcOffset: '-10:00' },
-            { id: 'Pacific/Noumea', label: 'Noumea', utcOffset: '+11:00' },
-            { id: 'Pacific/Port_Moresby', label: 'Port Moresby', utcOffset: '+10:00' }
-        ];
-
-        const now = new Date();
-        const timezonesWithOffsets = timezones.map(tz => {
-            try {
-                const offset = getTimezoneOffset(tz.id);
-                return {
-                    ...tz,
-                    utcOffset: offset
-                };
-            } catch (err) {
-                return tz;
-            }
-        });
-
-        res.status(200).json({
-            success: true,
-            timezones: timezonesWithOffsets
-        });
-
-    } catch (err) {
-        console.error('Error fetching timezones:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: 'Failed to fetch timezones'
-            }
-        });
-    }
-});
-
-// =============================================
 // HELPER FUNCTIONS
 // =============================================
 
-/**
- * Generate a 4-character recovery code segment
- */
 function generateRecoverySegment() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
@@ -45749,9 +45043,6 @@ function generateRecoverySegment() {
     return code;
 }
 
-/**
- * Detect browser from user agent
- */
 function detectBrowser(userAgent) {
     if (!userAgent) return 'Unknown';
     userAgent = userAgent.toLowerCase();
@@ -45764,9 +45055,6 @@ function detectBrowser(userAgent) {
     return 'Unknown';
 }
 
-/**
- * Detect OS from user agent
- */
 function detectOS(userAgent) {
     if (!userAgent) return 'Unknown';
     userAgent = userAgent.toLowerCase();
@@ -45779,9 +45067,6 @@ function detectOS(userAgent) {
     return 'Unknown';
 }
 
-/**
- * Detect device type from user agent
- */
 function detectDeviceType(userAgent) {
     if (!userAgent) return 'desktop';
     userAgent = userAgent.toLowerCase();
@@ -45789,108 +45074,6 @@ function detectDeviceType(userAgent) {
     if (userAgent.includes('tablet') || userAgent.includes('ipad')) return 'tablet';
     return 'desktop';
 }
-
-/**
- * Get timezone offset for a given IANA timezone
- */
-function getTimezoneOffset(timezoneId) {
-    try {
-        const now = new Date();
-        const dateString = now.toLocaleString('en-US', { timeZone: timezoneId });
-        const date = new Date(dateString);
-        const offsetMinutes = -date.getTimezoneOffset();
-        const hours = Math.floor(Math.abs(offsetMinutes) / 60);
-        const minutes = Math.abs(offsetMinutes) % 60;
-        const sign = offsetMinutes >= 0 ? '+' : '-';
-        return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-    } catch (err) {
-        return '+00:00';
-    }
-}
-
-/**
- * Log activity to the database
- */
-async function logActivity(type, actorType, actorId, targetId, targetType, req, metadata = {}) {
-    try {
-        const activity = new Activity({
-            type: type,
-            actor: {
-                type: actorType,
-                id: actorId
-            },
-            target: {
-                type: targetType,
-                id: targetId
-            },
-            title: getActivityTitle(type),
-            description: getActivityDescription(type, metadata),
-            status: 'completed',
-            ip: req.ip || req.headers['x-forwarded-for'] || 'Unknown',
-            location: {
-                city: 'Unknown',
-                country: 'Unknown'
-            },
-            device: {
-                browser: detectBrowser(req.headers['user-agent']),
-                os: detectOS(req.headers['user-agent'])
-            },
-            metadata: metadata,
-            createdAt: new Date()
-        });
-        await activity.save();
-    } catch (err) {
-        console.error('Error logging activity:', err);
-    }
-}
-
-/**
- * Get activity title based on type
- */
-function getActivityTitle(type) {
-    const titles = {
-        'login': 'New login',
-        'logout': 'Logout',
-        'logout_all_devices': 'Logged out all devices',
-        'password_changed': 'Password changed',
-        'password_reset': 'Password reset',
-        'authenticator_enabled': 'Authenticator enabled',
-        'authenticator_disabled': 'Authenticator disabled',
-        'recovery_codes_regenerated': 'Recovery codes regenerated',
-        'email_changed': 'Email changed',
-        'profile_updated': 'Profile updated',
-        'wallet_connected': 'Wallet connected',
-        'wallet_disconnected': 'Wallet disconnected',
-        'security_setting_changed': 'Security setting changed',
-        'device_logout': 'Device logged out'
-    };
-    return titles[type] || type;
-}
-
-/**
- * Get activity description based on type
- */
-function getActivityDescription(type, metadata) {
-    const descriptions = {
-        'login': 'Signed in to your account',
-        'logout': 'Signed out of your account',
-        'logout_all_devices': 'Signed out all other devices',
-        'password_changed': 'Your password was updated',
-        'password_reset': 'Your password was reset',
-        'authenticator_enabled': 'Two-factor authentication was enabled',
-        'authenticator_disabled': 'Two-factor authentication was disabled',
-        'recovery_codes_regenerated': 'Recovery codes were regenerated',
-        'email_changed': 'Your email address was updated',
-        'profile_updated': 'Your profile information was updated',
-        'wallet_connected': 'A new wallet was connected to your account',
-        'wallet_disconnected': 'A wallet was disconnected from your account',
-        'security_setting_changed': 'A security setting was changed',
-        'device_logout': 'A device session was revoked'
-    };
-    return descriptions[type] || type;
-}
-
-
 
 
 
