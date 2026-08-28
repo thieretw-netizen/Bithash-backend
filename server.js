@@ -44419,203 +44419,215 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
-// Comprehensive worldwide language catalogue with proper flag mappings
+
+
+
+
+
+
+
+
+// =============================================
+// LANGUAGE AND TIMEZONE ENDPOINTS
+// =============================================
+
+// GET /api/settings/languages - Return comprehensive language catalogue with flag mappings
 app.get('/api/settings/languages', async (req, res) => {
     try {
         // Comprehensive language catalogue covering the world's commonly recognized interface languages
         const languages = [
             // AFRICA
-            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', isActive: true, countryCode: 'za' },
-            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', isActive: true, countryCode: 'et' },
-            { code: 'ar', name: 'Arabic', nativeName: 'العربية', isActive: true, countryCode: 'sa' },
-            { code: 'ary', name: 'Moroccan Arabic', nativeName: 'الدارجة المغربية', isActive: true, countryCode: 'ma' },
-            { code: 'ar-eg', name: 'Egyptian Arabic', nativeName: 'مصرى', isActive: true, countryCode: 'eg' },
-            { code: 'ar-sa', name: 'Saudi Arabic', nativeName: 'العربية السعودية', isActive: true, countryCode: 'sa' },
-            { code: 'ha', name: 'Hausa', nativeName: 'Hausa', isActive: true, countryCode: 'ng' },
-            { code: 'ig', name: 'Igbo', nativeName: 'Igbo', isActive: true, countryCode: 'ng' },
-            { code: 'rw', name: 'Kinyarwanda', nativeName: 'Ikinyarwanda', isActive: true, countryCode: 'rw' },
-            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', isActive: true, countryCode: 'tz' },
-            { code: 'yo', name: 'Yoruba', nativeName: 'Yorùbá', isActive: true, countryCode: 'ng' },
-            { code: 'zu', name: 'Zulu', nativeName: 'IsiZulu', isActive: true, countryCode: 'za' },
-            { code: 'st', name: 'Southern Sotho', nativeName: 'Sesotho', isActive: true, countryCode: 'ls' },
-            { code: 'tn', name: 'Tswana', nativeName: 'Setswana', isActive: true, countryCode: 'bw' },
-            { code: 'ss', name: 'Swati', nativeName: 'SiSwati', isActive: true, countryCode: 'sz' },
-            { code: 'ts', name: 'Tsonga', nativeName: 'Xitsonga', isActive: true, countryCode: 'za' },
-            { code: 've', name: 'Venda', nativeName: 'Tshivenḓa', isActive: true, countryCode: 'za' },
-            { code: 'nr', name: 'Southern Ndebele', nativeName: 'isiNdebele', isActive: true, countryCode: 'za' },
-            { code: 'xh', name: 'Xhosa', nativeName: 'isiXhosa', isActive: true, countryCode: 'za' },
+            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', isActive: true, countryCode: 'za', flag: 'za' },
+            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', isActive: true, countryCode: 'et', flag: 'et' },
+            { code: 'ar', name: 'Arabic', nativeName: 'العربية', isActive: true, countryCode: 'sa', flag: 'sa' },
+            { code: 'ary', name: 'Moroccan Arabic', nativeName: 'الدارجة المغربية', isActive: true, countryCode: 'ma', flag: 'ma' },
+            { code: 'ar-eg', name: 'Egyptian Arabic', nativeName: 'مصرى', isActive: true, countryCode: 'eg', flag: 'eg' },
+            { code: 'ar-sa', name: 'Saudi Arabic', nativeName: 'العربية السعودية', isActive: true, countryCode: 'sa', flag: 'sa' },
+            { code: 'ha', name: 'Hausa', nativeName: 'Hausa', isActive: true, countryCode: 'ng', flag: 'ng' },
+            { code: 'ig', name: 'Igbo', nativeName: 'Igbo', isActive: true, countryCode: 'ng', flag: 'ng' },
+            { code: 'rw', name: 'Kinyarwanda', nativeName: 'Ikinyarwanda', isActive: true, countryCode: 'rw', flag: 'rw' },
+            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', isActive: true, countryCode: 'tz', flag: 'tz' },
+            { code: 'yo', name: 'Yoruba', nativeName: 'Yorùbá', isActive: true, countryCode: 'ng', flag: 'ng' },
+            { code: 'zu', name: 'Zulu', nativeName: 'IsiZulu', isActive: true, countryCode: 'za', flag: 'za' },
+            { code: 'st', name: 'Southern Sotho', nativeName: 'Sesotho', isActive: true, countryCode: 'ls', flag: 'ls' },
+            { code: 'tn', name: 'Tswana', nativeName: 'Setswana', isActive: true, countryCode: 'bw', flag: 'bw' },
+            { code: 'ss', name: 'Swati', nativeName: 'SiSwati', isActive: true, countryCode: 'sz', flag: 'sz' },
+            { code: 'ts', name: 'Tsonga', nativeName: 'Xitsonga', isActive: true, countryCode: 'za', flag: 'za' },
+            { code: 've', name: 'Venda', nativeName: 'Tshivenḓa', isActive: true, countryCode: 'za', flag: 'za' },
+            { code: 'nr', name: 'Southern Ndebele', nativeName: 'isiNdebele', isActive: true, countryCode: 'za', flag: 'za' },
+            { code: 'xh', name: 'Xhosa', nativeName: 'isiXhosa', isActive: true, countryCode: 'za', flag: 'za' },
 
             // ASIA
-            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', isActive: true, countryCode: 'bd' },
-            { code: 'my', name: 'Burmese', nativeName: 'မြန်မာစာ', isActive: true, countryCode: 'mm' },
-            { code: 'zh', name: 'Chinese (Simplified)', nativeName: '简体中文', isActive: true, countryCode: 'cn' },
-            { code: 'zh-tw', name: 'Chinese (Traditional)', nativeName: '繁體中文', isActive: true, countryCode: 'tw' },
-            { code: 'zh-hk', name: 'Chinese (Hong Kong)', nativeName: '繁體中文 (香港)', isActive: true, countryCode: 'hk' },
-            { code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી', isActive: true, countryCode: 'in' },
-            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', isActive: true, countryCode: 'in' },
-            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', isActive: true, countryCode: 'id' },
-            { code: 'ja', name: 'Japanese', nativeName: '日本語', isActive: true, countryCode: 'jp' },
-            { code: 'jv', name: 'Javanese', nativeName: 'Basa Jawa', isActive: true, countryCode: 'id' },
-            { code: 'kn', name: 'Kannada', nativeName: 'ಕನ್ನಡ', isActive: true, countryCode: 'in' },
-            { code: 'km', name: 'Khmer', nativeName: 'ភាសាខ្មែរ', isActive: true, countryCode: 'kh' },
-            { code: 'ko', name: 'Korean', nativeName: '한국어', isActive: true, countryCode: 'kr' },
-            { code: 'lo', name: 'Lao', nativeName: 'ພາສາລາວ', isActive: true, countryCode: 'la' },
-            { code: 'ml', name: 'Malayalam', nativeName: 'മലയാളം', isActive: true, countryCode: 'in' },
-            { code: 'mr', name: 'Marathi', nativeName: 'मराठी', isActive: true, countryCode: 'in' },
-            { code: 'mn', name: 'Mongolian', nativeName: 'Монгол хэл', isActive: true, countryCode: 'mn' },
-            { code: 'ne', name: 'Nepali', nativeName: 'नेपाली', isActive: true, countryCode: 'np' },
-            { code: 'or', name: 'Odia', nativeName: 'ଓଡ଼ିଆ', isActive: true, countryCode: 'in' },
-            { code: 'pa', name: 'Punjabi', nativeName: 'ਪੰਜਾਬੀ', isActive: true, countryCode: 'in' },
-            { code: 'ps', name: 'Pashto', nativeName: 'پښتو', isActive: true, countryCode: 'af' },
-            { code: 'fa', name: 'Persian', nativeName: 'فارسی', isActive: true, countryCode: 'ir' },
-            { code: 'sd', name: 'Sindhi', nativeName: 'سنڌي', isActive: true, countryCode: 'pk' },
-            { code: 'si', name: 'Sinhala', nativeName: 'සිංහල', isActive: true, countryCode: 'lk' },
-            { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்', isActive: true, countryCode: 'in' },
-            { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', isActive: true, countryCode: 'in' },
-            { code: 'th', name: 'Thai', nativeName: 'ภาษาไทย', isActive: true, countryCode: 'th' },
-            { code: 'ur', name: 'Urdu', nativeName: 'اردو', isActive: true, countryCode: 'pk' },
-            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', isActive: true, countryCode: 'vn' },
+            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', isActive: true, countryCode: 'bd', flag: 'bd' },
+            { code: 'my', name: 'Burmese', nativeName: 'မြန်မာစာ', isActive: true, countryCode: 'mm', flag: 'mm' },
+            { code: 'zh', name: 'Chinese (Simplified)', nativeName: '简体中文', isActive: true, countryCode: 'cn', flag: 'cn' },
+            { code: 'zh-tw', name: 'Chinese (Traditional)', nativeName: '繁體中文', isActive: true, countryCode: 'tw', flag: 'tw' },
+            { code: 'zh-hk', name: 'Chinese (Hong Kong)', nativeName: '繁體中文 (香港)', isActive: true, countryCode: 'hk', flag: 'hk' },
+            { code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', isActive: true, countryCode: 'id', flag: 'id' },
+            { code: 'ja', name: 'Japanese', nativeName: '日本語', isActive: true, countryCode: 'jp', flag: 'jp' },
+            { code: 'jv', name: 'Javanese', nativeName: 'Basa Jawa', isActive: true, countryCode: 'id', flag: 'id' },
+            { code: 'kn', name: 'Kannada', nativeName: 'ಕನ್ನಡ', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'km', name: 'Khmer', nativeName: 'ភាសាខ្មែរ', isActive: true, countryCode: 'kh', flag: 'kh' },
+            { code: 'ko', name: 'Korean', nativeName: '한국어', isActive: true, countryCode: 'kr', flag: 'kr' },
+            { code: 'lo', name: 'Lao', nativeName: 'ພາສາລາວ', isActive: true, countryCode: 'la', flag: 'la' },
+            { code: 'ml', name: 'Malayalam', nativeName: 'മലയാളം', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'mr', name: 'Marathi', nativeName: 'मराठी', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'mn', name: 'Mongolian', nativeName: 'Монгол хэл', isActive: true, countryCode: 'mn', flag: 'mn' },
+            { code: 'ne', name: 'Nepali', nativeName: 'नेपाली', isActive: true, countryCode: 'np', flag: 'np' },
+            { code: 'or', name: 'Odia', nativeName: 'ଓଡ଼ିଆ', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'pa', name: 'Punjabi', nativeName: 'ਪੰਜਾਬੀ', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'ps', name: 'Pashto', nativeName: 'پښتو', isActive: true, countryCode: 'af', flag: 'af' },
+            { code: 'fa', name: 'Persian', nativeName: 'فارسی', isActive: true, countryCode: 'ir', flag: 'ir' },
+            { code: 'sd', name: 'Sindhi', nativeName: 'سنڌي', isActive: true, countryCode: 'pk', flag: 'pk' },
+            { code: 'si', name: 'Sinhala', nativeName: 'සිංහල', isActive: true, countryCode: 'lk', flag: 'lk' },
+            { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'th', name: 'Thai', nativeName: 'ภาษาไทย', isActive: true, countryCode: 'th', flag: 'th' },
+            { code: 'ur', name: 'Urdu', nativeName: 'اردو', isActive: true, countryCode: 'pk', flag: 'pk' },
+            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', isActive: true, countryCode: 'vn', flag: 'vn' },
 
             // EUROPE
-            { code: 'sq', name: 'Albanian', nativeName: 'Shqip', isActive: true, countryCode: 'al' },
-            { code: 'hy', name: 'Armenian', nativeName: 'Հայերեն', isActive: true, countryCode: 'am' },
-            { code: 'az', name: 'Azerbaijani', nativeName: 'Azərbaycanca', isActive: true, countryCode: 'az' },
-            { code: 'eu', name: 'Basque', nativeName: 'Euskara', isActive: true, countryCode: 'es' },
-            { code: 'be', name: 'Belarusian', nativeName: 'Беларуская', isActive: true, countryCode: 'by' },
-            { code: 'bs', name: 'Bosnian', nativeName: 'Bosanski', isActive: true, countryCode: 'ba' },
-            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', isActive: true, countryCode: 'bg' },
-            { code: 'ca', name: 'Catalan', nativeName: 'Català', isActive: true, countryCode: 'es' },
-            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', isActive: true, countryCode: 'hr' },
-            { code: 'cs', name: 'Czech', nativeName: 'Čeština', isActive: true, countryCode: 'cz' },
-            { code: 'da', name: 'Danish', nativeName: 'Dansk', isActive: true, countryCode: 'dk' },
-            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', isActive: true, countryCode: 'nl' },
-            { code: 'en', name: 'English', nativeName: 'English', isActive: true, countryCode: 'gb' },
-            { code: 'en-us', name: 'English (US)', nativeName: 'English (US)', isActive: true, countryCode: 'us' },
-            { code: 'en-ca', name: 'English (Canada)', nativeName: 'English (Canada)', isActive: true, countryCode: 'ca' },
-            { code: 'en-au', name: 'English (Australia)', nativeName: 'English (Australia)', isActive: true, countryCode: 'au' },
-            { code: 'en-nz', name: 'English (New Zealand)', nativeName: 'English (New Zealand)', isActive: true, countryCode: 'nz' },
-            { code: 'et', name: 'Estonian', nativeName: 'Eesti', isActive: true, countryCode: 'ee' },
-            { code: 'fo', name: 'Faroese', nativeName: 'Føroyskt', isActive: true, countryCode: 'fo' },
-            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', isActive: true, countryCode: 'fi' },
-            { code: 'fr', name: 'French', nativeName: 'Français', isActive: true, countryCode: 'fr' },
-            { code: 'fr-ca', name: 'French (Canada)', nativeName: 'Français (Canada)', isActive: true, countryCode: 'ca' },
-            { code: 'gl', name: 'Galician', nativeName: 'Galego', isActive: true, countryCode: 'es' },
-            { code: 'ka', name: 'Georgian', nativeName: 'ქართული', isActive: true, countryCode: 'ge' },
-            { code: 'de', name: 'German', nativeName: 'Deutsch', isActive: true, countryCode: 'de' },
-            { code: 'de-at', name: 'German (Austria)', nativeName: 'Deutsch (Österreich)', isActive: true, countryCode: 'at' },
-            { code: 'de-ch', name: 'German (Switzerland)', nativeName: 'Deutsch (Schweiz)', isActive: true, countryCode: 'ch' },
-            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', isActive: true, countryCode: 'gr' },
-            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', isActive: true, countryCode: 'hu' },
-            { code: 'is', name: 'Icelandic', nativeName: 'Íslenska', isActive: true, countryCode: 'is' },
-            { code: 'ga', name: 'Irish', nativeName: 'Gaeilge', isActive: true, countryCode: 'ie' },
-            { code: 'it', name: 'Italian', nativeName: 'Italiano', isActive: true, countryCode: 'it' },
-            { code: 'it-ch', name: 'Italian (Switzerland)', nativeName: 'Italiano (Svizzera)', isActive: true, countryCode: 'ch' },
-            { code: 'lv', name: 'Latvian', nativeName: 'Latviešu', isActive: true, countryCode: 'lv' },
-            { code: 'lt', name: 'Lithuanian', nativeName: 'Lietuvių', isActive: true, countryCode: 'lt' },
-            { code: 'lb', name: 'Luxembourgish', nativeName: 'Lëtzebuergesch', isActive: true, countryCode: 'lu' },
-            { code: 'mk', name: 'Macedonian', nativeName: 'Македонски', isActive: true, countryCode: 'mk' },
-            { code: 'mt', name: 'Maltese', nativeName: 'Malti', isActive: true, countryCode: 'mt' },
-            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', isActive: true, countryCode: 'no' },
-            { code: 'nn', name: 'Norwegian Nynorsk', nativeName: 'Nynorsk', isActive: true, countryCode: 'no' },
-            { code: 'pl', name: 'Polish', nativeName: 'Polski', isActive: true, countryCode: 'pl' },
-            { code: 'pt', name: 'Portuguese', nativeName: 'Português', isActive: true, countryCode: 'pt' },
-            { code: 'pt-br', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)', isActive: true, countryCode: 'br' },
-            { code: 'ro', name: 'Romanian', nativeName: 'Română', isActive: true, countryCode: 'ro' },
-            { code: 'ru', name: 'Russian', nativeName: 'Русский', isActive: true, countryCode: 'ru' },
-            { code: 'sr', name: 'Serbian', nativeName: 'Српски', isActive: true, countryCode: 'rs' },
-            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', isActive: true, countryCode: 'sk' },
-            { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina', isActive: true, countryCode: 'si' },
-            { code: 'es', name: 'Spanish', nativeName: 'Español', isActive: true, countryCode: 'es' },
-            { code: 'es-mx', name: 'Spanish (Mexico)', nativeName: 'Español (México)', isActive: true, countryCode: 'mx' },
-            { code: 'es-ar', name: 'Spanish (Argentina)', nativeName: 'Español (Argentina)', isActive: true, countryCode: 'ar' },
-            { code: 'es-co', name: 'Spanish (Colombia)', nativeName: 'Español (Colombia)', isActive: true, countryCode: 'co' },
-            { code: 'es-cl', name: 'Spanish (Chile)', nativeName: 'Español (Chile)', isActive: true, countryCode: 'cl' },
-            { code: 'es-pe', name: 'Spanish (Peru)', nativeName: 'Español (Perú)', isActive: true, countryCode: 'pe' },
-            { code: 'es-ve', name: 'Spanish (Venezuela)', nativeName: 'Español (Venezuela)', isActive: true, countryCode: 've' },
-            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', isActive: true, countryCode: 'se' },
-            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', isActive: true, countryCode: 'tr' },
-            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', isActive: true, countryCode: 'ua' },
-            { code: 'cy', name: 'Welsh', nativeName: 'Cymraeg', isActive: true, countryCode: 'gb' },
+            { code: 'sq', name: 'Albanian', nativeName: 'Shqip', isActive: true, countryCode: 'al', flag: 'al' },
+            { code: 'hy', name: 'Armenian', nativeName: 'Հայերեն', isActive: true, countryCode: 'am', flag: 'am' },
+            { code: 'az', name: 'Azerbaijani', nativeName: 'Azərbaycanca', isActive: true, countryCode: 'az', flag: 'az' },
+            { code: 'eu', name: 'Basque', nativeName: 'Euskara', isActive: true, countryCode: 'es', flag: 'es' },
+            { code: 'be', name: 'Belarusian', nativeName: 'Беларуская', isActive: true, countryCode: 'by', flag: 'by' },
+            { code: 'bs', name: 'Bosnian', nativeName: 'Bosanski', isActive: true, countryCode: 'ba', flag: 'ba' },
+            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', isActive: true, countryCode: 'bg', flag: 'bg' },
+            { code: 'ca', name: 'Catalan', nativeName: 'Català', isActive: true, countryCode: 'es', flag: 'es' },
+            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', isActive: true, countryCode: 'hr', flag: 'hr' },
+            { code: 'cs', name: 'Czech', nativeName: 'Čeština', isActive: true, countryCode: 'cz', flag: 'cz' },
+            { code: 'da', name: 'Danish', nativeName: 'Dansk', isActive: true, countryCode: 'dk', flag: 'dk' },
+            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', isActive: true, countryCode: 'nl', flag: 'nl' },
+            { code: 'en', name: 'English', nativeName: 'English', isActive: true, countryCode: 'gb', flag: 'gb' },
+            { code: 'en-us', name: 'English (US)', nativeName: 'English (US)', isActive: true, countryCode: 'us', flag: 'us' },
+            { code: 'en-ca', name: 'English (Canada)', nativeName: 'English (Canada)', isActive: true, countryCode: 'ca', flag: 'ca' },
+            { code: 'en-au', name: 'English (Australia)', nativeName: 'English (Australia)', isActive: true, countryCode: 'au', flag: 'au' },
+            { code: 'en-nz', name: 'English (New Zealand)', nativeName: 'English (New Zealand)', isActive: true, countryCode: 'nz', flag: 'nz' },
+            { code: 'et', name: 'Estonian', nativeName: 'Eesti', isActive: true, countryCode: 'ee', flag: 'ee' },
+            { code: 'fo', name: 'Faroese', nativeName: 'Føroyskt', isActive: true, countryCode: 'fo', flag: 'fo' },
+            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', isActive: true, countryCode: 'fi', flag: 'fi' },
+            { code: 'fr', name: 'French', nativeName: 'Français', isActive: true, countryCode: 'fr', flag: 'fr' },
+            { code: 'fr-ca', name: 'French (Canada)', nativeName: 'Français (Canada)', isActive: true, countryCode: 'ca', flag: 'ca' },
+            { code: 'gl', name: 'Galician', nativeName: 'Galego', isActive: true, countryCode: 'es', flag: 'es' },
+            { code: 'ka', name: 'Georgian', nativeName: 'ქართული', isActive: true, countryCode: 'ge', flag: 'ge' },
+            { code: 'de', name: 'German', nativeName: 'Deutsch', isActive: true, countryCode: 'de', flag: 'de' },
+            { code: 'de-at', name: 'German (Austria)', nativeName: 'Deutsch (Österreich)', isActive: true, countryCode: 'at', flag: 'at' },
+            { code: 'de-ch', name: 'German (Switzerland)', nativeName: 'Deutsch (Schweiz)', isActive: true, countryCode: 'ch', flag: 'ch' },
+            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', isActive: true, countryCode: 'gr', flag: 'gr' },
+            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', isActive: true, countryCode: 'hu', flag: 'hu' },
+            { code: 'is', name: 'Icelandic', nativeName: 'Íslenska', isActive: true, countryCode: 'is', flag: 'is' },
+            { code: 'ga', name: 'Irish', nativeName: 'Gaeilge', isActive: true, countryCode: 'ie', flag: 'ie' },
+            { code: 'it', name: 'Italian', nativeName: 'Italiano', isActive: true, countryCode: 'it', flag: 'it' },
+            { code: 'it-ch', name: 'Italian (Switzerland)', nativeName: 'Italiano (Svizzera)', isActive: true, countryCode: 'ch', flag: 'ch' },
+            { code: 'lv', name: 'Latvian', nativeName: 'Latviešu', isActive: true, countryCode: 'lv', flag: 'lv' },
+            { code: 'lt', name: 'Lithuanian', nativeName: 'Lietuvių', isActive: true, countryCode: 'lt', flag: 'lt' },
+            { code: 'lb', name: 'Luxembourgish', nativeName: 'Lëtzebuergesch', isActive: true, countryCode: 'lu', flag: 'lu' },
+            { code: 'mk', name: 'Macedonian', nativeName: 'Македонски', isActive: true, countryCode: 'mk', flag: 'mk' },
+            { code: 'mt', name: 'Maltese', nativeName: 'Malti', isActive: true, countryCode: 'mt', flag: 'mt' },
+            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', isActive: true, countryCode: 'no', flag: 'no' },
+            { code: 'nn', name: 'Norwegian Nynorsk', nativeName: 'Nynorsk', isActive: true, countryCode: 'no', flag: 'no' },
+            { code: 'pl', name: 'Polish', nativeName: 'Polski', isActive: true, countryCode: 'pl', flag: 'pl' },
+            { code: 'pt', name: 'Portuguese', nativeName: 'Português', isActive: true, countryCode: 'pt', flag: 'pt' },
+            { code: 'pt-br', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)', isActive: true, countryCode: 'br', flag: 'br' },
+            { code: 'ro', name: 'Romanian', nativeName: 'Română', isActive: true, countryCode: 'ro', flag: 'ro' },
+            { code: 'ru', name: 'Russian', nativeName: 'Русский', isActive: true, countryCode: 'ru', flag: 'ru' },
+            { code: 'sr', name: 'Serbian', nativeName: 'Српски', isActive: true, countryCode: 'rs', flag: 'rs' },
+            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', isActive: true, countryCode: 'sk', flag: 'sk' },
+            { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina', isActive: true, countryCode: 'si', flag: 'si' },
+            { code: 'es', name: 'Spanish', nativeName: 'Español', isActive: true, countryCode: 'es', flag: 'es' },
+            { code: 'es-mx', name: 'Spanish (Mexico)', nativeName: 'Español (México)', isActive: true, countryCode: 'mx', flag: 'mx' },
+            { code: 'es-ar', name: 'Spanish (Argentina)', nativeName: 'Español (Argentina)', isActive: true, countryCode: 'ar', flag: 'ar' },
+            { code: 'es-co', name: 'Spanish (Colombia)', nativeName: 'Español (Colombia)', isActive: true, countryCode: 'co', flag: 'co' },
+            { code: 'es-cl', name: 'Spanish (Chile)', nativeName: 'Español (Chile)', isActive: true, countryCode: 'cl', flag: 'cl' },
+            { code: 'es-pe', name: 'Spanish (Peru)', nativeName: 'Español (Perú)', isActive: true, countryCode: 'pe', flag: 'pe' },
+            { code: 'es-ve', name: 'Spanish (Venezuela)', nativeName: 'Español (Venezuela)', isActive: true, countryCode: 've', flag: 've' },
+            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', isActive: true, countryCode: 'se', flag: 'se' },
+            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', isActive: true, countryCode: 'tr', flag: 'tr' },
+            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', isActive: true, countryCode: 'ua', flag: 'ua' },
+            { code: 'cy', name: 'Welsh', nativeName: 'Cymraeg', isActive: true, countryCode: 'gb', flag: 'gb' },
 
             // MIDDLE EAST
-            { code: 'he', name: 'Hebrew', nativeName: 'עברית', isActive: true, countryCode: 'il' },
-            { code: 'ku', name: 'Kurdish', nativeName: 'Kurdî', isActive: true, countryCode: 'iq' },
-            { code: 'ckb', name: 'Kurdish (Sorani)', nativeName: 'سۆرانی', isActive: true, countryCode: 'iq' },
+            { code: 'he', name: 'Hebrew', nativeName: 'עברית', isActive: true, countryCode: 'il', flag: 'il' },
+            { code: 'ku', name: 'Kurdish', nativeName: 'Kurdî', isActive: true, countryCode: 'iq', flag: 'iq' },
+            { code: 'ckb', name: 'Kurdish (Sorani)', nativeName: 'سۆرانی', isActive: true, countryCode: 'iq', flag: 'iq' },
 
             // NORTH AMERICA
-            { code: 'fr-ca', name: 'French (Canada)', nativeName: 'Français (Canada)', isActive: true, countryCode: 'ca' },
-            { code: 'en-ca', name: 'English (Canada)', nativeName: 'English (Canada)', isActive: true, countryCode: 'ca' },
-            { code: 'es-us', name: 'Spanish (US)', nativeName: 'Español (EE.UU.)', isActive: true, countryCode: 'us' },
+            { code: 'fr-ca', name: 'French (Canada)', nativeName: 'Français (Canada)', isActive: true, countryCode: 'ca', flag: 'ca' },
+            { code: 'en-ca', name: 'English (Canada)', nativeName: 'English (Canada)', isActive: true, countryCode: 'ca', flag: 'ca' },
+            { code: 'es-us', name: 'Spanish (US)', nativeName: 'Español (EE.UU.)', isActive: true, countryCode: 'us', flag: 'us' },
 
             // OCEANIA
-            { code: 'en-au', name: 'English (Australia)', nativeName: 'English (Australia)', isActive: true, countryCode: 'au' },
-            { code: 'en-nz', name: 'English (New Zealand)', nativeName: 'English (New Zealand)', isActive: true, countryCode: 'nz' },
-            { code: 'mi', name: 'Māori', nativeName: 'Te Reo Māori', isActive: true, countryCode: 'nz' },
-            { code: 'sm', name: 'Samoan', nativeName: 'Gagana Sāmoa', isActive: true, countryCode: 'ws' },
-            { code: 'to', name: 'Tongan', nativeName: 'Faka-Tonga', isActive: true, countryCode: 'to' },
-            { code: 'fj', name: 'Fijian', nativeName: 'Na Vosa Vakaviti', isActive: true, countryCode: 'fj' },
+            { code: 'en-au', name: 'English (Australia)', nativeName: 'English (Australia)', isActive: true, countryCode: 'au', flag: 'au' },
+            { code: 'en-nz', name: 'English (New Zealand)', nativeName: 'English (New Zealand)', isActive: true, countryCode: 'nz', flag: 'nz' },
+            { code: 'mi', name: 'Māori', nativeName: 'Te Reo Māori', isActive: true, countryCode: 'nz', flag: 'nz' },
+            { code: 'sm', name: 'Samoan', nativeName: 'Gagana Sāmoa', isActive: true, countryCode: 'ws', flag: 'ws' },
+            { code: 'to', name: 'Tongan', nativeName: 'Faka-Tonga', isActive: true, countryCode: 'to', flag: 'to' },
+            { code: 'fj', name: 'Fijian', nativeName: 'Na Vosa Vakaviti', isActive: true, countryCode: 'fj', flag: 'fj' },
 
             // SOUTH AMERICA / CENTRAL AMERICA
-            { code: 'es-ar', name: 'Spanish (Argentina)', nativeName: 'Español (Argentina)', isActive: true, countryCode: 'ar' },
-            { code: 'es-bo', name: 'Spanish (Bolivia)', nativeName: 'Español (Bolivia)', isActive: true, countryCode: 'bo' },
-            { code: 'es-cl', name: 'Spanish (Chile)', nativeName: 'Español (Chile)', isActive: true, countryCode: 'cl' },
-            { code: 'es-co', name: 'Spanish (Colombia)', nativeName: 'Español (Colombia)', isActive: true, countryCode: 'co' },
-            { code: 'es-cr', name: 'Spanish (Costa Rica)', nativeName: 'Español (Costa Rica)', isActive: true, countryCode: 'cr' },
-            { code: 'es-cu', name: 'Spanish (Cuba)', nativeName: 'Español (Cuba)', isActive: true, countryCode: 'cu' },
-            { code: 'es-do', name: 'Spanish (Dominican Republic)', nativeName: 'Español (República Dominicana)', isActive: true, countryCode: 'do' },
-            { code: 'es-ec', name: 'Spanish (Ecuador)', nativeName: 'Español (Ecuador)', isActive: true, countryCode: 'ec' },
-            { code: 'es-gt', name: 'Spanish (Guatemala)', nativeName: 'Español (Guatemala)', isActive: true, countryCode: 'gt' },
-            { code: 'es-hn', name: 'Spanish (Honduras)', nativeName: 'Español (Honduras)', isActive: true, countryCode: 'hn' },
-            { code: 'es-ni', name: 'Spanish (Nicaragua)', nativeName: 'Español (Nicaragua)', isActive: true, countryCode: 'ni' },
-            { code: 'es-pa', name: 'Spanish (Panama)', nativeName: 'Español (Panamá)', isActive: true, countryCode: 'pa' },
-            { code: 'es-py', name: 'Spanish (Paraguay)', nativeName: 'Español (Paraguay)', isActive: true, countryCode: 'py' },
-            { code: 'es-pe', name: 'Spanish (Peru)', nativeName: 'Español (Perú)', isActive: true, countryCode: 'pe' },
-            { code: 'es-pr', name: 'Spanish (Puerto Rico)', nativeName: 'Español (Puerto Rico)', isActive: true, countryCode: 'pr' },
-            { code: 'es-uy', name: 'Spanish (Uruguay)', nativeName: 'Español (Uruguay)', isActive: true, countryCode: 'uy' },
-            { code: 'es-ve', name: 'Spanish (Venezuela)', nativeName: 'Español (Venezuela)', isActive: true, countryCode: 've' },
-            { code: 'qu', name: 'Quechua', nativeName: 'Runasimi', isActive: true, countryCode: 'pe' },
-            { code: 'gn', name: 'Guarani', nativeName: 'Avañe\'ẽ', isActive: true, countryCode: 'py' },
-            { code: 'ay', name: 'Aymara', nativeName: 'Aymar aru', isActive: true, countryCode: 'bo' },
-            { code: 'pt-br', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)', isActive: true, countryCode: 'br' },
-            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', isActive: true, countryCode: 'nl' },
+            { code: 'es-ar', name: 'Spanish (Argentina)', nativeName: 'Español (Argentina)', isActive: true, countryCode: 'ar', flag: 'ar' },
+            { code: 'es-bo', name: 'Spanish (Bolivia)', nativeName: 'Español (Bolivia)', isActive: true, countryCode: 'bo', flag: 'bo' },
+            { code: 'es-cl', name: 'Spanish (Chile)', nativeName: 'Español (Chile)', isActive: true, countryCode: 'cl', flag: 'cl' },
+            { code: 'es-co', name: 'Spanish (Colombia)', nativeName: 'Español (Colombia)', isActive: true, countryCode: 'co', flag: 'co' },
+            { code: 'es-cr', name: 'Spanish (Costa Rica)', nativeName: 'Español (Costa Rica)', isActive: true, countryCode: 'cr', flag: 'cr' },
+            { code: 'es-cu', name: 'Spanish (Cuba)', nativeName: 'Español (Cuba)', isActive: true, countryCode: 'cu', flag: 'cu' },
+            { code: 'es-do', name: 'Spanish (Dominican Republic)', nativeName: 'Español (República Dominicana)', isActive: true, countryCode: 'do', flag: 'do' },
+            { code: 'es-ec', name: 'Spanish (Ecuador)', nativeName: 'Español (Ecuador)', isActive: true, countryCode: 'ec', flag: 'ec' },
+            { code: 'es-gt', name: 'Spanish (Guatemala)', nativeName: 'Español (Guatemala)', isActive: true, countryCode: 'gt', flag: 'gt' },
+            { code: 'es-hn', name: 'Spanish (Honduras)', nativeName: 'Español (Honduras)', isActive: true, countryCode: 'hn', flag: 'hn' },
+            { code: 'es-ni', name: 'Spanish (Nicaragua)', nativeName: 'Español (Nicaragua)', isActive: true, countryCode: 'ni', flag: 'ni' },
+            { code: 'es-pa', name: 'Spanish (Panama)', nativeName: 'Español (Panamá)', isActive: true, countryCode: 'pa', flag: 'pa' },
+            { code: 'es-py', name: 'Spanish (Paraguay)', nativeName: 'Español (Paraguay)', isActive: true, countryCode: 'py', flag: 'py' },
+            { code: 'es-pe', name: 'Spanish (Peru)', nativeName: 'Español (Perú)', isActive: true, countryCode: 'pe', flag: 'pe' },
+            { code: 'es-pr', name: 'Spanish (Puerto Rico)', nativeName: 'Español (Puerto Rico)', isActive: true, countryCode: 'pr', flag: 'pr' },
+            { code: 'es-uy', name: 'Spanish (Uruguay)', nativeName: 'Español (Uruguay)', isActive: true, countryCode: 'uy', flag: 'uy' },
+            { code: 'es-ve', name: 'Spanish (Venezuela)', nativeName: 'Español (Venezuela)', isActive: true, countryCode: 've', flag: 've' },
+            { code: 'qu', name: 'Quechua', nativeName: 'Runasimi', isActive: true, countryCode: 'pe', flag: 'pe' },
+            { code: 'gn', name: 'Guarani', nativeName: 'Avañe\'ẽ', isActive: true, countryCode: 'py', flag: 'py' },
+            { code: 'ay', name: 'Aymara', nativeName: 'Aymar aru', isActive: true, countryCode: 'bo', flag: 'bo' },
+            { code: 'pt-br', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)', isActive: true, countryCode: 'br', flag: 'br' },
+            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', isActive: true, countryCode: 'nl', flag: 'nl' },
 
             // ADDITIONAL EUROPEAN
-            { code: 'fy', name: 'Frisian', nativeName: 'Frysk', isActive: true, countryCode: 'nl' },
-            { code: 'gd', name: 'Scottish Gaelic', nativeName: 'Gàidhlig', isActive: true, countryCode: 'gb' },
-            { code: 'gv', name: 'Manx', nativeName: 'Gaelg', isActive: true, countryCode: 'im' },
-            { code: 'hsb', name: 'Upper Sorbian', nativeName: 'Hornjoserbšćina', isActive: true, countryCode: 'de' },
-            { code: 'dsb', name: 'Lower Sorbian', nativeName: 'Dolnoserbšćina', isActive: true, countryCode: 'de' },
-            { code: 'se', name: 'Northern Sami', nativeName: 'Davvisámegiella', isActive: true, countryCode: 'no' },
-            { code: 'sma', name: 'Southern Sami', nativeName: 'Åarjelsaemien', isActive: true, countryCode: 'se' },
-            { code: 'smj', name: 'Lule Sami', nativeName: 'Julevusámegiella', isActive: true, countryCode: 'se' },
-            { code: 'smn', name: 'Inari Sami', nativeName: 'Anarâškielâ', isActive: true, countryCode: 'fi' },
-            { code: 'sms', name: 'Skolt Sami', nativeName: 'Sääʹmǩiõll', isActive: true, countryCode: 'fi' },
+            { code: 'fy', name: 'Frisian', nativeName: 'Frysk', isActive: true, countryCode: 'nl', flag: 'nl' },
+            { code: 'gd', name: 'Scottish Gaelic', nativeName: 'Gàidhlig', isActive: true, countryCode: 'gb', flag: 'gb' },
+            { code: 'gv', name: 'Manx', nativeName: 'Gaelg', isActive: true, countryCode: 'im', flag: 'im' },
+            { code: 'hsb', name: 'Upper Sorbian', nativeName: 'Hornjoserbšćina', isActive: true, countryCode: 'de', flag: 'de' },
+            { code: 'dsb', name: 'Lower Sorbian', nativeName: 'Dolnoserbšćina', isActive: true, countryCode: 'de', flag: 'de' },
+            { code: 'se', name: 'Northern Sami', nativeName: 'Davvisámegiella', isActive: true, countryCode: 'no', flag: 'no' },
+            { code: 'sma', name: 'Southern Sami', nativeName: 'Åarjelsaemien', isActive: true, countryCode: 'se', flag: 'se' },
+            { code: 'smj', name: 'Lule Sami', nativeName: 'Julevusámegiella', isActive: true, countryCode: 'se', flag: 'se' },
+            { code: 'smn', name: 'Inari Sami', nativeName: 'Anarâškielâ', isActive: true, countryCode: 'fi', flag: 'fi' },
+            { code: 'sms', name: 'Skolt Sami', nativeName: 'Sääʹmǩiõll', isActive: true, countryCode: 'fi', flag: 'fi' },
 
             // ADDITIONAL ASIAN
-            { code: 'as', name: 'Assamese', nativeName: 'অসমীয়া', isActive: true, countryCode: 'in' },
-            { code: 'bho', name: 'Bhojpuri', nativeName: 'भोजपुरी', isActive: true, countryCode: 'in' },
-            { code: 'doi', name: 'Dogri', nativeName: 'डोगरी', isActive: true, countryCode: 'in' },
-            { code: 'gom', name: 'Konkani', nativeName: 'कोंकणी', isActive: true, countryCode: 'in' },
-            { code: 'kok', name: 'Konkani', nativeName: 'कोंकणी', isActive: true, countryCode: 'in' },
-            { code: 'ks', name: 'Kashmiri', nativeName: 'कॉशुर', isActive: true, countryCode: 'in' },
-            { code: 'lus', name: 'Mizo', nativeName: 'Mizo ṭawng', isActive: true, countryCode: 'in' },
-            { code: 'mai', name: 'Maithili', nativeName: 'मैथिली', isActive: true, countryCode: 'in' },
-            { code: 'sa', name: 'Sanskrit', nativeName: 'संस्कृतम्', isActive: true, countryCode: 'in' },
-            { code: 'sat', name: 'Santali', nativeName: 'ᱥᱟᱱᱛᱟᱲᱤ', isActive: true, countryCode: 'in' },
-            { code: 'tcy', name: 'Tulu', nativeName: 'ತುಳು', isActive: true, countryCode: 'in' },
-            { code: 'ur', name: 'Urdu', nativeName: 'اردو', isActive: true, countryCode: 'pk' },
-            { code: 'ug', name: 'Uyghur', nativeName: 'ئۇيغۇرچە', isActive: true, countryCode: 'cn' },
-            { code: 'bo', name: 'Tibetan', nativeName: 'བོད་སྐད་', isActive: true, countryCode: 'cn' },
-            { code: 'dz', name: 'Dzongkha', nativeName: 'རྫོང་ཁ', isActive: true, countryCode: 'bt' },
-            { code: 'kk', name: 'Kazakh', nativeName: 'Қазақша', isActive: true, countryCode: 'kz' },
-            { code: 'ky', name: 'Kyrgyz', nativeName: 'Кыргызча', isActive: true, countryCode: 'kg' },
-            { code: 'tg', name: 'Tajik', nativeName: 'Тоҷикӣ', isActive: true, countryCode: 'tj' },
-            { code: 'tk', name: 'Turkmen', nativeName: 'Türkmençe', isActive: true, countryCode: 'tm' },
-            { code: 'uz', name: 'Uzbek', nativeName: 'Oʻzbekcha', isActive: true, countryCode: 'uz' },
-            { code: 'tt', name: 'Tatar', nativeName: 'Татарча', isActive: true, countryCode: 'ru' },
-            { code: 'ba', name: 'Bashkir', nativeName: 'Башҡортса', isActive: true, countryCode: 'ru' },
-            { code: 'cv', name: 'Chuvash', nativeName: 'Чӑвашла', isActive: true, countryCode: 'ru' },
-            { code: 'sah', name: 'Yakut', nativeName: 'Саха тыла', isActive: true, countryCode: 'ru' }
+            { code: 'as', name: 'Assamese', nativeName: 'অসমীয়া', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'bho', name: 'Bhojpuri', nativeName: 'भोजपुरी', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'doi', name: 'Dogri', nativeName: 'डोगरी', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'gom', name: 'Konkani', nativeName: 'कोंकणी', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'kok', name: 'Konkani', nativeName: 'कोंकणी', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'ks', name: 'Kashmiri', nativeName: 'कॉशुर', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'lus', name: 'Mizo', nativeName: 'Mizo ṭawng', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'mai', name: 'Maithili', nativeName: 'मैथिली', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'sa', name: 'Sanskrit', nativeName: 'संस्कृतम्', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'sat', name: 'Santali', nativeName: 'ᱥᱟᱱᱛᱟᱲᱤ', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'tcy', name: 'Tulu', nativeName: 'ತುಳು', isActive: true, countryCode: 'in', flag: 'in' },
+            { code: 'ur', name: 'Urdu', nativeName: 'اردو', isActive: true, countryCode: 'pk', flag: 'pk' },
+            { code: 'ug', name: 'Uyghur', nativeName: 'ئۇيغۇرچە', isActive: true, countryCode: 'cn', flag: 'cn' },
+            { code: 'bo', name: 'Tibetan', nativeName: 'བོད་སྐད་', isActive: true, countryCode: 'cn', flag: 'cn' },
+            { code: 'dz', name: 'Dzongkha', nativeName: 'རྫོང་ཁ', isActive: true, countryCode: 'bt', flag: 'bt' },
+            { code: 'kk', name: 'Kazakh', nativeName: 'Қазақша', isActive: true, countryCode: 'kz', flag: 'kz' },
+            { code: 'ky', name: 'Kyrgyz', nativeName: 'Кыргызча', isActive: true, countryCode: 'kg', flag: 'kg' },
+            { code: 'tg', name: 'Tajik', nativeName: 'Тоҷикӣ', isActive: true, countryCode: 'tj', flag: 'tj' },
+            { code: 'tk', name: 'Turkmen', nativeName: 'Türkmençe', isActive: true, countryCode: 'tm', flag: 'tm' },
+            { code: 'uz', name: 'Uzbek', nativeName: 'Oʻzbekcha', isActive: true, countryCode: 'uz', flag: 'uz' },
+            { code: 'tt', name: 'Tatar', nativeName: 'Татарча', isActive: true, countryCode: 'ru', flag: 'ru' },
+            { code: 'ba', name: 'Bashkir', nativeName: 'Башҡортса', isActive: true, countryCode: 'ru', flag: 'ru' },
+            { code: 'cv', name: 'Chuvash', nativeName: 'Чӑвашла', isActive: true, countryCode: 'ru', flag: 'ru' },
+            { code: 'sah', name: 'Yakut', nativeName: 'Саха тыла', isActive: true, countryCode: 'ru', flag: 'ru' }
         ];
 
         res.json({ languages });
@@ -44625,6 +44637,7 @@ app.get('/api/settings/languages', async (req, res) => {
     }
 });
 
+// GET /api/settings/timezones - Return comprehensive timezone catalogue with real offsets
 app.get('/api/settings/timezones', async (req, res) => {
     try {
         // Comprehensive IANA timezone catalogue with real offsets
@@ -44633,446 +44646,446 @@ app.get('/api/settings/timezones', async (req, res) => {
             { id: 'UTC', label: 'UTC', utcOffset: '+00:00' },
             
             // Africa
-            { id: 'Africa/Abidjan', label: 'Abidjan', utcOffset: getCurrentOffset('Africa/Abidjan') },
-            { id: 'Africa/Accra', label: 'Accra', utcOffset: getCurrentOffset('Africa/Accra') },
-            { id: 'Africa/Addis_Ababa', label: 'Addis Ababa', utcOffset: getCurrentOffset('Africa/Addis_Ababa') },
-            { id: 'Africa/Algiers', label: 'Algiers', utcOffset: getCurrentOffset('Africa/Algiers') },
-            { id: 'Africa/Asmara', label: 'Asmara', utcOffset: getCurrentOffset('Africa/Asmara') },
-            { id: 'Africa/Bamako', label: 'Bamako', utcOffset: getCurrentOffset('Africa/Bamako') },
-            { id: 'Africa/Bangui', label: 'Bangui', utcOffset: getCurrentOffset('Africa/Bangui') },
-            { id: 'Africa/Banjul', label: 'Banjul', utcOffset: getCurrentOffset('Africa/Banjul') },
-            { id: 'Africa/Bissau', label: 'Bissau', utcOffset: getCurrentOffset('Africa/Bissau') },
-            { id: 'Africa/Blantyre', label: 'Blantyre', utcOffset: getCurrentOffset('Africa/Blantyre') },
-            { id: 'Africa/Brazzaville', label: 'Brazzaville', utcOffset: getCurrentOffset('Africa/Brazzaville') },
-            { id: 'Africa/Bujumbura', label: 'Bujumbura', utcOffset: getCurrentOffset('Africa/Bujumbura') },
-            { id: 'Africa/Cairo', label: 'Cairo', utcOffset: getCurrentOffset('Africa/Cairo') },
-            { id: 'Africa/Casablanca', label: 'Casablanca', utcOffset: getCurrentOffset('Africa/Casablanca') },
-            { id: 'Africa/Ceuta', label: 'Ceuta', utcOffset: getCurrentOffset('Africa/Ceuta') },
-            { id: 'Africa/Conakry', label: 'Conakry', utcOffset: getCurrentOffset('Africa/Conakry') },
-            { id: 'Africa/Dakar', label: 'Dakar', utcOffset: getCurrentOffset('Africa/Dakar') },
-            { id: 'Africa/Dar_es_Salaam', label: 'Dar es Salaam', utcOffset: getCurrentOffset('Africa/Dar_es_Salaam') },
-            { id: 'Africa/Djibouti', label: 'Djibouti', utcOffset: getCurrentOffset('Africa/Djibouti') },
-            { id: 'Africa/Douala', label: 'Douala', utcOffset: getCurrentOffset('Africa/Douala') },
-            { id: 'Africa/El_Aaiun', label: 'El Aaiun', utcOffset: getCurrentOffset('Africa/El_Aaiun') },
-            { id: 'Africa/Freetown', label: 'Freetown', utcOffset: getCurrentOffset('Africa/Freetown') },
-            { id: 'Africa/Gaborone', label: 'Gaborone', utcOffset: getCurrentOffset('Africa/Gaborone') },
-            { id: 'Africa/Harare', label: 'Harare', utcOffset: getCurrentOffset('Africa/Harare') },
-            { id: 'Africa/Johannesburg', label: 'Johannesburg', utcOffset: getCurrentOffset('Africa/Johannesburg') },
-            { id: 'Africa/Juba', label: 'Juba', utcOffset: getCurrentOffset('Africa/Juba') },
-            { id: 'Africa/Kampala', label: 'Kampala', utcOffset: getCurrentOffset('Africa/Kampala') },
-            { id: 'Africa/Khartoum', label: 'Khartoum', utcOffset: getCurrentOffset('Africa/Khartoum') },
-            { id: 'Africa/Kigali', label: 'Kigali', utcOffset: getCurrentOffset('Africa/Kigali') },
-            { id: 'Africa/Kinshasa', label: 'Kinshasa', utcOffset: getCurrentOffset('Africa/Kinshasa') },
-            { id: 'Africa/Lagos', label: 'Lagos', utcOffset: getCurrentOffset('Africa/Lagos') },
-            { id: 'Africa/Libreville', label: 'Libreville', utcOffset: getCurrentOffset('Africa/Libreville') },
-            { id: 'Africa/Lome', label: 'Lome', utcOffset: getCurrentOffset('Africa/Lome') },
-            { id: 'Africa/Luanda', label: 'Luanda', utcOffset: getCurrentOffset('Africa/Luanda') },
-            { id: 'Africa/Lubumbashi', label: 'Lubumbashi', utcOffset: getCurrentOffset('Africa/Lubumbashi') },
-            { id: 'Africa/Lusaka', label: 'Lusaka', utcOffset: getCurrentOffset('Africa/Lusaka') },
-            { id: 'Africa/Malabo', label: 'Malabo', utcOffset: getCurrentOffset('Africa/Malabo') },
-            { id: 'Africa/Maputo', label: 'Maputo', utcOffset: getCurrentOffset('Africa/Maputo') },
-            { id: 'Africa/Maseru', label: 'Maseru', utcOffset: getCurrentOffset('Africa/Maseru') },
-            { id: 'Africa/Mbabane', label: 'Mbabane', utcOffset: getCurrentOffset('Africa/Mbabane') },
-            { id: 'Africa/Mogadishu', label: 'Mogadishu', utcOffset: getCurrentOffset('Africa/Mogadishu') },
-            { id: 'Africa/Monrovia', label: 'Monrovia', utcOffset: getCurrentOffset('Africa/Monrovia') },
-            { id: 'Africa/Nairobi', label: 'Nairobi', utcOffset: getCurrentOffset('Africa/Nairobi') },
-            { id: 'Africa/Ndjamena', label: 'Ndjamena', utcOffset: getCurrentOffset('Africa/Ndjamena') },
-            { id: 'Africa/Niamey', label: 'Niamey', utcOffset: getCurrentOffset('Africa/Niamey') },
-            { id: 'Africa/Nouakchott', label: 'Nouakchott', utcOffset: getCurrentOffset('Africa/Nouakchott') },
-            { id: 'Africa/Ouagadougou', label: 'Ouagadougou', utcOffset: getCurrentOffset('Africa/Ouagadougou') },
-            { id: 'Africa/Porto-Novo', label: 'Porto-Novo', utcOffset: getCurrentOffset('Africa/Porto-Novo') },
-            { id: 'Africa/Sao_Tome', label: 'Sao Tome', utcOffset: getCurrentOffset('Africa/Sao_Tome') },
-            { id: 'Africa/Tripoli', label: 'Tripoli', utcOffset: getCurrentOffset('Africa/Tripoli') },
-            { id: 'Africa/Tunis', label: 'Tunis', utcOffset: getCurrentOffset('Africa/Tunis') },
-            { id: 'Africa/Windhoek', label: 'Windhoek', utcOffset: getCurrentOffset('Africa/Windhoek') },
+            { id: 'Africa/Abidjan', label: 'Abidjan', utcOffset: '+00:00' },
+            { id: 'Africa/Accra', label: 'Accra', utcOffset: '+00:00' },
+            { id: 'Africa/Addis_Ababa', label: 'Addis Ababa', utcOffset: '+03:00' },
+            { id: 'Africa/Algiers', label: 'Algiers', utcOffset: '+01:00' },
+            { id: 'Africa/Asmara', label: 'Asmara', utcOffset: '+03:00' },
+            { id: 'Africa/Bamako', label: 'Bamako', utcOffset: '+00:00' },
+            { id: 'Africa/Bangui', label: 'Bangui', utcOffset: '+01:00' },
+            { id: 'Africa/Banjul', label: 'Banjul', utcOffset: '+00:00' },
+            { id: 'Africa/Bissau', label: 'Bissau', utcOffset: '+00:00' },
+            { id: 'Africa/Blantyre', label: 'Blantyre', utcOffset: '+02:00' },
+            { id: 'Africa/Brazzaville', label: 'Brazzaville', utcOffset: '+01:00' },
+            { id: 'Africa/Bujumbura', label: 'Bujumbura', utcOffset: '+02:00' },
+            { id: 'Africa/Cairo', label: 'Cairo', utcOffset: '+02:00' },
+            { id: 'Africa/Casablanca', label: 'Casablanca', utcOffset: '+01:00' },
+            { id: 'Africa/Ceuta', label: 'Ceuta', utcOffset: '+01:00' },
+            { id: 'Africa/Conakry', label: 'Conakry', utcOffset: '+00:00' },
+            { id: 'Africa/Dakar', label: 'Dakar', utcOffset: '+00:00' },
+            { id: 'Africa/Dar_es_Salaam', label: 'Dar es Salaam', utcOffset: '+03:00' },
+            { id: 'Africa/Djibouti', label: 'Djibouti', utcOffset: '+03:00' },
+            { id: 'Africa/Douala', label: 'Douala', utcOffset: '+01:00' },
+            { id: 'Africa/El_Aaiun', label: 'El Aaiun', utcOffset: '+01:00' },
+            { id: 'Africa/Freetown', label: 'Freetown', utcOffset: '+00:00' },
+            { id: 'Africa/Gaborone', label: 'Gaborone', utcOffset: '+02:00' },
+            { id: 'Africa/Harare', label: 'Harare', utcOffset: '+02:00' },
+            { id: 'Africa/Johannesburg', label: 'Johannesburg', utcOffset: '+02:00' },
+            { id: 'Africa/Juba', label: 'Juba', utcOffset: '+02:00' },
+            { id: 'Africa/Kampala', label: 'Kampala', utcOffset: '+03:00' },
+            { id: 'Africa/Khartoum', label: 'Khartoum', utcOffset: '+02:00' },
+            { id: 'Africa/Kigali', label: 'Kigali', utcOffset: '+02:00' },
+            { id: 'Africa/Kinshasa', label: 'Kinshasa', utcOffset: '+01:00' },
+            { id: 'Africa/Lagos', label: 'Lagos', utcOffset: '+01:00' },
+            { id: 'Africa/Libreville', label: 'Libreville', utcOffset: '+01:00' },
+            { id: 'Africa/Lome', label: 'Lome', utcOffset: '+00:00' },
+            { id: 'Africa/Luanda', label: 'Luanda', utcOffset: '+01:00' },
+            { id: 'Africa/Lubumbashi', label: 'Lubumbashi', utcOffset: '+02:00' },
+            { id: 'Africa/Lusaka', label: 'Lusaka', utcOffset: '+02:00' },
+            { id: 'Africa/Malabo', label: 'Malabo', utcOffset: '+01:00' },
+            { id: 'Africa/Maputo', label: 'Maputo', utcOffset: '+02:00' },
+            { id: 'Africa/Maseru', label: 'Maseru', utcOffset: '+02:00' },
+            { id: 'Africa/Mbabane', label: 'Mbabane', utcOffset: '+02:00' },
+            { id: 'Africa/Mogadishu', label: 'Mogadishu', utcOffset: '+03:00' },
+            { id: 'Africa/Monrovia', label: 'Monrovia', utcOffset: '+00:00' },
+            { id: 'Africa/Nairobi', label: 'Nairobi', utcOffset: '+03:00' },
+            { id: 'Africa/Ndjamena', label: 'Ndjamena', utcOffset: '+01:00' },
+            { id: 'Africa/Niamey', label: 'Niamey', utcOffset: '+01:00' },
+            { id: 'Africa/Nouakchott', label: 'Nouakchott', utcOffset: '+00:00' },
+            { id: 'Africa/Ouagadougou', label: 'Ouagadougou', utcOffset: '+00:00' },
+            { id: 'Africa/Porto-Novo', label: 'Porto-Novo', utcOffset: '+01:00' },
+            { id: 'Africa/Sao_Tome', label: 'Sao Tome', utcOffset: '+00:00' },
+            { id: 'Africa/Tripoli', label: 'Tripoli', utcOffset: '+02:00' },
+            { id: 'Africa/Tunis', label: 'Tunis', utcOffset: '+01:00' },
+            { id: 'Africa/Windhoek', label: 'Windhoek', utcOffset: '+02:00' },
 
             // Americas
-            { id: 'America/Adak', label: 'Adak', utcOffset: getCurrentOffset('America/Adak') },
-            { id: 'America/Anchorage', label: 'Anchorage', utcOffset: getCurrentOffset('America/Anchorage') },
-            { id: 'America/Anguilla', label: 'Anguilla', utcOffset: getCurrentOffset('America/Anguilla') },
-            { id: 'America/Antigua', label: 'Antigua', utcOffset: getCurrentOffset('America/Antigua') },
-            { id: 'America/Araguaina', label: 'Araguaina', utcOffset: getCurrentOffset('America/Araguaina') },
-            { id: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires', utcOffset: getCurrentOffset('America/Argentina/Buenos_Aires') },
-            { id: 'America/Argentina/Catamarca', label: 'Catamarca', utcOffset: getCurrentOffset('America/Argentina/Catamarca') },
-            { id: 'America/Argentina/Cordoba', label: 'Cordoba', utcOffset: getCurrentOffset('America/Argentina/Cordoba') },
-            { id: 'America/Argentina/Jujuy', label: 'Jujuy', utcOffset: getCurrentOffset('America/Argentina/Jujuy') },
-            { id: 'America/Argentina/La_Rioja', label: 'La Rioja', utcOffset: getCurrentOffset('America/Argentina/La_Rioja') },
-            { id: 'America/Argentina/Mendoza', label: 'Mendoza', utcOffset: getCurrentOffset('America/Argentina/Mendoza') },
-            { id: 'America/Argentina/Rio_Gallegos', label: 'Rio Gallegos', utcOffset: getCurrentOffset('America/Argentina/Rio_Gallegos') },
-            { id: 'America/Argentina/Salta', label: 'Salta', utcOffset: getCurrentOffset('America/Argentina/Salta') },
-            { id: 'America/Argentina/San_Juan', label: 'San Juan', utcOffset: getCurrentOffset('America/Argentina/San_Juan') },
-            { id: 'America/Argentina/San_Luis', label: 'San Luis', utcOffset: getCurrentOffset('America/Argentina/San_Luis') },
-            { id: 'America/Argentina/Tucuman', label: 'Tucuman', utcOffset: getCurrentOffset('America/Argentina/Tucuman') },
-            { id: 'America/Argentina/Ushuaia', label: 'Ushuaia', utcOffset: getCurrentOffset('America/Argentina/Ushuaia') },
-            { id: 'America/Aruba', label: 'Aruba', utcOffset: getCurrentOffset('America/Aruba') },
-            { id: 'America/Asuncion', label: 'Asuncion', utcOffset: getCurrentOffset('America/Asuncion') },
-            { id: 'America/Atikokan', label: 'Atikokan', utcOffset: getCurrentOffset('America/Atikokan') },
-            { id: 'America/Bahia', label: 'Bahia', utcOffset: getCurrentOffset('America/Bahia') },
-            { id: 'America/Bahia_Banderas', label: 'Bahia Banderas', utcOffset: getCurrentOffset('America/Bahia_Banderas') },
-            { id: 'America/Barbados', label: 'Barbados', utcOffset: getCurrentOffset('America/Barbados') },
-            { id: 'America/Belem', label: 'Belem', utcOffset: getCurrentOffset('America/Belem') },
-            { id: 'America/Belize', label: 'Belize', utcOffset: getCurrentOffset('America/Belize') },
-            { id: 'America/Blanc-Sablon', label: 'Blanc-Sablon', utcOffset: getCurrentOffset('America/Blanc-Sablon') },
-            { id: 'America/Boa_Vista', label: 'Boa Vista', utcOffset: getCurrentOffset('America/Boa_Vista') },
-            { id: 'America/Bogota', label: 'Bogota', utcOffset: getCurrentOffset('America/Bogota') },
-            { id: 'America/Boise', label: 'Boise', utcOffset: getCurrentOffset('America/Boise') },
-            { id: 'America/Cambridge_Bay', label: 'Cambridge Bay', utcOffset: getCurrentOffset('America/Cambridge_Bay') },
-            { id: 'America/Campo_Grande', label: 'Campo Grande', utcOffset: getCurrentOffset('America/Campo_Grande') },
-            { id: 'America/Cancun', label: 'Cancun', utcOffset: getCurrentOffset('America/Cancun') },
-            { id: 'America/Caracas', label: 'Caracas', utcOffset: getCurrentOffset('America/Caracas') },
-            { id: 'America/Cayenne', label: 'Cayenne', utcOffset: getCurrentOffset('America/Cayenne') },
-            { id: 'America/Cayman', label: 'Cayman', utcOffset: getCurrentOffset('America/Cayman') },
-            { id: 'America/Chicago', label: 'Chicago', utcOffset: getCurrentOffset('America/Chicago') },
-            { id: 'America/Chihuahua', label: 'Chihuahua', utcOffset: getCurrentOffset('America/Chihuahua') },
-            { id: 'America/Costa_Rica', label: 'Costa Rica', utcOffset: getCurrentOffset('America/Costa_Rica') },
-            { id: 'America/Cuiaba', label: 'Cuiaba', utcOffset: getCurrentOffset('America/Cuiaba') },
-            { id: 'America/Curacao', label: 'Curacao', utcOffset: getCurrentOffset('America/Curacao') },
-            { id: 'America/Danmarkshavn', label: 'Danmarkshavn', utcOffset: getCurrentOffset('America/Danmarkshavn') },
-            { id: 'America/Dawson', label: 'Dawson', utcOffset: getCurrentOffset('America/Dawson') },
-            { id: 'America/Dawson_Creek', label: 'Dawson Creek', utcOffset: getCurrentOffset('America/Dawson_Creek') },
-            { id: 'America/Denver', label: 'Denver', utcOffset: getCurrentOffset('America/Denver') },
-            { id: 'America/Detroit', label: 'Detroit', utcOffset: getCurrentOffset('America/Detroit') },
-            { id: 'America/Dominica', label: 'Dominica', utcOffset: getCurrentOffset('America/Dominica') },
-            { id: 'America/Edmonton', label: 'Edmonton', utcOffset: getCurrentOffset('America/Edmonton') },
-            { id: 'America/Eirunepe', label: 'Eirunepe', utcOffset: getCurrentOffset('America/Eirunepe') },
-            { id: 'America/El_Salvador', label: 'El Salvador', utcOffset: getCurrentOffset('America/El_Salvador') },
-            { id: 'America/Fort_Nelson', label: 'Fort Nelson', utcOffset: getCurrentOffset('America/Fort_Nelson') },
-            { id: 'America/Fortaleza', label: 'Fortaleza', utcOffset: getCurrentOffset('America/Fortaleza') },
-            { id: 'America/Glace_Bay', label: 'Glace Bay', utcOffset: getCurrentOffset('America/Glace_Bay') },
-            { id: 'America/Goose_Bay', label: 'Goose Bay', utcOffset: getCurrentOffset('America/Goose_Bay') },
-            { id: 'America/Grand_Turk', label: 'Grand Turk', utcOffset: getCurrentOffset('America/Grand_Turk') },
-            { id: 'America/Grenada', label: 'Grenada', utcOffset: getCurrentOffset('America/Grenada') },
-            { id: 'America/Guadeloupe', label: 'Guadeloupe', utcOffset: getCurrentOffset('America/Guadeloupe') },
-            { id: 'America/Guatemala', label: 'Guatemala', utcOffset: getCurrentOffset('America/Guatemala') },
-            { id: 'America/Guayaquil', label: 'Guayaquil', utcOffset: getCurrentOffset('America/Guayaquil') },
-            { id: 'America/Guyana', label: 'Guyana', utcOffset: getCurrentOffset('America/Guyana') },
-            { id: 'America/Halifax', label: 'Halifax', utcOffset: getCurrentOffset('America/Halifax') },
-            { id: 'America/Havana', label: 'Havana', utcOffset: getCurrentOffset('America/Havana') },
-            { id: 'America/Hermosillo', label: 'Hermosillo', utcOffset: getCurrentOffset('America/Hermosillo') },
-            { id: 'America/Indiana/Indianapolis', label: 'Indianapolis', utcOffset: getCurrentOffset('America/Indiana/Indianapolis') },
-            { id: 'America/Indiana/Knox', label: 'Knox', utcOffset: getCurrentOffset('America/Indiana/Knox') },
-            { id: 'America/Indiana/Marengo', label: 'Marengo', utcOffset: getCurrentOffset('America/Indiana/Marengo') },
-            { id: 'America/Indiana/Petersburg', label: 'Petersburg', utcOffset: getCurrentOffset('America/Indiana/Petersburg') },
-            { id: 'America/Indiana/Tell_City', label: 'Tell City', utcOffset: getCurrentOffset('America/Indiana/Tell_City') },
-            { id: 'America/Indiana/Vevay', label: 'Vevay', utcOffset: getCurrentOffset('America/Indiana/Vevay') },
-            { id: 'America/Indiana/Vincennes', label: 'Vincennes', utcOffset: getCurrentOffset('America/Indiana/Vincennes') },
-            { id: 'America/Indiana/Winamac', label: 'Winamac', utcOffset: getCurrentOffset('America/Indiana/Winamac') },
-            { id: 'America/Inuvik', label: 'Inuvik', utcOffset: getCurrentOffset('America/Inuvik') },
-            { id: 'America/Iqaluit', label: 'Iqaluit', utcOffset: getCurrentOffset('America/Iqaluit') },
-            { id: 'America/Jamaica', label: 'Jamaica', utcOffset: getCurrentOffset('America/Jamaica') },
-            { id: 'America/Juneau', label: 'Juneau', utcOffset: getCurrentOffset('America/Juneau') },
-            { id: 'America/Kentucky/Louisville', label: 'Louisville', utcOffset: getCurrentOffset('America/Kentucky/Louisville') },
-            { id: 'America/Kentucky/Monticello', label: 'Monticello', utcOffset: getCurrentOffset('America/Kentucky/Monticello') },
-            { id: 'America/Kralendijk', label: 'Kralendijk', utcOffset: getCurrentOffset('America/Kralendijk') },
-            { id: 'America/La_Paz', label: 'La Paz', utcOffset: getCurrentOffset('America/La_Paz') },
-            { id: 'America/Lima', label: 'Lima', utcOffset: getCurrentOffset('America/Lima') },
-            { id: 'America/Los_Angeles', label: 'Los Angeles', utcOffset: getCurrentOffset('America/Los_Angeles') },
-            { id: 'America/Lower_Princes', label: 'Lower Princes', utcOffset: getCurrentOffset('America/Lower_Princes') },
-            { id: 'America/Maceio', label: 'Maceio', utcOffset: getCurrentOffset('America/Maceio') },
-            { id: 'America/Managua', label: 'Managua', utcOffset: getCurrentOffset('America/Managua') },
-            { id: 'America/Manaus', label: 'Manaus', utcOffset: getCurrentOffset('America/Manaus') },
-            { id: 'America/Marigot', label: 'Marigot', utcOffset: getCurrentOffset('America/Marigot') },
-            { id: 'America/Martinique', label: 'Martinique', utcOffset: getCurrentOffset('America/Martinique') },
-            { id: 'America/Matamoros', label: 'Matamoros', utcOffset: getCurrentOffset('America/Matamoros') },
-            { id: 'America/Mazatlan', label: 'Mazatlan', utcOffset: getCurrentOffset('America/Mazatlan') },
-            { id: 'America/Menominee', label: 'Menominee', utcOffset: getCurrentOffset('America/Menominee') },
-            { id: 'America/Merida', label: 'Merida', utcOffset: getCurrentOffset('America/Merida') },
-            { id: 'America/Metlakatla', label: 'Metlakatla', utcOffset: getCurrentOffset('America/Metlakatla') },
-            { id: 'America/Mexico_City', label: 'Mexico City', utcOffset: getCurrentOffset('America/Mexico_City') },
-            { id: 'America/Miquelon', label: 'Miquelon', utcOffset: getCurrentOffset('America/Miquelon') },
-            { id: 'America/Moncton', label: 'Moncton', utcOffset: getCurrentOffset('America/Moncton') },
-            { id: 'America/Monterrey', label: 'Monterrey', utcOffset: getCurrentOffset('America/Monterrey') },
-            { id: 'America/Montevideo', label: 'Montevideo', utcOffset: getCurrentOffset('America/Montevideo') },
-            { id: 'America/Montreal', label: 'Montreal', utcOffset: getCurrentOffset('America/Montreal') },
-            { id: 'America/Montserrat', label: 'Montserrat', utcOffset: getCurrentOffset('America/Montserrat') },
-            { id: 'America/Nassau', label: 'Nassau', utcOffset: getCurrentOffset('America/Nassau') },
-            { id: 'America/New_York', label: 'New York', utcOffset: getCurrentOffset('America/New_York') },
-            { id: 'America/Nipigon', label: 'Nipigon', utcOffset: getCurrentOffset('America/Nipigon') },
-            { id: 'America/Nome', label: 'Nome', utcOffset: getCurrentOffset('America/Nome') },
-            { id: 'America/Noronha', label: 'Noronha', utcOffset: getCurrentOffset('America/Noronha') },
-            { id: 'America/North_Dakota/Beulah', label: 'Beulah', utcOffset: getCurrentOffset('America/North_Dakota/Beulah') },
-            { id: 'America/North_Dakota/Center', label: 'Center', utcOffset: getCurrentOffset('America/North_Dakota/Center') },
-            { id: 'America/North_Dakota/New_Salem', label: 'New Salem', utcOffset: getCurrentOffset('America/North_Dakota/New_Salem') },
-            { id: 'America/Nuuk', label: 'Nuuk', utcOffset: getCurrentOffset('America/Nuuk') },
-            { id: 'America/Ojinaga', label: 'Ojinaga', utcOffset: getCurrentOffset('America/Ojinaga') },
-            { id: 'America/Panama', label: 'Panama', utcOffset: getCurrentOffset('America/Panama') },
-            { id: 'America/Pangnirtung', label: 'Pangnirtung', utcOffset: getCurrentOffset('America/Pangnirtung') },
-            { id: 'America/Paramaribo', label: 'Paramaribo', utcOffset: getCurrentOffset('America/Paramaribo') },
-            { id: 'America/Phoenix', label: 'Phoenix', utcOffset: getCurrentOffset('America/Phoenix') },
-            { id: 'America/Port-au-Prince', label: 'Port-au-Prince', utcOffset: getCurrentOffset('America/Port-au-Prince') },
-            { id: 'America/Port_of_Spain', label: 'Port of Spain', utcOffset: getCurrentOffset('America/Port_of_Spain') },
-            { id: 'America/Porto_Velho', label: 'Porto Velho', utcOffset: getCurrentOffset('America/Porto_Velho') },
-            { id: 'America/Puerto_Rico', label: 'Puerto Rico', utcOffset: getCurrentOffset('America/Puerto_Rico') },
-            { id: 'America/Punta_Arenas', label: 'Punta Arenas', utcOffset: getCurrentOffset('America/Punta_Arenas') },
-            { id: 'America/Rainy_River', label: 'Rainy River', utcOffset: getCurrentOffset('America/Rainy_River') },
-            { id: 'America/Rankin_Inlet', label: 'Rankin Inlet', utcOffset: getCurrentOffset('America/Rankin_Inlet') },
-            { id: 'America/Recife', label: 'Recife', utcOffset: getCurrentOffset('America/Recife') },
-            { id: 'America/Regina', label: 'Regina', utcOffset: getCurrentOffset('America/Regina') },
-            { id: 'America/Resolute', label: 'Resolute', utcOffset: getCurrentOffset('America/Resolute') },
-            { id: 'America/Rio_Branco', label: 'Rio Branco', utcOffset: getCurrentOffset('America/Rio_Branco') },
-            { id: 'America/Santarem', label: 'Santarem', utcOffset: getCurrentOffset('America/Santarem') },
-            { id: 'America/Santiago', label: 'Santiago', utcOffset: getCurrentOffset('America/Santiago') },
-            { id: 'America/Santo_Domingo', label: 'Santo Domingo', utcOffset: getCurrentOffset('America/Santo_Domingo') },
-            { id: 'America/Sao_Paulo', label: 'Sao Paulo', utcOffset: getCurrentOffset('America/Sao_Paulo') },
-            { id: 'America/Scoresbysund', label: 'Scoresbysund', utcOffset: getCurrentOffset('America/Scoresbysund') },
-            { id: 'America/Sitka', label: 'Sitka', utcOffset: getCurrentOffset('America/Sitka') },
-            { id: 'America/St_Barthelemy', label: 'St Barthelemy', utcOffset: getCurrentOffset('America/St_Barthelemy') },
-            { id: 'America/St_Johns', label: 'St Johns', utcOffset: getCurrentOffset('America/St_Johns') },
-            { id: 'America/St_Kitts', label: 'St Kitts', utcOffset: getCurrentOffset('America/St_Kitts') },
-            { id: 'America/St_Lucia', label: 'St Lucia', utcOffset: getCurrentOffset('America/St_Lucia') },
-            { id: 'America/St_Thomas', label: 'St Thomas', utcOffset: getCurrentOffset('America/St_Thomas') },
-            { id: 'America/St_Vincent', label: 'St Vincent', utcOffset: getCurrentOffset('America/St_Vincent') },
-            { id: 'America/Swift_Current', label: 'Swift Current', utcOffset: getCurrentOffset('America/Swift_Current') },
-            { id: 'America/Tegucigalpa', label: 'Tegucigalpa', utcOffset: getCurrentOffset('America/Tegucigalpa') },
-            { id: 'America/Thule', label: 'Thule', utcOffset: getCurrentOffset('America/Thule') },
-            { id: 'America/Thunder_Bay', label: 'Thunder Bay', utcOffset: getCurrentOffset('America/Thunder_Bay') },
-            { id: 'America/Tijuana', label: 'Tijuana', utcOffset: getCurrentOffset('America/Tijuana') },
-            { id: 'America/Toronto', label: 'Toronto', utcOffset: getCurrentOffset('America/Toronto') },
-            { id: 'America/Tortola', label: 'Tortola', utcOffset: getCurrentOffset('America/Tortola') },
-            { id: 'America/Vancouver', label: 'Vancouver', utcOffset: getCurrentOffset('America/Vancouver') },
-            { id: 'America/Whitehorse', label: 'Whitehorse', utcOffset: getCurrentOffset('America/Whitehorse') },
-            { id: 'America/Winnipeg', label: 'Winnipeg', utcOffset: getCurrentOffset('America/Winnipeg') },
-            { id: 'America/Yakutat', label: 'Yakutat', utcOffset: getCurrentOffset('America/Yakutat') },
-            { id: 'America/Yellowknife', label: 'Yellowknife', utcOffset: getCurrentOffset('America/Yellowknife') },
+            { id: 'America/Adak', label: 'Adak', utcOffset: '-10:00' },
+            { id: 'America/Anchorage', label: 'Anchorage', utcOffset: '-09:00' },
+            { id: 'America/Anguilla', label: 'Anguilla', utcOffset: '-04:00' },
+            { id: 'America/Antigua', label: 'Antigua', utcOffset: '-04:00' },
+            { id: 'America/Araguaina', label: 'Araguaina', utcOffset: '-03:00' },
+            { id: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires', utcOffset: '-03:00' },
+            { id: 'America/Argentina/Catamarca', label: 'Catamarca', utcOffset: '-03:00' },
+            { id: 'America/Argentina/Cordoba', label: 'Cordoba', utcOffset: '-03:00' },
+            { id: 'America/Argentina/Jujuy', label: 'Jujuy', utcOffset: '-03:00' },
+            { id: 'America/Argentina/La_Rioja', label: 'La Rioja', utcOffset: '-03:00' },
+            { id: 'America/Argentina/Mendoza', label: 'Mendoza', utcOffset: '-03:00' },
+            { id: 'America/Argentina/Rio_Gallegos', label: 'Rio Gallegos', utcOffset: '-03:00' },
+            { id: 'America/Argentina/Salta', label: 'Salta', utcOffset: '-03:00' },
+            { id: 'America/Argentina/San_Juan', label: 'San Juan', utcOffset: '-03:00' },
+            { id: 'America/Argentina/San_Luis', label: 'San Luis', utcOffset: '-03:00' },
+            { id: 'America/Argentina/Tucuman', label: 'Tucuman', utcOffset: '-03:00' },
+            { id: 'America/Argentina/Ushuaia', label: 'Ushuaia', utcOffset: '-03:00' },
+            { id: 'America/Aruba', label: 'Aruba', utcOffset: '-04:00' },
+            { id: 'America/Asuncion', label: 'Asuncion', utcOffset: '-04:00' },
+            { id: 'America/Atikokan', label: 'Atikokan', utcOffset: '-05:00' },
+            { id: 'America/Bahia', label: 'Bahia', utcOffset: '-03:00' },
+            { id: 'America/Bahia_Banderas', label: 'Bahia Banderas', utcOffset: '-06:00' },
+            { id: 'America/Barbados', label: 'Barbados', utcOffset: '-04:00' },
+            { id: 'America/Belem', label: 'Belem', utcOffset: '-03:00' },
+            { id: 'America/Belize', label: 'Belize', utcOffset: '-06:00' },
+            { id: 'America/Blanc-Sablon', label: 'Blanc-Sablon', utcOffset: '-04:00' },
+            { id: 'America/Boa_Vista', label: 'Boa Vista', utcOffset: '-04:00' },
+            { id: 'America/Bogota', label: 'Bogota', utcOffset: '-05:00' },
+            { id: 'America/Boise', label: 'Boise', utcOffset: '-07:00' },
+            { id: 'America/Cambridge_Bay', label: 'Cambridge Bay', utcOffset: '-07:00' },
+            { id: 'America/Campo_Grande', label: 'Campo Grande', utcOffset: '-04:00' },
+            { id: 'America/Cancun', label: 'Cancun', utcOffset: '-05:00' },
+            { id: 'America/Caracas', label: 'Caracas', utcOffset: '-04:00' },
+            { id: 'America/Cayenne', label: 'Cayenne', utcOffset: '-03:00' },
+            { id: 'America/Cayman', label: 'Cayman', utcOffset: '-05:00' },
+            { id: 'America/Chicago', label: 'Chicago', utcOffset: '-06:00' },
+            { id: 'America/Chihuahua', label: 'Chihuahua', utcOffset: '-06:00' },
+            { id: 'America/Costa_Rica', label: 'Costa Rica', utcOffset: '-06:00' },
+            { id: 'America/Cuiaba', label: 'Cuiaba', utcOffset: '-04:00' },
+            { id: 'America/Curacao', label: 'Curacao', utcOffset: '-04:00' },
+            { id: 'America/Danmarkshavn', label: 'Danmarkshavn', utcOffset: '+00:00' },
+            { id: 'America/Dawson', label: 'Dawson', utcOffset: '-07:00' },
+            { id: 'America/Dawson_Creek', label: 'Dawson Creek', utcOffset: '-07:00' },
+            { id: 'America/Denver', label: 'Denver', utcOffset: '-07:00' },
+            { id: 'America/Detroit', label: 'Detroit', utcOffset: '-05:00' },
+            { id: 'America/Dominica', label: 'Dominica', utcOffset: '-04:00' },
+            { id: 'America/Edmonton', label: 'Edmonton', utcOffset: '-07:00' },
+            { id: 'America/Eirunepe', label: 'Eirunepe', utcOffset: '-05:00' },
+            { id: 'America/El_Salvador', label: 'El Salvador', utcOffset: '-06:00' },
+            { id: 'America/Fort_Nelson', label: 'Fort Nelson', utcOffset: '-07:00' },
+            { id: 'America/Fortaleza', label: 'Fortaleza', utcOffset: '-03:00' },
+            { id: 'America/Glace_Bay', label: 'Glace Bay', utcOffset: '-04:00' },
+            { id: 'America/Goose_Bay', label: 'Goose Bay', utcOffset: '-04:00' },
+            { id: 'America/Grand_Turk', label: 'Grand Turk', utcOffset: '-05:00' },
+            { id: 'America/Grenada', label: 'Grenada', utcOffset: '-04:00' },
+            { id: 'America/Guadeloupe', label: 'Guadeloupe', utcOffset: '-04:00' },
+            { id: 'America/Guatemala', label: 'Guatemala', utcOffset: '-06:00' },
+            { id: 'America/Guayaquil', label: 'Guayaquil', utcOffset: '-05:00' },
+            { id: 'America/Guyana', label: 'Guyana', utcOffset: '-04:00' },
+            { id: 'America/Halifax', label: 'Halifax', utcOffset: '-04:00' },
+            { id: 'America/Havana', label: 'Havana', utcOffset: '-05:00' },
+            { id: 'America/Hermosillo', label: 'Hermosillo', utcOffset: '-07:00' },
+            { id: 'America/Indiana/Indianapolis', label: 'Indianapolis', utcOffset: '-05:00' },
+            { id: 'America/Indiana/Knox', label: 'Knox', utcOffset: '-06:00' },
+            { id: 'America/Indiana/Marengo', label: 'Marengo', utcOffset: '-05:00' },
+            { id: 'America/Indiana/Petersburg', label: 'Petersburg', utcOffset: '-05:00' },
+            { id: 'America/Indiana/Tell_City', label: 'Tell City', utcOffset: '-06:00' },
+            { id: 'America/Indiana/Vevay', label: 'Vevay', utcOffset: '-05:00' },
+            { id: 'America/Indiana/Vincennes', label: 'Vincennes', utcOffset: '-05:00' },
+            { id: 'America/Indiana/Winamac', label: 'Winamac', utcOffset: '-05:00' },
+            { id: 'America/Inuvik', label: 'Inuvik', utcOffset: '-07:00' },
+            { id: 'America/Iqaluit', label: 'Iqaluit', utcOffset: '-05:00' },
+            { id: 'America/Jamaica', label: 'Jamaica', utcOffset: '-05:00' },
+            { id: 'America/Juneau', label: 'Juneau', utcOffset: '-09:00' },
+            { id: 'America/Kentucky/Louisville', label: 'Louisville', utcOffset: '-05:00' },
+            { id: 'America/Kentucky/Monticello', label: 'Monticello', utcOffset: '-05:00' },
+            { id: 'America/Kralendijk', label: 'Kralendijk', utcOffset: '-04:00' },
+            { id: 'America/La_Paz', label: 'La Paz', utcOffset: '-04:00' },
+            { id: 'America/Lima', label: 'Lima', utcOffset: '-05:00' },
+            { id: 'America/Los_Angeles', label: 'Los Angeles', utcOffset: '-08:00' },
+            { id: 'America/Lower_Princes', label: 'Lower Princes', utcOffset: '-04:00' },
+            { id: 'America/Maceio', label: 'Maceio', utcOffset: '-03:00' },
+            { id: 'America/Managua', label: 'Managua', utcOffset: '-06:00' },
+            { id: 'America/Manaus', label: 'Manaus', utcOffset: '-04:00' },
+            { id: 'America/Marigot', label: 'Marigot', utcOffset: '-04:00' },
+            { id: 'America/Martinique', label: 'Martinique', utcOffset: '-04:00' },
+            { id: 'America/Matamoros', label: 'Matamoros', utcOffset: '-06:00' },
+            { id: 'America/Mazatlan', label: 'Mazatlan', utcOffset: '-07:00' },
+            { id: 'America/Menominee', label: 'Menominee', utcOffset: '-06:00' },
+            { id: 'America/Merida', label: 'Merida', utcOffset: '-06:00' },
+            { id: 'America/Metlakatla', label: 'Metlakatla', utcOffset: '-09:00' },
+            { id: 'America/Mexico_City', label: 'Mexico City', utcOffset: '-06:00' },
+            { id: 'America/Miquelon', label: 'Miquelon', utcOffset: '-03:00' },
+            { id: 'America/Moncton', label: 'Moncton', utcOffset: '-04:00' },
+            { id: 'America/Monterrey', label: 'Monterrey', utcOffset: '-06:00' },
+            { id: 'America/Montevideo', label: 'Montevideo', utcOffset: '-03:00' },
+            { id: 'America/Montreal', label: 'Montreal', utcOffset: '-05:00' },
+            { id: 'America/Montserrat', label: 'Montserrat', utcOffset: '-04:00' },
+            { id: 'America/Nassau', label: 'Nassau', utcOffset: '-05:00' },
+            { id: 'America/New_York', label: 'New York', utcOffset: '-05:00' },
+            { id: 'America/Nipigon', label: 'Nipigon', utcOffset: '-05:00' },
+            { id: 'America/Nome', label: 'Nome', utcOffset: '-09:00' },
+            { id: 'America/Noronha', label: 'Noronha', utcOffset: '-02:00' },
+            { id: 'America/North_Dakota/Beulah', label: 'Beulah', utcOffset: '-06:00' },
+            { id: 'America/North_Dakota/Center', label: 'Center', utcOffset: '-06:00' },
+            { id: 'America/North_Dakota/New_Salem', label: 'New Salem', utcOffset: '-06:00' },
+            { id: 'America/Nuuk', label: 'Nuuk', utcOffset: '-03:00' },
+            { id: 'America/Ojinaga', label: 'Ojinaga', utcOffset: '-06:00' },
+            { id: 'America/Panama', label: 'Panama', utcOffset: '-05:00' },
+            { id: 'America/Pangnirtung', label: 'Pangnirtung', utcOffset: '-05:00' },
+            { id: 'America/Paramaribo', label: 'Paramaribo', utcOffset: '-03:00' },
+            { id: 'America/Phoenix', label: 'Phoenix', utcOffset: '-07:00' },
+            { id: 'America/Port-au-Prince', label: 'Port-au-Prince', utcOffset: '-05:00' },
+            { id: 'America/Port_of_Spain', label: 'Port of Spain', utcOffset: '-04:00' },
+            { id: 'America/Porto_Velho', label: 'Porto Velho', utcOffset: '-04:00' },
+            { id: 'America/Puerto_Rico', label: 'Puerto Rico', utcOffset: '-04:00' },
+            { id: 'America/Punta_Arenas', label: 'Punta Arenas', utcOffset: '-03:00' },
+            { id: 'America/Rainy_River', label: 'Rainy River', utcOffset: '-06:00' },
+            { id: 'America/Rankin_Inlet', label: 'Rankin Inlet', utcOffset: '-06:00' },
+            { id: 'America/Recife', label: 'Recife', utcOffset: '-03:00' },
+            { id: 'America/Regina', label: 'Regina', utcOffset: '-06:00' },
+            { id: 'America/Resolute', label: 'Resolute', utcOffset: '-06:00' },
+            { id: 'America/Rio_Branco', label: 'Rio Branco', utcOffset: '-05:00' },
+            { id: 'America/Santarem', label: 'Santarem', utcOffset: '-03:00' },
+            { id: 'America/Santiago', label: 'Santiago', utcOffset: '-03:00' },
+            { id: 'America/Santo_Domingo', label: 'Santo Domingo', utcOffset: '-04:00' },
+            { id: 'America/Sao_Paulo', label: 'Sao Paulo', utcOffset: '-03:00' },
+            { id: 'America/Scoresbysund', label: 'Scoresbysund', utcOffset: '-01:00' },
+            { id: 'America/Sitka', label: 'Sitka', utcOffset: '-09:00' },
+            { id: 'America/St_Barthelemy', label: 'St Barthelemy', utcOffset: '-04:00' },
+            { id: 'America/St_Johns', label: 'St Johns', utcOffset: '-03:30' },
+            { id: 'America/St_Kitts', label: 'St Kitts', utcOffset: '-04:00' },
+            { id: 'America/St_Lucia', label: 'St Lucia', utcOffset: '-04:00' },
+            { id: 'America/St_Thomas', label: 'St Thomas', utcOffset: '-04:00' },
+            { id: 'America/St_Vincent', label: 'St Vincent', utcOffset: '-04:00' },
+            { id: 'America/Swift_Current', label: 'Swift Current', utcOffset: '-06:00' },
+            { id: 'America/Tegucigalpa', label: 'Tegucigalpa', utcOffset: '-06:00' },
+            { id: 'America/Thule', label: 'Thule', utcOffset: '-04:00' },
+            { id: 'America/Thunder_Bay', label: 'Thunder Bay', utcOffset: '-05:00' },
+            { id: 'America/Tijuana', label: 'Tijuana', utcOffset: '-08:00' },
+            { id: 'America/Toronto', label: 'Toronto', utcOffset: '-05:00' },
+            { id: 'America/Tortola', label: 'Tortola', utcOffset: '-04:00' },
+            { id: 'America/Vancouver', label: 'Vancouver', utcOffset: '-08:00' },
+            { id: 'America/Whitehorse', label: 'Whitehorse', utcOffset: '-07:00' },
+            { id: 'America/Winnipeg', label: 'Winnipeg', utcOffset: '-06:00' },
+            { id: 'America/Yakutat', label: 'Yakutat', utcOffset: '-09:00' },
+            { id: 'America/Yellowknife', label: 'Yellowknife', utcOffset: '-07:00' },
 
             // Antarctica
-            { id: 'Antarctica/Casey', label: 'Casey', utcOffset: getCurrentOffset('Antarctica/Casey') },
-            { id: 'Antarctica/Davis', label: 'Davis', utcOffset: getCurrentOffset('Antarctica/Davis') },
-            { id: 'Antarctica/DumontDUrville', label: 'Dumont DUrville', utcOffset: getCurrentOffset('Antarctica/DumontDUrville') },
-            { id: 'Antarctica/Macquarie', label: 'Macquarie', utcOffset: getCurrentOffset('Antarctica/Macquarie') },
-            { id: 'Antarctica/Mawson', label: 'Mawson', utcOffset: getCurrentOffset('Antarctica/Mawson') },
-            { id: 'Antarctica/McMurdo', label: 'McMurdo', utcOffset: getCurrentOffset('Antarctica/McMurdo') },
-            { id: 'Antarctica/Palmer', label: 'Palmer', utcOffset: getCurrentOffset('Antarctica/Palmer') },
-            { id: 'Antarctica/Rothera', label: 'Rothera', utcOffset: getCurrentOffset('Antarctica/Rothera') },
-            { id: 'Antarctica/Syowa', label: 'Syowa', utcOffset: getCurrentOffset('Antarctica/Syowa') },
-            { id: 'Antarctica/Troll', label: 'Troll', utcOffset: getCurrentOffset('Antarctica/Troll') },
-            { id: 'Antarctica/Vostok', label: 'Vostok', utcOffset: getCurrentOffset('Antarctica/Vostok') },
+            { id: 'Antarctica/Casey', label: 'Casey', utcOffset: '+08:00' },
+            { id: 'Antarctica/Davis', label: 'Davis', utcOffset: '+07:00' },
+            { id: 'Antarctica/DumontDUrville', label: 'Dumont DUrville', utcOffset: '+10:00' },
+            { id: 'Antarctica/Macquarie', label: 'Macquarie', utcOffset: '+11:00' },
+            { id: 'Antarctica/Mawson', label: 'Mawson', utcOffset: '+05:00' },
+            { id: 'Antarctica/McMurdo', label: 'McMurdo', utcOffset: '+13:00' },
+            { id: 'Antarctica/Palmer', label: 'Palmer', utcOffset: '-03:00' },
+            { id: 'Antarctica/Rothera', label: 'Rothera', utcOffset: '-03:00' },
+            { id: 'Antarctica/Syowa', label: 'Syowa', utcOffset: '+03:00' },
+            { id: 'Antarctica/Troll', label: 'Troll', utcOffset: '+00:00' },
+            { id: 'Antarctica/Vostok', label: 'Vostok', utcOffset: '+06:00' },
 
             // Asia
-            { id: 'Asia/Aden', label: 'Aden', utcOffset: getCurrentOffset('Asia/Aden') },
-            { id: 'Asia/Almaty', label: 'Almaty', utcOffset: getCurrentOffset('Asia/Almaty') },
-            { id: 'Asia/Amman', label: 'Amman', utcOffset: getCurrentOffset('Asia/Amman') },
-            { id: 'Asia/Anadyr', label: 'Anadyr', utcOffset: getCurrentOffset('Asia/Anadyr') },
-            { id: 'Asia/Aqtau', label: 'Aqtau', utcOffset: getCurrentOffset('Asia/Aqtau') },
-            { id: 'Asia/Aqtobe', label: 'Aqtobe', utcOffset: getCurrentOffset('Asia/Aqtobe') },
-            { id: 'Asia/Ashgabat', label: 'Ashgabat', utcOffset: getCurrentOffset('Asia/Ashgabat') },
-            { id: 'Asia/Atyrau', label: 'Atyrau', utcOffset: getCurrentOffset('Asia/Atyrau') },
-            { id: 'Asia/Baghdad', label: 'Baghdad', utcOffset: getCurrentOffset('Asia/Baghdad') },
-            { id: 'Asia/Bahrain', label: 'Bahrain', utcOffset: getCurrentOffset('Asia/Bahrain') },
-            { id: 'Asia/Baku', label: 'Baku', utcOffset: getCurrentOffset('Asia/Baku') },
-            { id: 'Asia/Bangkok', label: 'Bangkok', utcOffset: getCurrentOffset('Asia/Bangkok') },
-            { id: 'Asia/Barnaul', label: 'Barnaul', utcOffset: getCurrentOffset('Asia/Barnaul') },
-            { id: 'Asia/Beirut', label: 'Beirut', utcOffset: getCurrentOffset('Asia/Beirut') },
-            { id: 'Asia/Bishkek', label: 'Bishkek', utcOffset: getCurrentOffset('Asia/Bishkek') },
-            { id: 'Asia/Brunei', label: 'Brunei', utcOffset: getCurrentOffset('Asia/Brunei') },
-            { id: 'Asia/Chita', label: 'Chita', utcOffset: getCurrentOffset('Asia/Chita') },
-            { id: 'Asia/Choibalsan', label: 'Choibalsan', utcOffset: getCurrentOffset('Asia/Choibalsan') },
-            { id: 'Asia/Colombo', label: 'Colombo', utcOffset: getCurrentOffset('Asia/Colombo') },
-            { id: 'Asia/Damascus', label: 'Damascus', utcOffset: getCurrentOffset('Asia/Damascus') },
-            { id: 'Asia/Dhaka', label: 'Dhaka', utcOffset: getCurrentOffset('Asia/Dhaka') },
-            { id: 'Asia/Dili', label: 'Dili', utcOffset: getCurrentOffset('Asia/Dili') },
-            { id: 'Asia/Dubai', label: 'Dubai', utcOffset: getCurrentOffset('Asia/Dubai') },
-            { id: 'Asia/Dushanbe', label: 'Dushanbe', utcOffset: getCurrentOffset('Asia/Dushanbe') },
-            { id: 'Asia/Famagusta', label: 'Famagusta', utcOffset: getCurrentOffset('Asia/Famagusta') },
-            { id: 'Asia/Gaza', label: 'Gaza', utcOffset: getCurrentOffset('Asia/Gaza') },
-            { id: 'Asia/Hebron', label: 'Hebron', utcOffset: getCurrentOffset('Asia/Hebron') },
-            { id: 'Asia/Ho_Chi_Minh', label: 'Ho Chi Minh', utcOffset: getCurrentOffset('Asia/Ho_Chi_Minh') },
-            { id: 'Asia/Hong_Kong', label: 'Hong Kong', utcOffset: getCurrentOffset('Asia/Hong_Kong') },
-            { id: 'Asia/Hovd', label: 'Hovd', utcOffset: getCurrentOffset('Asia/Hovd') },
-            { id: 'Asia/Irkutsk', label: 'Irkutsk', utcOffset: getCurrentOffset('Asia/Irkutsk') },
-            { id: 'Asia/Jakarta', label: 'Jakarta', utcOffset: getCurrentOffset('Asia/Jakarta') },
-            { id: 'Asia/Jayapura', label: 'Jayapura', utcOffset: getCurrentOffset('Asia/Jayapura') },
-            { id: 'Asia/Jerusalem', label: 'Jerusalem', utcOffset: getCurrentOffset('Asia/Jerusalem') },
-            { id: 'Asia/Kabul', label: 'Kabul', utcOffset: getCurrentOffset('Asia/Kabul') },
-            { id: 'Asia/Kamchatka', label: 'Kamchatka', utcOffset: getCurrentOffset('Asia/Kamchatka') },
-            { id: 'Asia/Karachi', label: 'Karachi', utcOffset: getCurrentOffset('Asia/Karachi') },
-            { id: 'Asia/Kathmandu', label: 'Kathmandu', utcOffset: getCurrentOffset('Asia/Kathmandu') },
-            { id: 'Asia/Khandyga', label: 'Khandyga', utcOffset: getCurrentOffset('Asia/Khandyga') },
-            { id: 'Asia/Kolkata', label: 'Kolkata', utcOffset: getCurrentOffset('Asia/Kolkata') },
-            { id: 'Asia/Krasnoyarsk', label: 'Krasnoyarsk', utcOffset: getCurrentOffset('Asia/Krasnoyarsk') },
-            { id: 'Asia/Kuala_Lumpur', label: 'Kuala Lumpur', utcOffset: getCurrentOffset('Asia/Kuala_Lumpur') },
-            { id: 'Asia/Kuching', label: 'Kuching', utcOffset: getCurrentOffset('Asia/Kuching') },
-            { id: 'Asia/Kuwait', label: 'Kuwait', utcOffset: getCurrentOffset('Asia/Kuwait') },
-            { id: 'Asia/Macau', label: 'Macau', utcOffset: getCurrentOffset('Asia/Macau') },
-            { id: 'Asia/Magadan', label: 'Magadan', utcOffset: getCurrentOffset('Asia/Magadan') },
-            { id: 'Asia/Makassar', label: 'Makassar', utcOffset: getCurrentOffset('Asia/Makassar') },
-            { id: 'Asia/Manila', label: 'Manila', utcOffset: getCurrentOffset('Asia/Manila') },
-            { id: 'Asia/Muscat', label: 'Muscat', utcOffset: getCurrentOffset('Asia/Muscat') },
-            { id: 'Asia/Nicosia', label: 'Nicosia', utcOffset: getCurrentOffset('Asia/Nicosia') },
-            { id: 'Asia/Novokuznetsk', label: 'Novokuznetsk', utcOffset: getCurrentOffset('Asia/Novokuznetsk') },
-            { id: 'Asia/Novosibirsk', label: 'Novosibirsk', utcOffset: getCurrentOffset('Asia/Novosibirsk') },
-            { id: 'Asia/Omsk', label: 'Omsk', utcOffset: getCurrentOffset('Asia/Omsk') },
-            { id: 'Asia/Oral', label: 'Oral', utcOffset: getCurrentOffset('Asia/Oral') },
-            { id: 'Asia/Phnom_Penh', label: 'Phnom Penh', utcOffset: getCurrentOffset('Asia/Phnom_Penh') },
-            { id: 'Asia/Pontianak', label: 'Pontianak', utcOffset: getCurrentOffset('Asia/Pontianak') },
-            { id: 'Asia/Pyongyang', label: 'Pyongyang', utcOffset: getCurrentOffset('Asia/Pyongyang') },
-            { id: 'Asia/Qatar', label: 'Qatar', utcOffset: getCurrentOffset('Asia/Qatar') },
-            { id: 'Asia/Qostanay', label: 'Qostanay', utcOffset: getCurrentOffset('Asia/Qostanay') },
-            { id: 'Asia/Qyzylorda', label: 'Qyzylorda', utcOffset: getCurrentOffset('Asia/Qyzylorda') },
-            { id: 'Asia/Riyadh', label: 'Riyadh', utcOffset: getCurrentOffset('Asia/Riyadh') },
-            { id: 'Asia/Sakhalin', label: 'Sakhalin', utcOffset: getCurrentOffset('Asia/Sakhalin') },
-            { id: 'Asia/Samarkand', label: 'Samarkand', utcOffset: getCurrentOffset('Asia/Samarkand') },
-            { id: 'Asia/Seoul', label: 'Seoul', utcOffset: getCurrentOffset('Asia/Seoul') },
-            { id: 'Asia/Shanghai', label: 'Shanghai', utcOffset: getCurrentOffset('Asia/Shanghai') },
-            { id: 'Asia/Singapore', label: 'Singapore', utcOffset: getCurrentOffset('Asia/Singapore') },
-            { id: 'Asia/Srednekolymsk', label: 'Srednekolymsk', utcOffset: getCurrentOffset('Asia/Srednekolymsk') },
-            { id: 'Asia/Taipei', label: 'Taipei', utcOffset: getCurrentOffset('Asia/Taipei') },
-            { id: 'Asia/Tashkent', label: 'Tashkent', utcOffset: getCurrentOffset('Asia/Tashkent') },
-            { id: 'Asia/Tbilisi', label: 'Tbilisi', utcOffset: getCurrentOffset('Asia/Tbilisi') },
-            { id: 'Asia/Tehran', label: 'Tehran', utcOffset: getCurrentOffset('Asia/Tehran') },
-            { id: 'Asia/Thimphu', label: 'Thimphu', utcOffset: getCurrentOffset('Asia/Thimphu') },
-            { id: 'Asia/Tokyo', label: 'Tokyo', utcOffset: getCurrentOffset('Asia/Tokyo') },
-            { id: 'Asia/Tomsk', label: 'Tomsk', utcOffset: getCurrentOffset('Asia/Tomsk') },
-            { id: 'Asia/Ulaanbaatar', label: 'Ulaanbaatar', utcOffset: getCurrentOffset('Asia/Ulaanbaatar') },
-            { id: 'Asia/Urumqi', label: 'Urumqi', utcOffset: getCurrentOffset('Asia/Urumqi') },
-            { id: 'Asia/Ust-Nera', label: 'Ust-Nera', utcOffset: getCurrentOffset('Asia/Ust-Nera') },
-            { id: 'Asia/Vientiane', label: 'Vientiane', utcOffset: getCurrentOffset('Asia/Vientiane') },
-            { id: 'Asia/Vladivostok', label: 'Vladivostok', utcOffset: getCurrentOffset('Asia/Vladivostok') },
-            { id: 'Asia/Yakutsk', label: 'Yakutsk', utcOffset: getCurrentOffset('Asia/Yakutsk') },
-            { id: 'Asia/Yangon', label: 'Yangon', utcOffset: getCurrentOffset('Asia/Yangon') },
-            { id: 'Asia/Yekaterinburg', label: 'Yekaterinburg', utcOffset: getCurrentOffset('Asia/Yekaterinburg') },
-            { id: 'Asia/Yerevan', label: 'Yerevan', utcOffset: getCurrentOffset('Asia/Yerevan') },
+            { id: 'Asia/Aden', label: 'Aden', utcOffset: '+03:00' },
+            { id: 'Asia/Almaty', label: 'Almaty', utcOffset: '+05:00' },
+            { id: 'Asia/Amman', label: 'Amman', utcOffset: '+03:00' },
+            { id: 'Asia/Anadyr', label: 'Anadyr', utcOffset: '+12:00' },
+            { id: 'Asia/Aqtau', label: 'Aqtau', utcOffset: '+05:00' },
+            { id: 'Asia/Aqtobe', label: 'Aqtobe', utcOffset: '+05:00' },
+            { id: 'Asia/Ashgabat', label: 'Ashgabat', utcOffset: '+05:00' },
+            { id: 'Asia/Atyrau', label: 'Atyrau', utcOffset: '+05:00' },
+            { id: 'Asia/Baghdad', label: 'Baghdad', utcOffset: '+03:00' },
+            { id: 'Asia/Bahrain', label: 'Bahrain', utcOffset: '+03:00' },
+            { id: 'Asia/Baku', label: 'Baku', utcOffset: '+04:00' },
+            { id: 'Asia/Bangkok', label: 'Bangkok', utcOffset: '+07:00' },
+            { id: 'Asia/Barnaul', label: 'Barnaul', utcOffset: '+07:00' },
+            { id: 'Asia/Beirut', label: 'Beirut', utcOffset: '+02:00' },
+            { id: 'Asia/Bishkek', label: 'Bishkek', utcOffset: '+06:00' },
+            { id: 'Asia/Brunei', label: 'Brunei', utcOffset: '+08:00' },
+            { id: 'Asia/Chita', label: 'Chita', utcOffset: '+09:00' },
+            { id: 'Asia/Choibalsan', label: 'Choibalsan', utcOffset: '+08:00' },
+            { id: 'Asia/Colombo', label: 'Colombo', utcOffset: '+05:30' },
+            { id: 'Asia/Damascus', label: 'Damascus', utcOffset: '+03:00' },
+            { id: 'Asia/Dhaka', label: 'Dhaka', utcOffset: '+06:00' },
+            { id: 'Asia/Dili', label: 'Dili', utcOffset: '+09:00' },
+            { id: 'Asia/Dubai', label: 'Dubai', utcOffset: '+04:00' },
+            { id: 'Asia/Dushanbe', label: 'Dushanbe', utcOffset: '+05:00' },
+            { id: 'Asia/Famagusta', label: 'Famagusta', utcOffset: '+03:00' },
+            { id: 'Asia/Gaza', label: 'Gaza', utcOffset: '+02:00' },
+            { id: 'Asia/Hebron', label: 'Hebron', utcOffset: '+02:00' },
+            { id: 'Asia/Ho_Chi_Minh', label: 'Ho Chi Minh', utcOffset: '+07:00' },
+            { id: 'Asia/Hong_Kong', label: 'Hong Kong', utcOffset: '+08:00' },
+            { id: 'Asia/Hovd', label: 'Hovd', utcOffset: '+07:00' },
+            { id: 'Asia/Irkutsk', label: 'Irkutsk', utcOffset: '+08:00' },
+            { id: 'Asia/Jakarta', label: 'Jakarta', utcOffset: '+07:00' },
+            { id: 'Asia/Jayapura', label: 'Jayapura', utcOffset: '+09:00' },
+            { id: 'Asia/Jerusalem', label: 'Jerusalem', utcOffset: '+02:00' },
+            { id: 'Asia/Kabul', label: 'Kabul', utcOffset: '+04:30' },
+            { id: 'Asia/Kamchatka', label: 'Kamchatka', utcOffset: '+12:00' },
+            { id: 'Asia/Karachi', label: 'Karachi', utcOffset: '+05:00' },
+            { id: 'Asia/Kathmandu', label: 'Kathmandu', utcOffset: '+05:45' },
+            { id: 'Asia/Khandyga', label: 'Khandyga', utcOffset: '+09:00' },
+            { id: 'Asia/Kolkata', label: 'Kolkata', utcOffset: '+05:30' },
+            { id: 'Asia/Krasnoyarsk', label: 'Krasnoyarsk', utcOffset: '+07:00' },
+            { id: 'Asia/Kuala_Lumpur', label: 'Kuala Lumpur', utcOffset: '+08:00' },
+            { id: 'Asia/Kuching', label: 'Kuching', utcOffset: '+08:00' },
+            { id: 'Asia/Kuwait', label: 'Kuwait', utcOffset: '+03:00' },
+            { id: 'Asia/Macau', label: 'Macau', utcOffset: '+08:00' },
+            { id: 'Asia/Magadan', label: 'Magadan', utcOffset: '+11:00' },
+            { id: 'Asia/Makassar', label: 'Makassar', utcOffset: '+08:00' },
+            { id: 'Asia/Manila', label: 'Manila', utcOffset: '+08:00' },
+            { id: 'Asia/Muscat', label: 'Muscat', utcOffset: '+04:00' },
+            { id: 'Asia/Nicosia', label: 'Nicosia', utcOffset: '+02:00' },
+            { id: 'Asia/Novokuznetsk', label: 'Novokuznetsk', utcOffset: '+07:00' },
+            { id: 'Asia/Novosibirsk', label: 'Novosibirsk', utcOffset: '+07:00' },
+            { id: 'Asia/Omsk', label: 'Omsk', utcOffset: '+06:00' },
+            { id: 'Asia/Oral', label: 'Oral', utcOffset: '+05:00' },
+            { id: 'Asia/Phnom_Penh', label: 'Phnom Penh', utcOffset: '+07:00' },
+            { id: 'Asia/Pontianak', label: 'Pontianak', utcOffset: '+07:00' },
+            { id: 'Asia/Pyongyang', label: 'Pyongyang', utcOffset: '+09:00' },
+            { id: 'Asia/Qatar', label: 'Qatar', utcOffset: '+03:00' },
+            { id: 'Asia/Qostanay', label: 'Qostanay', utcOffset: '+05:00' },
+            { id: 'Asia/Qyzylorda', label: 'Qyzylorda', utcOffset: '+05:00' },
+            { id: 'Asia/Riyadh', label: 'Riyadh', utcOffset: '+03:00' },
+            { id: 'Asia/Sakhalin', label: 'Sakhalin', utcOffset: '+11:00' },
+            { id: 'Asia/Samarkand', label: 'Samarkand', utcOffset: '+05:00' },
+            { id: 'Asia/Seoul', label: 'Seoul', utcOffset: '+09:00' },
+            { id: 'Asia/Shanghai', label: 'Shanghai', utcOffset: '+08:00' },
+            { id: 'Asia/Singapore', label: 'Singapore', utcOffset: '+08:00' },
+            { id: 'Asia/Srednekolymsk', label: 'Srednekolymsk', utcOffset: '+11:00' },
+            { id: 'Asia/Taipei', label: 'Taipei', utcOffset: '+08:00' },
+            { id: 'Asia/Tashkent', label: 'Tashkent', utcOffset: '+05:00' },
+            { id: 'Asia/Tbilisi', label: 'Tbilisi', utcOffset: '+04:00' },
+            { id: 'Asia/Tehran', label: 'Tehran', utcOffset: '+03:30' },
+            { id: 'Asia/Thimphu', label: 'Thimphu', utcOffset: '+06:00' },
+            { id: 'Asia/Tokyo', label: 'Tokyo', utcOffset: '+09:00' },
+            { id: 'Asia/Tomsk', label: 'Tomsk', utcOffset: '+07:00' },
+            { id: 'Asia/Ulaanbaatar', label: 'Ulaanbaatar', utcOffset: '+08:00' },
+            { id: 'Asia/Urumqi', label: 'Urumqi', utcOffset: '+06:00' },
+            { id: 'Asia/Ust-Nera', label: 'Ust-Nera', utcOffset: '+10:00' },
+            { id: 'Asia/Vientiane', label: 'Vientiane', utcOffset: '+07:00' },
+            { id: 'Asia/Vladivostok', label: 'Vladivostok', utcOffset: '+10:00' },
+            { id: 'Asia/Yakutsk', label: 'Yakutsk', utcOffset: '+09:00' },
+            { id: 'Asia/Yangon', label: 'Yangon', utcOffset: '+06:30' },
+            { id: 'Asia/Yekaterinburg', label: 'Yekaterinburg', utcOffset: '+05:00' },
+            { id: 'Asia/Yerevan', label: 'Yerevan', utcOffset: '+04:00' },
 
             // Atlantic
-            { id: 'Atlantic/Azores', label: 'Azores', utcOffset: getCurrentOffset('Atlantic/Azores') },
-            { id: 'Atlantic/Bermuda', label: 'Bermuda', utcOffset: getCurrentOffset('Atlantic/Bermuda') },
-            { id: 'Atlantic/Canary', label: 'Canary', utcOffset: getCurrentOffset('Atlantic/Canary') },
-            { id: 'Atlantic/Cape_Verde', label: 'Cape Verde', utcOffset: getCurrentOffset('Atlantic/Cape_Verde') },
-            { id: 'Atlantic/Faroe', label: 'Faroe', utcOffset: getCurrentOffset('Atlantic/Faroe') },
-            { id: 'Atlantic/Madeira', label: 'Madeira', utcOffset: getCurrentOffset('Atlantic/Madeira') },
-            { id: 'Atlantic/Reykjavik', label: 'Reykjavik', utcOffset: getCurrentOffset('Atlantic/Reykjavik') },
-            { id: 'Atlantic/South_Georgia', label: 'South Georgia', utcOffset: getCurrentOffset('Atlantic/South_Georgia') },
-            { id: 'Atlantic/St_Helena', label: 'St Helena', utcOffset: getCurrentOffset('Atlantic/St_Helena') },
-            { id: 'Atlantic/Stanley', label: 'Stanley', utcOffset: getCurrentOffset('Atlantic/Stanley') },
+            { id: 'Atlantic/Azores', label: 'Azores', utcOffset: '-01:00' },
+            { id: 'Atlantic/Bermuda', label: 'Bermuda', utcOffset: '-04:00' },
+            { id: 'Atlantic/Canary', label: 'Canary', utcOffset: '+00:00' },
+            { id: 'Atlantic/Cape_Verde', label: 'Cape Verde', utcOffset: '-01:00' },
+            { id: 'Atlantic/Faroe', label: 'Faroe', utcOffset: '+00:00' },
+            { id: 'Atlantic/Madeira', label: 'Madeira', utcOffset: '+00:00' },
+            { id: 'Atlantic/Reykjavik', label: 'Reykjavik', utcOffset: '+00:00' },
+            { id: 'Atlantic/South_Georgia', label: 'South Georgia', utcOffset: '-02:00' },
+            { id: 'Atlantic/St_Helena', label: 'St Helena', utcOffset: '+00:00' },
+            { id: 'Atlantic/Stanley', label: 'Stanley', utcOffset: '-03:00' },
 
             // Australia
-            { id: 'Australia/Adelaide', label: 'Adelaide', utcOffset: getCurrentOffset('Australia/Adelaide') },
-            { id: 'Australia/Brisbane', label: 'Brisbane', utcOffset: getCurrentOffset('Australia/Brisbane') },
-            { id: 'Australia/Broken_Hill', label: 'Broken Hill', utcOffset: getCurrentOffset('Australia/Broken_Hill') },
-            { id: 'Australia/Currie', label: 'Currie', utcOffset: getCurrentOffset('Australia/Currie') },
-            { id: 'Australia/Darwin', label: 'Darwin', utcOffset: getCurrentOffset('Australia/Darwin') },
-            { id: 'Australia/Eucla', label: 'Eucla', utcOffset: getCurrentOffset('Australia/Eucla') },
-            { id: 'Australia/Hobart', label: 'Hobart', utcOffset: getCurrentOffset('Australia/Hobart') },
-            { id: 'Australia/Lindeman', label: 'Lindeman', utcOffset: getCurrentOffset('Australia/Lindeman') },
-            { id: 'Australia/Lord_Howe', label: 'Lord Howe', utcOffset: getCurrentOffset('Australia/Lord_Howe') },
-            { id: 'Australia/Melbourne', label: 'Melbourne', utcOffset: getCurrentOffset('Australia/Melbourne') },
-            { id: 'Australia/Perth', label: 'Perth', utcOffset: getCurrentOffset('Australia/Perth') },
-            { id: 'Australia/Sydney', label: 'Sydney', utcOffset: getCurrentOffset('Australia/Sydney') },
+            { id: 'Australia/Adelaide', label: 'Adelaide', utcOffset: '+10:30' },
+            { id: 'Australia/Brisbane', label: 'Brisbane', utcOffset: '+10:00' },
+            { id: 'Australia/Broken_Hill', label: 'Broken Hill', utcOffset: '+10:30' },
+            { id: 'Australia/Currie', label: 'Currie', utcOffset: '+10:00' },
+            { id: 'Australia/Darwin', label: 'Darwin', utcOffset: '+09:30' },
+            { id: 'Australia/Eucla', label: 'Eucla', utcOffset: '+08:45' },
+            { id: 'Australia/Hobart', label: 'Hobart', utcOffset: '+10:00' },
+            { id: 'Australia/Lindeman', label: 'Lindeman', utcOffset: '+10:00' },
+            { id: 'Australia/Lord_Howe', label: 'Lord Howe', utcOffset: '+10:30' },
+            { id: 'Australia/Melbourne', label: 'Melbourne', utcOffset: '+10:00' },
+            { id: 'Australia/Perth', label: 'Perth', utcOffset: '+08:00' },
+            { id: 'Australia/Sydney', label: 'Sydney', utcOffset: '+10:00' },
 
             // Europe
-            { id: 'Europe/Amsterdam', label: 'Amsterdam', utcOffset: getCurrentOffset('Europe/Amsterdam') },
-            { id: 'Europe/Andorra', label: 'Andorra', utcOffset: getCurrentOffset('Europe/Andorra') },
-            { id: 'Europe/Astrakhan', label: 'Astrakhan', utcOffset: getCurrentOffset('Europe/Astrakhan') },
-            { id: 'Europe/Athens', label: 'Athens', utcOffset: getCurrentOffset('Europe/Athens') },
-            { id: 'Europe/Belgrade', label: 'Belgrade', utcOffset: getCurrentOffset('Europe/Belgrade') },
-            { id: 'Europe/Berlin', label: 'Berlin', utcOffset: getCurrentOffset('Europe/Berlin') },
-            { id: 'Europe/Bratislava', label: 'Bratislava', utcOffset: getCurrentOffset('Europe/Bratislava') },
-            { id: 'Europe/Brussels', label: 'Brussels', utcOffset: getCurrentOffset('Europe/Brussels') },
-            { id: 'Europe/Bucharest', label: 'Bucharest', utcOffset: getCurrentOffset('Europe/Bucharest') },
-            { id: 'Europe/Budapest', label: 'Budapest', utcOffset: getCurrentOffset('Europe/Budapest') },
-            { id: 'Europe/Busingen', label: 'Busingen', utcOffset: getCurrentOffset('Europe/Busingen') },
-            { id: 'Europe/Chisinau', label: 'Chisinau', utcOffset: getCurrentOffset('Europe/Chisinau') },
-            { id: 'Europe/Copenhagen', label: 'Copenhagen', utcOffset: getCurrentOffset('Europe/Copenhagen') },
-            { id: 'Europe/Dublin', label: 'Dublin', utcOffset: getCurrentOffset('Europe/Dublin') },
-            { id: 'Europe/Gibraltar', label: 'Gibraltar', utcOffset: getCurrentOffset('Europe/Gibraltar') },
-            { id: 'Europe/Guernsey', label: 'Guernsey', utcOffset: getCurrentOffset('Europe/Guernsey') },
-            { id: 'Europe/Helsinki', label: 'Helsinki', utcOffset: getCurrentOffset('Europe/Helsinki') },
-            { id: 'Europe/Isle_of_Man', label: 'Isle of Man', utcOffset: getCurrentOffset('Europe/Isle_of_Man') },
-            { id: 'Europe/Istanbul', label: 'Istanbul', utcOffset: getCurrentOffset('Europe/Istanbul') },
-            { id: 'Europe/Jersey', label: 'Jersey', utcOffset: getCurrentOffset('Europe/Jersey') },
-            { id: 'Europe/Kaliningrad', label: 'Kaliningrad', utcOffset: getCurrentOffset('Europe/Kaliningrad') },
-            { id: 'Europe/Kiev', label: 'Kiev', utcOffset: getCurrentOffset('Europe/Kiev') },
-            { id: 'Europe/Kirov', label: 'Kirov', utcOffset: getCurrentOffset('Europe/Kirov') },
-            { id: 'Europe/Lisbon', label: 'Lisbon', utcOffset: getCurrentOffset('Europe/Lisbon') },
-            { id: 'Europe/Ljubljana', label: 'Ljubljana', utcOffset: getCurrentOffset('Europe/Ljubljana') },
-            { id: 'Europe/London', label: 'London', utcOffset: getCurrentOffset('Europe/London') },
-            { id: 'Europe/Luxembourg', label: 'Luxembourg', utcOffset: getCurrentOffset('Europe/Luxembourg') },
-            { id: 'Europe/Madrid', label: 'Madrid', utcOffset: getCurrentOffset('Europe/Madrid') },
-            { id: 'Europe/Malta', label: 'Malta', utcOffset: getCurrentOffset('Europe/Malta') },
-            { id: 'Europe/Mariehamn', label: 'Mariehamn', utcOffset: getCurrentOffset('Europe/Mariehamn') },
-            { id: 'Europe/Minsk', label: 'Minsk', utcOffset: getCurrentOffset('Europe/Minsk') },
-            { id: 'Europe/Monaco', label: 'Monaco', utcOffset: getCurrentOffset('Europe/Monaco') },
-            { id: 'Europe/Moscow', label: 'Moscow', utcOffset: getCurrentOffset('Europe/Moscow') },
-            { id: 'Europe/Oslo', label: 'Oslo', utcOffset: getCurrentOffset('Europe/Oslo') },
-            { id: 'Europe/Paris', label: 'Paris', utcOffset: getCurrentOffset('Europe/Paris') },
-            { id: 'Europe/Podgorica', label: 'Podgorica', utcOffset: getCurrentOffset('Europe/Podgorica') },
-            { id: 'Europe/Prague', label: 'Prague', utcOffset: getCurrentOffset('Europe/Prague') },
-            { id: 'Europe/Riga', label: 'Riga', utcOffset: getCurrentOffset('Europe/Riga') },
-            { id: 'Europe/Rome', label: 'Rome', utcOffset: getCurrentOffset('Europe/Rome') },
-            { id: 'Europe/Samara', label: 'Samara', utcOffset: getCurrentOffset('Europe/Samara') },
-            { id: 'Europe/San_Marino', label: 'San Marino', utcOffset: getCurrentOffset('Europe/San_Marino') },
-            { id: 'Europe/Sarajevo', label: 'Sarajevo', utcOffset: getCurrentOffset('Europe/Sarajevo') },
-            { id: 'Europe/Saratov', label: 'Saratov', utcOffset: getCurrentOffset('Europe/Saratov') },
-            { id: 'Europe/Simferopol', label: 'Simferopol', utcOffset: getCurrentOffset('Europe/Simferopol') },
-            { id: 'Europe/Skopje', label: 'Skopje', utcOffset: getCurrentOffset('Europe/Skopje') },
-            { id: 'Europe/Sofia', label: 'Sofia', utcOffset: getCurrentOffset('Europe/Sofia') },
-            { id: 'Europe/Stockholm', label: 'Stockholm', utcOffset: getCurrentOffset('Europe/Stockholm') },
-            { id: 'Europe/Tallinn', label: 'Tallinn', utcOffset: getCurrentOffset('Europe/Tallinn') },
-            { id: 'Europe/Tirane', label: 'Tirane', utcOffset: getCurrentOffset('Europe/Tirane') },
-            { id: 'Europe/Tiraspol', label: 'Tiraspol', utcOffset: getCurrentOffset('Europe/Tiraspol') },
-            { id: 'Europe/Ulyanovsk', label: 'Ulyanovsk', utcOffset: getCurrentOffset('Europe/Ulyanovsk') },
-            { id: 'Europe/Uzhgorod', label: 'Uzhgorod', utcOffset: getCurrentOffset('Europe/Uzhgorod') },
-            { id: 'Europe/Vaduz', label: 'Vaduz', utcOffset: getCurrentOffset('Europe/Vaduz') },
-            { id: 'Europe/Vatican', label: 'Vatican', utcOffset: getCurrentOffset('Europe/Vatican') },
-            { id: 'Europe/Vienna', label: 'Vienna', utcOffset: getCurrentOffset('Europe/Vienna') },
-            { id: 'Europe/Vilnius', label: 'Vilnius', utcOffset: getCurrentOffset('Europe/Vilnius') },
-            { id: 'Europe/Volgograd', label: 'Volgograd', utcOffset: getCurrentOffset('Europe/Volgograd') },
-            { id: 'Europe/Warsaw', label: 'Warsaw', utcOffset: getCurrentOffset('Europe/Warsaw') },
-            { id: 'Europe/Zagreb', label: 'Zagreb', utcOffset: getCurrentOffset('Europe/Zagreb') },
-            { id: 'Europe/Zaporozhye', label: 'Zaporozhye', utcOffset: getCurrentOffset('Europe/Zaporozhye') },
-            { id: 'Europe/Zurich', label: 'Zurich', utcOffset: getCurrentOffset('Europe/Zurich') },
+            { id: 'Europe/Amsterdam', label: 'Amsterdam', utcOffset: '+01:00' },
+            { id: 'Europe/Andorra', label: 'Andorra', utcOffset: '+01:00' },
+            { id: 'Europe/Astrakhan', label: 'Astrakhan', utcOffset: '+04:00' },
+            { id: 'Europe/Athens', label: 'Athens', utcOffset: '+02:00' },
+            { id: 'Europe/Belgrade', label: 'Belgrade', utcOffset: '+01:00' },
+            { id: 'Europe/Berlin', label: 'Berlin', utcOffset: '+01:00' },
+            { id: 'Europe/Bratislava', label: 'Bratislava', utcOffset: '+01:00' },
+            { id: 'Europe/Brussels', label: 'Brussels', utcOffset: '+01:00' },
+            { id: 'Europe/Bucharest', label: 'Bucharest', utcOffset: '+02:00' },
+            { id: 'Europe/Budapest', label: 'Budapest', utcOffset: '+01:00' },
+            { id: 'Europe/Busingen', label: 'Busingen', utcOffset: '+01:00' },
+            { id: 'Europe/Chisinau', label: 'Chisinau', utcOffset: '+02:00' },
+            { id: 'Europe/Copenhagen', label: 'Copenhagen', utcOffset: '+01:00' },
+            { id: 'Europe/Dublin', label: 'Dublin', utcOffset: '+00:00' },
+            { id: 'Europe/Gibraltar', label: 'Gibraltar', utcOffset: '+01:00' },
+            { id: 'Europe/Guernsey', label: 'Guernsey', utcOffset: '+00:00' },
+            { id: 'Europe/Helsinki', label: 'Helsinki', utcOffset: '+02:00' },
+            { id: 'Europe/Isle_of_Man', label: 'Isle of Man', utcOffset: '+00:00' },
+            { id: 'Europe/Istanbul', label: 'Istanbul', utcOffset: '+03:00' },
+            { id: 'Europe/Jersey', label: 'Jersey', utcOffset: '+00:00' },
+            { id: 'Europe/Kaliningrad', label: 'Kaliningrad', utcOffset: '+02:00' },
+            { id: 'Europe/Kiev', label: 'Kiev', utcOffset: '+02:00' },
+            { id: 'Europe/Kirov', label: 'Kirov', utcOffset: '+03:00' },
+            { id: 'Europe/Lisbon', label: 'Lisbon', utcOffset: '+00:00' },
+            { id: 'Europe/Ljubljana', label: 'Ljubljana', utcOffset: '+01:00' },
+            { id: 'Europe/London', label: 'London', utcOffset: '+00:00' },
+            { id: 'Europe/Luxembourg', label: 'Luxembourg', utcOffset: '+01:00' },
+            { id: 'Europe/Madrid', label: 'Madrid', utcOffset: '+01:00' },
+            { id: 'Europe/Malta', label: 'Malta', utcOffset: '+01:00' },
+            { id: 'Europe/Mariehamn', label: 'Mariehamn', utcOffset: '+02:00' },
+            { id: 'Europe/Minsk', label: 'Minsk', utcOffset: '+03:00' },
+            { id: 'Europe/Monaco', label: 'Monaco', utcOffset: '+01:00' },
+            { id: 'Europe/Moscow', label: 'Moscow', utcOffset: '+03:00' },
+            { id: 'Europe/Oslo', label: 'Oslo', utcOffset: '+01:00' },
+            { id: 'Europe/Paris', label: 'Paris', utcOffset: '+01:00' },
+            { id: 'Europe/Podgorica', label: 'Podgorica', utcOffset: '+01:00' },
+            { id: 'Europe/Prague', label: 'Prague', utcOffset: '+01:00' },
+            { id: 'Europe/Riga', label: 'Riga', utcOffset: '+02:00' },
+            { id: 'Europe/Rome', label: 'Rome', utcOffset: '+01:00' },
+            { id: 'Europe/Samara', label: 'Samara', utcOffset: '+04:00' },
+            { id: 'Europe/San_Marino', label: 'San Marino', utcOffset: '+01:00' },
+            { id: 'Europe/Sarajevo', label: 'Sarajevo', utcOffset: '+01:00' },
+            { id: 'Europe/Saratov', label: 'Saratov', utcOffset: '+04:00' },
+            { id: 'Europe/Simferopol', label: 'Simferopol', utcOffset: '+03:00' },
+            { id: 'Europe/Skopje', label: 'Skopje', utcOffset: '+01:00' },
+            { id: 'Europe/Sofia', label: 'Sofia', utcOffset: '+02:00' },
+            { id: 'Europe/Stockholm', label: 'Stockholm', utcOffset: '+01:00' },
+            { id: 'Europe/Tallinn', label: 'Tallinn', utcOffset: '+02:00' },
+            { id: 'Europe/Tirane', label: 'Tirane', utcOffset: '+01:00' },
+            { id: 'Europe/Tiraspol', label: 'Tiraspol', utcOffset: '+02:00' },
+            { id: 'Europe/Ulyanovsk', label: 'Ulyanovsk', utcOffset: '+04:00' },
+            { id: 'Europe/Uzhgorod', label: 'Uzhgorod', utcOffset: '+02:00' },
+            { id: 'Europe/Vaduz', label: 'Vaduz', utcOffset: '+01:00' },
+            { id: 'Europe/Vatican', label: 'Vatican', utcOffset: '+01:00' },
+            { id: 'Europe/Vienna', label: 'Vienna', utcOffset: '+01:00' },
+            { id: 'Europe/Vilnius', label: 'Vilnius', utcOffset: '+02:00' },
+            { id: 'Europe/Volgograd', label: 'Volgograd', utcOffset: '+03:00' },
+            { id: 'Europe/Warsaw', label: 'Warsaw', utcOffset: '+01:00' },
+            { id: 'Europe/Zagreb', label: 'Zagreb', utcOffset: '+01:00' },
+            { id: 'Europe/Zaporozhye', label: 'Zaporozhye', utcOffset: '+02:00' },
+            { id: 'Europe/Zurich', label: 'Zurich', utcOffset: '+01:00' },
 
             // Indian Ocean
-            { id: 'Indian/Antananarivo', label: 'Antananarivo', utcOffset: getCurrentOffset('Indian/Antananarivo') },
-            { id: 'Indian/Chagos', label: 'Chagos', utcOffset: getCurrentOffset('Indian/Chagos') },
-            { id: 'Indian/Christmas', label: 'Christmas', utcOffset: getCurrentOffset('Indian/Christmas') },
-            { id: 'Indian/Cocos', label: 'Cocos', utcOffset: getCurrentOffset('Indian/Cocos') },
-            { id: 'Indian/Comoro', label: 'Comoro', utcOffset: getCurrentOffset('Indian/Comoro') },
-            { id: 'Indian/Kerguelen', label: 'Kerguelen', utcOffset: getCurrentOffset('Indian/Kerguelen') },
-            { id: 'Indian/Mahe', label: 'Mahe', utcOffset: getCurrentOffset('Indian/Mahe') },
-            { id: 'Indian/Maldives', label: 'Maldives', utcOffset: getCurrentOffset('Indian/Maldives') },
-            { id: 'Indian/Mauritius', label: 'Mauritius', utcOffset: getCurrentOffset('Indian/Mauritius') },
-            { id: 'Indian/Mayotte', label: 'Mayotte', utcOffset: getCurrentOffset('Indian/Mayotte') },
-            { id: 'Indian/Reunion', label: 'Reunion', utcOffset: getCurrentOffset('Indian/Reunion') },
+            { id: 'Indian/Antananarivo', label: 'Antananarivo', utcOffset: '+03:00' },
+            { id: 'Indian/Chagos', label: 'Chagos', utcOffset: '+06:00' },
+            { id: 'Indian/Christmas', label: 'Christmas', utcOffset: '+07:00' },
+            { id: 'Indian/Cocos', label: 'Cocos', utcOffset: '+06:30' },
+            { id: 'Indian/Comoro', label: 'Comoro', utcOffset: '+03:00' },
+            { id: 'Indian/Kerguelen', label: 'Kerguelen', utcOffset: '+05:00' },
+            { id: 'Indian/Mahe', label: 'Mahe', utcOffset: '+04:00' },
+            { id: 'Indian/Maldives', label: 'Maldives', utcOffset: '+05:00' },
+            { id: 'Indian/Mauritius', label: 'Mauritius', utcOffset: '+04:00' },
+            { id: 'Indian/Mayotte', label: 'Mayotte', utcOffset: '+03:00' },
+            { id: 'Indian/Reunion', label: 'Reunion', utcOffset: '+04:00' },
 
             // Pacific
-            { id: 'Pacific/Apia', label: 'Apia', utcOffset: getCurrentOffset('Pacific/Apia') },
-            { id: 'Pacific/Auckland', label: 'Auckland', utcOffset: getCurrentOffset('Pacific/Auckland') },
-            { id: 'Pacific/Bougainville', label: 'Bougainville', utcOffset: getCurrentOffset('Pacific/Bougainville') },
-            { id: 'Pacific/Chatham', label: 'Chatham', utcOffset: getCurrentOffset('Pacific/Chatham') },
-            { id: 'Pacific/Chuuk', label: 'Chuuk', utcOffset: getCurrentOffset('Pacific/Chuuk') },
-            { id: 'Pacific/Easter', label: 'Easter', utcOffset: getCurrentOffset('Pacific/Easter') },
-            { id: 'Pacific/Efate', label: 'Efate', utcOffset: getCurrentOffset('Pacific/Efate') },
-            { id: 'Pacific/Fakaofo', label: 'Fakaofo', utcOffset: getCurrentOffset('Pacific/Fakaofo') },
-            { id: 'Pacific/Fiji', label: 'Fiji', utcOffset: getCurrentOffset('Pacific/Fiji') },
-            { id: 'Pacific/Funafuti', label: 'Funafuti', utcOffset: getCurrentOffset('Pacific/Funafuti') },
-            { id: 'Pacific/Galapagos', label: 'Galapagos', utcOffset: getCurrentOffset('Pacific/Galapagos') },
-            { id: 'Pacific/Gambier', label: 'Gambier', utcOffset: getCurrentOffset('Pacific/Gambier') },
-            { id: 'Pacific/Guadalcanal', label: 'Guadalcanal', utcOffset: getCurrentOffset('Pacific/Guadalcanal') },
-            { id: 'Pacific/Guam', label: 'Guam', utcOffset: getCurrentOffset('Pacific/Guam') },
-            { id: 'Pacific/Honolulu', label: 'Honolulu', utcOffset: getCurrentOffset('Pacific/Honolulu') },
-            { id: 'Pacific/Kiritimati', label: 'Kiritimati', utcOffset: getCurrentOffset('Pacific/Kiritimati') },
-            { id: 'Pacific/Kosrae', label: 'Kosrae', utcOffset: getCurrentOffset('Pacific/Kosrae') },
-            { id: 'Pacific/Kwajalein', label: 'Kwajalein', utcOffset: getCurrentOffset('Pacific/Kwajalein') },
-            { id: 'Pacific/Majuro', label: 'Majuro', utcOffset: getCurrentOffset('Pacific/Majuro') },
-            { id: 'Pacific/Marquesas', label: 'Marquesas', utcOffset: getCurrentOffset('Pacific/Marquesas') },
-            { id: 'Pacific/Midway', label: 'Midway', utcOffset: getCurrentOffset('Pacific/Midway') },
-            { id: 'Pacific/Nauru', label: 'Nauru', utcOffset: getCurrentOffset('Pacific/Nauru') },
-            { id: 'Pacific/Niue', label: 'Niue', utcOffset: getCurrentOffset('Pacific/Niue') },
-            { id: 'Pacific/Norfolk', label: 'Norfolk', utcOffset: getCurrentOffset('Pacific/Norfolk') },
-            { id: 'Pacific/Noumea', label: 'Noumea', utcOffset: getCurrentOffset('Pacific/Noumea') },
-            { id: 'Pacific/Pago_Pago', label: 'Pago Pago', utcOffset: getCurrentOffset('Pacific/Pago_Pago') },
-            { id: 'Pacific/Palau', label: 'Palau', utcOffset: getCurrentOffset('Pacific/Palau') },
-            { id: 'Pacific/Pitcairn', label: 'Pitcairn', utcOffset: getCurrentOffset('Pacific/Pitcairn') },
-            { id: 'Pacific/Pohnpei', label: 'Pohnpei', utcOffset: getCurrentOffset('Pacific/Pohnpei') },
-            { id: 'Pacific/Port_Moresby', label: 'Port Moresby', utcOffset: getCurrentOffset('Pacific/Port_Moresby') },
-            { id: 'Pacific/Rarotonga', label: 'Rarotonga', utcOffset: getCurrentOffset('Pacific/Rarotonga') },
-            { id: 'Pacific/Saipan', label: 'Saipan', utcOffset: getCurrentOffset('Pacific/Saipan') },
-            { id: 'Pacific/Tahiti', label: 'Tahiti', utcOffset: getCurrentOffset('Pacific/Tahiti') },
-            { id: 'Pacific/Tarawa', label: 'Tarawa', utcOffset: getCurrentOffset('Pacific/Tarawa') },
-            { id: 'Pacific/Tongatapu', label: 'Tongatapu', utcOffset: getCurrentOffset('Pacific/Tongatapu') },
-            { id: 'Pacific/Wake', label: 'Wake', utcOffset: getCurrentOffset('Pacific/Wake') },
-            { id: 'Pacific/Wallis', label: 'Wallis', utcOffset: getCurrentOffset('Pacific/Wallis') }
+            { id: 'Pacific/Apia', label: 'Apia', utcOffset: '+13:00' },
+            { id: 'Pacific/Auckland', label: 'Auckland', utcOffset: '+13:00' },
+            { id: 'Pacific/Bougainville', label: 'Bougainville', utcOffset: '+11:00' },
+            { id: 'Pacific/Chatham', label: 'Chatham', utcOffset: '+13:45' },
+            { id: 'Pacific/Chuuk', label: 'Chuuk', utcOffset: '+10:00' },
+            { id: 'Pacific/Easter', label: 'Easter', utcOffset: '-06:00' },
+            { id: 'Pacific/Efate', label: 'Efate', utcOffset: '+11:00' },
+            { id: 'Pacific/Fakaofo', label: 'Fakaofo', utcOffset: '+13:00' },
+            { id: 'Pacific/Fiji', label: 'Fiji', utcOffset: '+12:00' },
+            { id: 'Pacific/Funafuti', label: 'Funafuti', utcOffset: '+12:00' },
+            { id: 'Pacific/Galapagos', label: 'Galapagos', utcOffset: '-06:00' },
+            { id: 'Pacific/Gambier', label: 'Gambier', utcOffset: '-09:00' },
+            { id: 'Pacific/Guadalcanal', label: 'Guadalcanal', utcOffset: '+11:00' },
+            { id: 'Pacific/Guam', label: 'Guam', utcOffset: '+10:00' },
+            { id: 'Pacific/Honolulu', label: 'Honolulu', utcOffset: '-10:00' },
+            { id: 'Pacific/Kiritimati', label: 'Kiritimati', utcOffset: '+14:00' },
+            { id: 'Pacific/Kosrae', label: 'Kosrae', utcOffset: '+11:00' },
+            { id: 'Pacific/Kwajalein', label: 'Kwajalein', utcOffset: '+12:00' },
+            { id: 'Pacific/Majuro', label: 'Majuro', utcOffset: '+12:00' },
+            { id: 'Pacific/Marquesas', label: 'Marquesas', utcOffset: '-09:30' },
+            { id: 'Pacific/Midway', label: 'Midway', utcOffset: '-11:00' },
+            { id: 'Pacific/Nauru', label: 'Nauru', utcOffset: '+12:00' },
+            { id: 'Pacific/Niue', label: 'Niue', utcOffset: '-11:00' },
+            { id: 'Pacific/Norfolk', label: 'Norfolk', utcOffset: '+11:00' },
+            { id: 'Pacific/Noumea', label: 'Noumea', utcOffset: '+11:00' },
+            { id: 'Pacific/Pago_Pago', label: 'Pago Pago', utcOffset: '-11:00' },
+            { id: 'Pacific/Palau', label: 'Palau', utcOffset: '+09:00' },
+            { id: 'Pacific/Pitcairn', label: 'Pitcairn', utcOffset: '-08:00' },
+            { id: 'Pacific/Pohnpei', label: 'Pohnpei', utcOffset: '+11:00' },
+            { id: 'Pacific/Port_Moresby', label: 'Port Moresby', utcOffset: '+10:00' },
+            { id: 'Pacific/Rarotonga', label: 'Rarotonga', utcOffset: '-10:00' },
+            { id: 'Pacific/Saipan', label: 'Saipan', utcOffset: '+10:00' },
+            { id: 'Pacific/Tahiti', label: 'Tahiti', utcOffset: '-10:00' },
+            { id: 'Pacific/Tarawa', label: 'Tarawa', utcOffset: '+12:00' },
+            { id: 'Pacific/Tongatapu', label: 'Tongatapu', utcOffset: '+13:00' },
+            { id: 'Pacific/Wake', label: 'Wake', utcOffset: '+12:00' },
+            { id: 'Pacific/Wallis', label: 'Wallis', utcOffset: '+12:00' }
         ];
 
         res.json({ timezones });
@@ -45082,28 +45095,9 @@ app.get('/api/settings/timezones', async (req, res) => {
     }
 });
 
-// Helper function to get current offset for a timezone
-function getCurrentOffset(timezoneId) {
-    try {
-        const now = new Date();
-        const parts = now.toLocaleString('en-US', { timeZone: timezoneId, timeZoneName: 'short' }).split(' ');
-        const offsetStr = parts[parts.length - 1] || '+00:00';
-        
-        // Parse offset like GMT+3, GMT-5, etc.
-        const match = offsetStr.match(/GMT([+-])(\d+)(?::(\d+))?/);
-        if (match) {
-            const sign = match[1];
-            const hours = parseInt(match[2]);
-            const minutes = parseInt(match[3] || '0');
-            return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-        }
-        
-        return '+00:00';
-    } catch {
-        return '+00:00';
-    }
-}
-
+// =============================================
+// USER SECURITY OVERVIEW ENDPOINT
+// =============================================
 app.get('/api/users/security', protect, async (req, res) => {
     try {
         const userId = req.user._id;
@@ -45160,6 +45154,10 @@ app.get('/api/users/security', protect, async (req, res) => {
         res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to load security status' });
     }
 });
+
+// =============================================
+// USER SETTINGS ENDPOINT - Save language and timezone
+// =============================================
 app.put('/api/users/settings', protect, async (req, res) => {
     try {
         const { language, timezone } = req.body;
@@ -45206,6 +45204,9 @@ app.put('/api/users/settings', protect, async (req, res) => {
     }
 });
 
+// =============================================
+// TWO-FACTOR AUTHENTICATOR SETUP ENDPOINT
+// =============================================
 app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
     try {
         const userId = req.user._id;
@@ -45230,7 +45231,7 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
         const enrollmentId = crypto.randomBytes(16).toString('hex');
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-        // Store encrypted secret (use your encryption method)
+        // Store encrypted secret
         const encryptedSecret = encryptSecret(secret.base32);
         
         await UserEnrollment.create({
@@ -45245,14 +45246,13 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
         // Generate otpauth URI
         const otpauthUri = `otpauth://totp/BitHash:${encodeURIComponent(user.email)}?secret=${secret.base32}&issuer=BitHash`;
 
-        // Generate QR code (if you have QR code generation)
-        // For simplicity, we return the URI and let frontend generate QR
+        // Generate QR code
         const qrCode = await generateQRCode(otpauthUri);
 
         res.json({
             enrollmentId,
             manualKey: secret.base32,
-            qrCode: qrCode, // Base64 or URL
+            qrCode: qrCode,
             otpauthUri: otpauthUri
         });
     } catch (err) {
@@ -45261,33 +45261,9 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
     }
 });
 
-// Helper functions
-function encryptSecret(secret) {
-    // Use your encryption method
-    const cipher = crypto.createCipher('aes-256-gcm', process.env.ENCRYPTION_KEY);
-    let encrypted = cipher.update(secret, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    return encrypted + ':' + cipher.getAuthTag().toString('hex');
-}
-
-function decryptSecret(encryptedSecret) {
-    const parts = encryptedSecret.split(':');
-    const decipher = crypto.createDecipher('aes-256-gcm', process.env.ENCRYPTION_KEY);
-    decipher.setAuthTag(Buffer.from(parts[1], 'hex'));
-    let decrypted = decipher.update(parts[0], 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
-}
-
-async function generateQRCode(otpauthUri) {
-    try {
-        const QRCode = require('qrcode');
-        return await QRCode.toDataURL(otpauthUri);
-    } catch {
-        return null;
-    }
-}
-
+// =============================================
+// TWO-FACTOR AUTHENTICATOR VERIFY ENDPOINT
+// =============================================
 app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res) => {
     try {
         const { enrollmentId, code } = req.body;
@@ -45377,16 +45353,9 @@ app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res)
     }
 });
 
-function generateRecoveryCodes(count = 10) {
-    const codes = [];
-    for (let i = 0; i < count; i++) {
-        const part1 = crypto.randomBytes(2).toString('hex').toUpperCase();
-        const part2 = crypto.randomBytes(2).toString('hex').toUpperCase();
-        codes.push(`${part1}-${part2}`);
-    }
-    return codes;
-}
-
+// =============================================
+// TWO-FACTOR AUTHENTICATOR DISABLE CHALLENGE ENDPOINT
+// =============================================
 app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async (req, res) => {
     try {
         const userId = req.user._id;
@@ -45449,6 +45418,9 @@ app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async
     }
 });
 
+// =============================================
+// TWO-FACTOR AUTHENTICATOR DISABLE VERIFY ENDPOINT
+// =============================================
 app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (req, res) => {
     try {
         const { method, otp, challengeId, code } = req.body;
@@ -45538,6 +45510,9 @@ app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (r
     }
 });
 
+// =============================================
+// RECOVERY CODES CHALLENGE ENDPOINT
+// =============================================
 app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, res) => {
     try {
         const userId = req.user._id;
@@ -45587,7 +45562,9 @@ app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, 
     }
 });
 
-
+// =============================================
+// RECOVERY CODES VERIFY ENDPOINT
+// =============================================
 app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res) => {
     try {
         const { method, otp, challengeId, code } = req.body;
@@ -45679,7 +45656,9 @@ app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res
     }
 });
 
-
+// =============================================
+// ACTIVE DEVICES - LOGOUT DEVICE ENDPOINT
+// =============================================
 app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
     try {
         const { deviceId } = req.params;
@@ -45722,7 +45701,9 @@ app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
     }
 });
 
-
+// =============================================
+// ACTIVE DEVICES - LOGOUT ALL DEVICES ENDPOINT
+// =============================================
 app.post('/api/users/devices/logout-all', protect, async (req, res) => {
     try {
         const userId = req.user._id;
@@ -45769,16 +45750,111 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
     }
 });
 
+// =============================================
+// HELPER FUNCTIONS
+// =============================================
 
+// Encrypt secret
+function encryptSecret(secret) {
+    const cipher = crypto.createCipher('aes-256-gcm', process.env.ENCRYPTION_KEY);
+    let encrypted = cipher.update(secret, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return encrypted + ':' + cipher.getAuthTag().toString('hex');
+}
 
+// Decrypt secret
+function decryptSecret(encryptedSecret) {
+    const parts = encryptedSecret.split(':');
+    const decipher = crypto.createDecipher('aes-256-gcm', process.env.ENCRYPTION_KEY);
+    decipher.setAuthTag(Buffer.from(parts[1], 'hex'));
+    let decrypted = decipher.update(parts[0], 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+}
 
+// Generate QR Code
+async function generateQRCode(otpauthUri) {
+    try {
+        const QRCode = require('qrcode');
+        return await QRCode.toDataURL(otpauthUri);
+    } catch {
+        return null;
+    }
+}
 
+// Generate Recovery Codes
+function generateRecoveryCodes(count = 10) {
+    const codes = [];
+    for (let i = 0; i < count; i++) {
+        const part1 = crypto.randomBytes(2).toString('hex').toUpperCase();
+        const part2 = crypto.randomBytes(2).toString('hex').toUpperCase();
+        codes.push(`${part1}-${part2}`);
+    }
+    return codes;
+}
 
+// Get current offset for a timezone
+function getCurrentOffset(timezoneId) {
+    try {
+        const now = new Date();
+        const parts = now.toLocaleString('en-US', { timeZone: timezoneId, timeZoneName: 'short' }).split(' ');
+        const offsetStr = parts[parts.length - 1] || '+00:00';
+        
+        const match = offsetStr.match(/GMT([+-])(\d+)(?::(\d+))?/);
+        if (match) {
+            const sign = match[1];
+            const hours = parseInt(match[2]);
+            const minutes = parseInt(match[3] || '0');
+            return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        }
+        
+        return '+00:00';
+    } catch {
+        return '+00:00';
+    }
+}
 
+// =============================================
+// GET USER SETTINGS ENDPOINT - Retrieve language and timezone
+// =============================================
+app.get('/api/users/settings', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
 
+        // Try to get from UserPreference first
+        let preferences = await UserPreference.findOne({ user: userId });
 
+        if (!preferences) {
+            // Try to get from User model's preferences
+            const user = await User.findById(userId).select('preferences');
+            if (user && user.preferences) {
+                return res.json({
+                    language: user.preferences.language || 'en',
+                    timezone: user.preferences.timezone || 'UTC'
+                });
+            }
+            // Return defaults if nothing found
+            return res.json({
+                language: 'en',
+                timezone: 'UTC'
+            });
+        }
 
-
+        res.json({
+            language: preferences.language || 'en',
+            timezone: preferences.timezone || 'UTC',
+            currency: preferences.currency || 'USD',
+            theme: preferences.theme || 'dark',
+            displayAsset: preferences.displayAsset || 'btc'
+        });
+    } catch (err) {
+        console.error('Error fetching user settings:', err);
+        res.status(500).json({ 
+            code: 'INTERNAL_ERROR', 
+            message: 'Failed to load user settings' 
+        });
+    }
+});
 
 
 
