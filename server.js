@@ -44650,6 +44650,19 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // LANGUAGE AND TIMEZONE ENDPOINTS - DATABASE DRIVEN WITH CACHING
 // =============================================
@@ -44662,128 +44675,126 @@ let timezonesCacheTime = 0;
 
 // GET /api/settings/languages - Return comprehensive language catalogue with flag mappings
 app.get('/api/settings/languages', async (req, res) => {
-try {
-const now = Date.now();
-if (languagesCache && (now - languagesCacheTime) < CACHE_TTL) {
-return res.json({
-success: true,
-languages: languagesCache
-});
-}
+  try {
+    const now = Date.now();
+    if (languagesCache && (now - languagesCacheTime) < CACHE_TTL) {
+      return res.json({
+        success: true,
+        languages: languagesCache
+      });
+    }
 
     // Get languages from database with flag data
     const languages = await Language.find({ isActive: true })
-        .sort({ sortOrder: 1, name: 1 })
-        .lean();
+      .sort({ sortOrder: 1, name: 1 })
+      .lean();
 
     languagesCache = languages || [];
     languagesCacheTime = now;
 
     res.json({
-        success: true,
-        languages: languagesCache
+      success: true,
+      languages: languagesCache
     });
-} catch (err) {
+  } catch (err) {
     console.error('Error fetching languages:', err);
-    res.status(500).json({ 
-        success: false,
-        code: 'INTERNAL_ERROR', 
-        message: 'Failed to load languages' 
+    res.status(500).json({
+      success: false,
+      code: 'INTERNAL_ERROR',
+      message: 'Failed to load languages'
     });
-}
-
+  }
 });
 
 // GET /api/settings/timezones - Return comprehensive timezone catalogue
 app.get('/api/settings/timezones', async (req, res) => {
-try {
-const now = Date.now();
-if (timezonesCache && (now - timezonesCacheTime) < CACHE_TTL) {
-return res.json({
-success: true,
-timezones: timezonesCache
-});
-}
+  try {
+    const now = Date.now();
+    if (timezonesCache && (now - timezonesCacheTime) < CACHE_TTL) {
+      return res.json({
+        success: true,
+        timezones: timezonesCache
+      });
+    }
 
     const timezones = await Timezone.find({ isActive: true })
-        .sort({ sortOrder: 1, label: 1 })
-        .lean();
+      .sort({ sortOrder: 1, label: 1 })
+      .lean();
 
     // Calculate current UTC offset for each timezone
     const timezonesWithOffset = timezones.map(tz => {
-        try {
-            const now = new Date();
-            const formatter = new Intl.DateTimeFormat('en-US', {
-                timeZone: tz.id,
-                timeZoneName: 'longOffset'
-            });
-            const parts = formatter.formatToParts(now);
-            const offsetPart = parts.find(p => p.type === 'timeZoneName');
-            let offset = offsetPart ? offsetPart.value : tz.utcOffset || '+00:00';
-            
-            // Convert GMT+5:30 to +05:30 format
-            if (offset.startsWith('GMT')) {
-                offset = offset.replace('GMT', '');
-                if (!offset.startsWith('+') && !offset.startsWith('-')) {
-                    offset = '+' + offset;
-                }
-                // Ensure proper formatting
-                if (!offset.includes(':')) {
-                    const num = parseInt(offset);
-                    const sign = num >= 0 ? '+' : '-';
-                    const abs = Math.abs(num);
-                    offset = `${sign}${String(abs).padStart(2, '0')}:00`;
-                }
-            }
-            
-            return {
-                ...tz,
-                utcOffset: offset
-            };
-        } catch (e) {
-            return {
-                ...tz,
-                utcOffset: tz.utcOffset || '+00:00'
-            };
+      try {
+        const now = new Date();
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz.id,
+          timeZoneName: 'longOffset'
+        });
+        const parts = formatter.formatToParts(now);
+        const offsetPart = parts.find(p => p.type === 'timeZoneName');
+        let offset = offsetPart ? offsetPart.value : tz.utcOffset || '+00:00';
+
+        // Convert GMT+5:30 to +05:30 format
+        if (offset.startsWith('GMT')) {
+          offset = offset.replace('GMT', '');
+          if (!offset.startsWith('+') && !offset.startsWith('-')) {
+            offset = '+' + offset;
+          }
+          // Ensure proper formatting
+          if (!offset.includes(':')) {
+            const num = parseInt(offset);
+            const sign = num >= 0 ? '+' : '-';
+            const abs = Math.abs(num);
+            offset = `${sign}${String(abs).padStart(2, '0')}:00`;
+          }
         }
+
+        return {
+          ...tz,
+          utcOffset: offset
+        };
+      } catch (e) {
+        return {
+          ...tz,
+          utcOffset: tz.utcOffset || '+00:00'
+        };
+      }
     });
 
     timezonesCache = timezonesWithOffset;
     timezonesCacheTime = now;
 
     res.json({
-        success: true,
-        timezones: timezonesCache
+      success: true,
+      timezones: timezonesCache
     });
-} catch (err) {
+  } catch (err) {
     console.error('Error fetching timezones:', err);
-    res.status(500).json({ 
-        success: false,
-        code: 'INTERNAL_ERROR', 
-        message: 'Failed to load timezones' 
+    res.status(500).json({
+      success: false,
+      code: 'INTERNAL_ERROR',
+      message: 'Failed to load timezones'
     });
-}
-
+  }
 });
 
 // =============================================
-// USER SECURITY STATUS ENDPOINT
+// USER SECURITY STATUS ENDPOINT - FIXED RESPONSE STRUCTURE
 // =============================================
 app.get('/api/users/security', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const user = await User.findById(userId).select('passwordChangedAt twoFactorAuth');
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId).select('passwordChangedAt twoFactorAuth');
 
     if (!user) {
-        return res.status(404).json({
-            status: 'fail',
-            message: 'User not found'
-        });
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
     }
 
     // Get active devices count from login history
     const activeDevices = user.loginHistory?.filter(
-        session => session.revoked !== true && 
+      session => session.revoked !== true &&
         (!session.expiresAt || new Date(session.expiresAt) > new Date())
     ) || [];
 
@@ -44792,1365 +44803,643 @@ const user = await User.findById(userId).select('passwordChangedAt twoFactorAuth
     // Determine security level
     let securityLevel = 'medium';
     const has2FA = user.twoFactorAuth?.enabled || false;
-    const hasRecentPassword = user.passwordChangedAt && 
-        (Date.now() - new Date(user.passwordChangedAt).getTime() < 90 * 24 * 60 * 60 * 1000);
-    
+    const hasRecentPassword = user.passwordChangedAt &&
+      (Date.now() - new Date(user.passwordChangedAt).getTime() < 90 * 24 * 60 * 60 * 1000);
+
     if (has2FA && hasRecentPassword && activeDevicesCount <= 3) {
-        securityLevel = 'strong';
+      securityLevel = 'strong';
     } else if (!has2FA && !hasRecentPassword && activeDevicesCount > 5) {
-        securityLevel = 'weak';
+      securityLevel = 'weak';
     }
-    
+
+    // ✅ FIX: Return consistent response structure with data.authenticator
     res.status(200).json({
-        status: 'success',
-        data: {
-            securityLevel: securityLevel,
-            statusMessage: securityLevel === 'strong' ? 'Your account is well protected.' :
-                          securityLevel === 'medium' ? 'Consider enabling additional security features.' :
-                          'Your account security needs attention.',
-            authenticator: {
-                enabled: has2FA,
-                enabledAt: user.twoFactorAuth?.enabledAt || null
-            },
-            password: {
-                lastChanged: user.passwordChangedAt || null,
-                strong: hasRecentPassword
-            },
-            devices: {
-                activeCount: activeDevicesCount
-            }
+      status: 'success',
+      data: {
+        securityLevel: securityLevel,
+        statusMessage: securityLevel === 'strong' ? 'Your account is well protected.' :
+          securityLevel === 'medium' ? 'Consider enabling additional security features.' :
+          'Your account security needs attention.',
+        authenticator: {
+          enabled: has2FA,
+          enabledAt: user.twoFactorAuth?.enabledAt || null
+        },
+        password: {
+          lastChanged: user.passwordChangedAt || null,
+          strong: hasRecentPassword
+        },
+        devices: {
+          activeCount: activeDevicesCount
         }
+      }
     });
-} catch (err) {
+  } catch (err) {
     console.error('Get security status error:', err);
     res.status(500).json({
-        status: 'error',
-        message: 'Failed to fetch security status'
+      status: 'error',
+      message: 'Failed to fetch security status'
     });
-}
-
-});
-
-// =============================================
-// USER PREFERENCES ENDPOINTS
-// =============================================
-app.get('/api/users/settings', protect, async (req, res) => {
-try {
-const user = await User.findById(req.user._id).select('preferences ipPreferences');
-
-    if (!user) {
-        return res.status(404).json({
-            status: 'fail',
-            message: 'User not found'
-        });
-    }
-
-    const language = user.preferences?.language || user.ipPreferences?.language || 'en';
-    const timezone = user.preferences?.timezone || user.ipPreferences?.timezone || 'UTC';
-
-    res.status(200).json({
-        status: 'success',
-        data: {
-            language: language,
-            timezone: timezone,
-            theme: user.preferences?.theme || 'dark',
-            currency: user.preferences?.currency || user.ipPreferences?.currency || 'USD',
-            displayAsset: user.preferences?.displayAsset || 'btc'
-        }
-    });
-} catch (err) {
-    console.error('Get user settings error:', err);
-    res.status(500).json({
-        status: 'error',
-        message: 'Failed to fetch user settings'
-    });
-}
-
-});
-
-app.put('/api/users/settings', protect, async (req, res) => {
-try {
-const { language, timezone, theme, currency, displayAsset } = req.body;
-
-    // Validate language exists
-    if (language) {
-        const langExists = await Language.findOne({ code: language, isActive: true });
-        if (!langExists) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid language code',
-                code: 'PREFERENCE_INVALID_LANGUAGE'
-            });
-        }
-    }
-
-    // Validate timezone exists
-    if (timezone) {
-        const tzExists = await Timezone.findOne({ id: timezone, isActive: true });
-        if (!tzExists) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid timezone',
-                code: 'PREFERENCE_INVALID_TIMEZONE'
-            });
-        }
-    }
-
-    const updates = {};
-    if (language) updates['preferences.language'] = language;
-    if (timezone) updates['preferences.timezone'] = timezone;
-    if (theme) updates['preferences.theme'] = theme;
-    if (currency) updates['preferences.currency'] = currency;
-    if (displayAsset) updates['preferences.displayAsset'] = displayAsset;
-
-    const user = await User.findByIdAndUpdate(
-        req.user._id,
-        { $set: updates },
-        { new: true }
-    ).select('preferences');
-
-    // Also update UserPreference collection
-    if (language || timezone || theme || currency || displayAsset) {
-        await UserPreference.findOneAndUpdate(
-            { user: req.user._id },
-            { 
-                language: language || undefined,
-                currency: currency || undefined,
-                theme: theme || undefined,
-                displayAsset: displayAsset || undefined,
-                $setOnInsert: { user: req.user._id }
-            },
-            { upsert: true }
-        );
-    }
-
-    // Log activity
-    await SystemLog.create({
-        action: 'account_settings_update',
-        entity: 'User',
-        entityId: req.user._id,
-        performedBy: req.user._id,
-        performedByModel: 'User',
-        performedByEmail: req.user.email,
-        performedByName: `${req.user.firstName} ${req.user.lastName}`,
-        status: 'success',
-        metadata: {
-            changes: updates
-        }
-    });
-
-    res.status(200).json({
-        status: 'success',
-        data: {
-            language: user.preferences?.language || 'en',
-            timezone: user.preferences?.timezone || 'UTC',
-            theme: user.preferences?.theme || 'dark',
-            currency: user.preferences?.currency || 'USD',
-            displayAsset: user.preferences?.displayAsset || 'btc'
-        }
-    });
-} catch (err) {
-    console.error('Update user settings error:', err);
-    res.status(500).json({
-        status: 'error',
-        message: 'Failed to update settings',
-        code: 'INTERNAL_ERROR'
-    });
-}
-
+  }
 });
 
 // =============================================
 // USER API KEYS ENDPOINTS
 // =============================================
 app.get('/api/users/api-keys', protect, async (req, res) => {
-try {
-const user = await User.findById(req.user._id).select('apiKeys');
+  try {
+    const user = await User.findById(req.user._id).select('apiKeys');
 
     if (!user) {
-        return res.status(404).json({
-            status: 'fail',
-            message: 'User not found'
-        });
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
     }
 
     const keys = (user.apiKeys || []).map(key => ({
-        id: key._id,
-        name: key.name,
-        permissions: key.permissions || [],
-        createdAt: key.createdAt,
-        expiresAt: key.expiresAt,
-        expired: key.expiresAt && new Date(key.expiresAt) < new Date(),
-        isActive: key.isActive !== false
+      id: key._id,
+      name: key.name,
+      permissions: key.permissions || [],
+      createdAt: key.createdAt,
+      expiresAt: key.expiresAt,
+      expired: key.expiresAt && new Date(key.expiresAt) < new Date(),
+      isActive: key.isActive !== false
     }));
-    
+
     res.status(200).json({
-        status: 'success',
-        data: { keys }
+      status: 'success',
+      data: { keys }
     });
-} catch (err) {
+  } catch (err) {
     console.error('Get API keys error:', err);
     res.status(500).json({
-        status: 'error',
-        message: 'Failed to fetch API keys'
+      status: 'error',
+      message: 'Failed to fetch API keys'
     });
-}
-
+  }
 });
 
 app.post('/api/users/api-keys', protect, async (req, res) => {
-try {
-const { name, permissions, expiresIn } = req.body;
+  try {
+    const { name, permissions, expiresIn } = req.body;
 
     if (!name || name.trim() === '') {
-        return res.status(400).json({
-            status: 'fail',
-            message: 'API key name is required'
-        });
+      return res.status(400).json({
+        status: 'fail',
+        message: 'API key name is required'
+      });
     }
-    
+
     // Check for duplicate name
     const user = await User.findById(req.user._id).select('apiKeys');
     if (user && user.apiKeys) {
-        const existing = user.apiKeys.find(k => k.name.toLowerCase() === name.trim().toLowerCase() && k.isActive !== false);
-        if (existing) {
-            return res.status(409).json({
-                status: 'fail',
-                message: 'An API key with this name already exists',
-                code: 'API_KEY_NAME_EXISTS'
-            });
-        }
+      const existing = user.apiKeys.find(k => k.name.toLowerCase() === name.trim().toLowerCase() && k.isActive !== false);
+      if (existing) {
+        return res.status(409).json({
+          status: 'fail',
+          message: 'An API key with this name already exists'
+        });
+      }
     }
-    
+
     // Generate API key
     const apiKey = crypto.randomBytes(32).toString('hex');
-    
+
     // Calculate expiration
     let expiresAt = null;
     if (expiresIn && expiresIn > 0) {
-        expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + parseInt(expiresIn));
+      expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + parseInt(expiresIn));
     }
-    
+
     // Create API key object
     const newKey = {
-        name: name.trim(),
-        key: apiKey,
-        permissions: permissions || ['read'],
-        expiresAt: expiresAt,
-        isActive: true,
-        createdAt: new Date()
+      name: name.trim(),
+      key: apiKey,
+      permissions: permissions || ['read'],
+      expiresAt: expiresAt,
+      isActive: true,
+      createdAt: new Date()
     };
-    
+
     const updatedUser = await User.findByIdAndUpdate(
-        req.user._id,
-        { $push: { apiKeys: newKey } },
-        { new: true }
+      req.user._id,
+      { $push: { apiKeys: newKey } },
+      { new: true }
     ).select('apiKeys');
-    
+
     const createdKey = updatedUser.apiKeys[updatedUser.apiKeys.length - 1];
-    
+
     // Log activity
     await SystemLog.create({
-        action: 'api_key_create',
-        entity: 'User',
-        entityId: req.user._id,
-        performedBy: req.user._id,
-        performedByModel: 'User',
-        performedByEmail: req.user.email,
-        performedByName: `${req.user.firstName} ${req.user.lastName}`,
-        status: 'success',
-        metadata: {
-            keyName: createdKey.name,
-            permissions: createdKey.permissions,
-            expiresAt: createdKey.expiresAt
-        }
+      action: 'api_key_create',
+      entity: 'User',
+      entityId: req.user._id,
+      performedBy: req.user._id,
+      performedByModel: 'User',
+      performedByEmail: req.user.email,
+      performedByName: `${req.user.firstName} ${req.user.lastName}`,
+      status: 'success',
+      metadata: {
+        keyName: createdKey.name,
+        permissions: createdKey.permissions,
+        expiresAt: createdKey.expiresAt
+      }
     });
-    
+
     res.status(201).json({
-        status: 'success',
-        data: {
-            id: createdKey._id,
-            key: apiKey,
-            name: createdKey.name,
-            permissions: createdKey.permissions,
-            expiresAt: createdKey.expiresAt
-        }
+      status: 'success',
+      data: {
+        id: createdKey._id,
+        key: apiKey,
+        name: createdKey.name,
+        permissions: createdKey.permissions,
+        expiresAt: createdKey.expiresAt
+      }
     });
-} catch (err) {
+  } catch (err) {
     console.error('Create API key error:', err);
     res.status(500).json({
-        status: 'error',
-        message: 'Failed to create API key'
+      status: 'error',
+      message: 'Failed to create API key'
     });
-}
-
+  }
 });
 
 app.delete('/api/users/api-keys/:id', protect, async (req, res) => {
-try {
-const { id } = req.params;
+  try {
+    const { id } = req.params;
 
     // Find the key to log its name
     const user = await User.findById(req.user._id).select('apiKeys');
     const keyToDelete = user?.apiKeys?.find(k => k._id.toString() === id);
-    
+
     const updatedUser = await User.findByIdAndUpdate(
-        req.user._id,
-        { $pull: { apiKeys: { _id: id } } },
-        { new: true }
+      req.user._id,
+      { $pull: { apiKeys: { _id: id } } },
+      { new: true }
     );
-    
+
     if (!updatedUser) {
-        return res.status(404).json({
-            status: 'fail',
-            message: 'User not found'
-        });
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
     }
-    
+
     // Log activity
     await SystemLog.create({
-        action: 'api_key_revoke',
-        entity: 'User',
-        entityId: req.user._id,
-        performedBy: req.user._id,
-        performedByModel: 'User',
-        performedByEmail: req.user.email,
-        performedByName: `${req.user.firstName} ${req.user.lastName}`,
-        status: 'success',
-        metadata: {
-            keyName: keyToDelete?.name || 'Unknown',
-            keyId: id
-        }
+      action: 'api_key_revoke',
+      entity: 'User',
+      entityId: req.user._id,
+      performedBy: req.user._id,
+      performedByModel: 'User',
+      performedByEmail: req.user.email,
+      performedByName: `${req.user.firstName} ${req.user.lastName}`,
+      status: 'success',
+      metadata: {
+        keyName: keyToDelete?.name || 'Unknown',
+        keyId: id
+      }
     });
-    
+
     res.status(200).json({
-        status: 'success',
-        message: 'API key revoked successfully'
+      status: 'success',
+      message: 'API key revoked successfully'
     });
-} catch (err) {
+  } catch (err) {
     console.error('Delete API key error:', err);
     res.status(500).json({
-        status: 'error',
-        message: 'Failed to revoke API key'
+      status: 'error',
+      message: 'Failed to revoke API key'
     });
-}
-
+  }
 });
 
 // =============================================
 // USER DEVICES ENDPOINTS - Enhanced with proper logout functionality
 // =============================================
 app.get('/api/users/devices', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const currentSessionId = req.sessionId || req.headers['x-session-id'] || null;
+  try {
+    const userId = req.user._id;
+    const currentSessionId = req.sessionId || req.headers['x-session-id'] || null;
 
     const user = await User.findById(userId).select('loginHistory');
     if (!user) {
-        return res.status(404).json({ 
-            success: false,
-            code: 'USER_NOT_FOUND', 
-            message: 'User not found' 
-        });
+      return res.status(404).json({
+        success: false,
+        code: 'USER_NOT_FOUND',
+        message: 'User not found'
+      });
     }
 
     const loginHistory = user.loginHistory || [];
     const devices = loginHistory.map(session => {
-        const isCurrent = currentSessionId && session._id && session._id.toString() === currentSessionId;
-        
-        // Determine session status
-        let sessionStatus = 'active';
-        if (session.revoked) {
-            sessionStatus = 'revoked';
-        } else if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
-            sessionStatus = 'expired';
-        }
+      const isCurrent = currentSessionId && session._id && session._id.toString() === currentSessionId;
 
-        return {
-            id: session._id,
-            name: session.deviceName || session.userAgent || 'Unknown Device',
-            deviceType: session.deviceType || 'desktop',
-            os: session.os || '',
-            browser: session.browser || '',
-            location: {
-                city: session.city || '',
-                country: session.country || ''
-            },
-            ipAddress: session.ipAddress || '',
-            lastActiveAt: session.timestamp || session.lastActiveAt || new Date().toISOString(),
-            timestamp: session.timestamp || new Date().toISOString(),
-            sessionStatus: sessionStatus,
-            current: isCurrent || false
-        };
+      // Determine session status
+      let sessionStatus = 'active';
+      if (session.revoked) {
+        sessionStatus = 'revoked';
+      } else if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
+        sessionStatus = 'expired';
+      }
+
+      return {
+        id: session._id,
+        name: session.deviceName || session.userAgent || 'Unknown Device',
+        deviceType: session.deviceType || 'desktop',
+        os: session.os || '',
+        browser: session.browser || '',
+        location: {
+          city: session.city || '',
+          country: session.country || ''
+        },
+        ipAddress: session.ipAddress || '',
+        lastActiveAt: session.timestamp || session.lastActiveAt || new Date().toISOString(),
+        timestamp: session.timestamp || new Date().toISOString(),
+        sessionStatus: sessionStatus,
+        current: isCurrent || false
+      };
     });
 
     // Sort: current first, then active, then expired/revoked
     devices.sort((a, b) => {
-        if (a.current) return -1;
-        if (b.current) return 1;
-        if (a.sessionStatus === 'active' && b.sessionStatus !== 'active') return -1;
-        if (b.sessionStatus === 'active' && a.sessionStatus !== 'active') return 1;
-        return new Date(b.lastActiveAt) - new Date(a.lastActiveAt);
+      if (a.current) return -1;
+      if (b.current) return 1;
+      if (a.sessionStatus === 'active' && b.sessionStatus !== 'active') return -1;
+      if (b.sessionStatus === 'active' && a.sessionStatus !== 'active') return 1;
+      return new Date(b.lastActiveAt) - new Date(a.lastActiveAt);
     });
 
     res.json({
-        success: true,
-        devices: devices
+      success: true,
+      devices: devices
     });
-} catch (err) {
+  } catch (err) {
     console.error('Error fetching devices:', err);
-    res.status(500).json({ 
-        success: false,
-        code: 'INTERNAL_ERROR', 
-        message: 'Failed to load devices' 
+    res.status(500).json({
+      success: false,
+      code: 'INTERNAL_ERROR',
+      message: 'Failed to load devices'
     });
-}
-
+  }
 });
 
 app.post('/api/users/devices/:id/logout', protect, async (req, res) => {
-try {
-const { id } = req.params;
-const userId = req.user._id;
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
 
     // Find and update the specific login history entry
     const user = await User.findById(userId);
     if (!user) {
-        return res.status(404).json({
-            success: false,
-            code: 'USER_NOT_FOUND',
-            message: 'User not found'
-        });
+      return res.status(404).json({
+        success: false,
+        code: 'USER_NOT_FOUND',
+        message: 'User not found'
+      });
     }
-    
+
     // Find the device in loginHistory
     const deviceIndex = user.loginHistory?.findIndex(
-        session => session._id && session._id.toString() === id
+      session => session._id && session._id.toString() === id
     );
-    
+
     if (deviceIndex === -1 || deviceIndex === undefined) {
-        return res.status(404).json({
-            success: false,
-            code: 'DEVICE_NOT_FOUND',
-            message: 'Device not found'
-        });
+      return res.status(404).json({
+        success: false,
+        code: 'DEVICE_NOT_FOUND',
+        message: 'Device not found'
+      });
     }
-    
+
     // Mark as revoked
     user.loginHistory[deviceIndex].revoked = true;
     user.loginHistory[deviceIndex].revokedAt = new Date();
     await user.save();
-    
+
     // Log activity
     await SystemLog.create({
-        action: 'device_logout',
-        entity: 'User',
-        entityId: userId,
-        performedBy: userId,
-        performedByModel: 'User',
-        performedByEmail: req.user.email,
-        performedByName: `${req.user.firstName} ${req.user.lastName}`,
-        status: 'success',
-        metadata: {
-            deviceId: id,
-            deviceName: user.loginHistory[deviceIndex]?.deviceName || 'Unknown'
-        }
+      action: 'device_logout',
+      entity: 'User',
+      entityId: userId,
+      performedBy: userId,
+      performedByModel: 'User',
+      performedByEmail: req.user.email,
+      performedByName: `${req.user.firstName} ${req.user.lastName}`,
+      status: 'success',
+      metadata: {
+        deviceId: id,
+        deviceName: user.loginHistory[deviceIndex]?.deviceName || 'Unknown'
+      }
     });
-    
+
     res.status(200).json({
-        success: true,
-        message: 'Device logged out successfully'
+      success: true,
+      message: 'Device logged out successfully'
     });
-} catch (err) {
+  } catch (err) {
     console.error('Logout device error:', err);
     res.status(500).json({
-        success: false,
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to logout device'
+      success: false,
+      code: 'INTERNAL_ERROR',
+      message: 'Failed to logout device'
     });
-}
-
+  }
 });
 
 app.post('/api/users/devices/logout-all', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const currentSessionId = req.sessionId || req.headers['x-session-id'];
+  try {
+    const userId = req.user._id;
+    const currentSessionId = req.sessionId || req.headers['x-session-id'];
 
     // Find the user
     const user = await User.findById(userId);
     if (!user) {
-        return res.status(404).json({
-            success: false,
-            code: 'USER_NOT_FOUND',
-            message: 'User not found'
-        });
+      return res.status(404).json({
+        success: false,
+        code: 'USER_NOT_FOUND',
+        message: 'User not found'
+      });
     }
-    
+
     // Revoke all sessions except current
     let revokedCount = 0;
     if (user.loginHistory) {
-        user.loginHistory.forEach(session => {
-            const sessionId = session._id ? session._id.toString() : null;
-            if (sessionId && sessionId !== currentSessionId && !session.revoked) {
-                session.revoked = true;
-                session.revokedAt = new Date();
-                session.revokedBy = 'logout_all';
-                revokedCount++;
-            }
-        });
-        await user.save();
+      user.loginHistory.forEach(session => {
+        const sessionId = session._id ? session._id.toString() : null;
+        if (sessionId && sessionId !== currentSessionId && !session.revoked) {
+          session.revoked = true;
+          session.revokedAt = new Date();
+          session.revokedBy = 'logout_all';
+          revokedCount++;
+        }
+      });
+      await user.save();
     }
-    
+
     // Log activity
     await SystemLog.create({
-        action: 'devices_logged_out_all',
-        entity: 'User',
-        entityId: userId,
-        performedBy: userId,
-        performedByModel: 'User',
-        performedByEmail: req.user.email,
-        performedByName: `${req.user.firstName} ${req.user.lastName}`,
-        status: 'success',
-        metadata: {
-            revokedCount: revokedCount
-        }
+      action: 'devices_logged_out_all',
+      entity: 'User',
+      entityId: userId,
+      performedBy: userId,
+      performedByModel: 'User',
+      performedByEmail: req.user.email,
+      performedByName: `${req.user.firstName} ${req.user.lastName}`,
+      status: 'success',
+      metadata: {
+        revokedCount: revokedCount
+      }
     });
-    
+
     res.status(200).json({
-        success: true,
-        message: 'All other devices logged out successfully',
-        data: { revokedCount }
+      success: true,
+      message: 'All other devices logged out successfully',
+      data: { revokedCount }
     });
-} catch (err) {
+  } catch (err) {
     console.error('Logout all devices error:', err);
     res.status(500).json({
-        success: false,
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to logout all devices'
+      success: false,
+      code: 'INTERNAL_ERROR',
+      message: 'Failed to logout all devices'
     });
-}
-
+  }
 });
 
 // =============================================
 // USER ACTIVITY ENDPOINT - GET RECENT ACTIVITY
 // =============================================
 app.get('/api/users/activity', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const page = parseInt(req.query.page) || 1;
-const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-const type = req.query.type || 'all';
-const skip = (page - 1) * limit;
+  try {
+    const userId = req.user._id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const type = req.query.type || 'all';
+    const skip = (page - 1) * limit;
 
-    // Build filter for SystemLog - filter by user ownership, not just performedBy
-    const filter = { 
-        $or: [
-            { performedBy: userId, performedByModel: 'User' },
-            { entity: 'User', entityId: userId },
-            { 'metadata.userId': userId },
-            { 'metadata.user': userId }
-        ]
+    // Build filter for SystemLog - get ALL activity belonging to this user
+    // Including actions performed by the user AND actions performed on the user's account
+    const filter = {
+      $or: [
+        { performedBy: userId, performedByModel: 'User' },
+        { entity: 'User', entityId: userId }
+      ]
     };
-    
+
     // Apply type filter using action mapping
     if (type !== 'all') {
-        const typeMap = {
-            'authentication': ['signup', 'login', 'failed_login', 'logout', 'login_attempt', 'session_created'],
-            'security': ['password_change', 'password_changed', '2fa_enable', '2fa_disable', 'security_settings_update'],
-            'devices': ['device_login', 'device_logout', 'trusted_device_added', 'session_created', 'session_timeout'],
-            'deposits': ['deposit_created', 'deposit_completed', 'deposit_failed', 'deposit_pending', 'deposit_cancelled'],
-            'withdrawals': ['withdrawal_created', 'withdrawal_completed', 'withdrawal_failed', 'withdrawal_pending', 'withdrawal_cancelled'],
-            'wallets': ['wallet_connected', 'wallet_disconnected', 'wallet_linked', 'wallet_unlinked'],
-            'verification': ['kyc_submission', 'kyc_pending', 'kyc_approved', 'kyc_rejected', 'identity_verification', 'address_verification'],
-            'api': ['api_key_create', 'api_key_delete', 'api_key_regenerate', 'api_key_revoke'],
-            'account': ['profile_update', 'account_settings_update', 'email_verification', 'profile_view']
-        };
-        
-        const actions = typeMap[type] || [];
-        if (actions.length > 0) {
-            filter.action = { $in: actions };
-        }
+      const typeMap = {
+        'authentication': ['signup', 'login', 'failed_login', 'logout', 'login_attempt', 'session_created'],
+        'security': ['password_change', 'password_changed', '2fa_enable', '2fa_disable', 'security_settings_update'],
+        'devices': ['device_login', 'device_logout', 'trusted_device_added', 'session_created', 'session_timeout'],
+        'deposits': ['deposit_created', 'deposit_completed', 'deposit_failed', 'deposit_pending', 'deposit_cancelled'],
+        'withdrawals': ['withdrawal_created', 'withdrawal_completed', 'withdrawal_failed', 'withdrawal_pending', 'withdrawal_cancelled'],
+        'wallets': ['wallet_connected', 'wallet_disconnected', 'wallet_linked', 'wallet_unlinked'],
+        'verification': ['kyc_submission', 'kyc_pending', 'kyc_approved', 'kyc_rejected', 'identity_verification', 'address_verification'],
+        'api': ['api_key_create', 'api_key_delete', 'api_key_regenerate', 'api_key_revoke'],
+        'account': ['profile_update', 'account_settings_update', 'email_verification', 'profile_view']
+      };
+
+      const actions = typeMap[type] || [];
+      if (actions.length > 0) {
+        filter.action = { $in: actions };
+      }
     }
 
     // Get total count for pagination
     const totalCount = await SystemLog.countDocuments(filter);
-    
+
     // Get activities
     const activities = await SystemLog.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
 
     const formattedActivities = activities.map(log => ({
-        id: log._id,
-        type: log.actionCategory || 'account',
-        action: log.action || log.type,
-        title: getActivityTitle(log),
-        description: getActivityDescription(log),
-        status: log.status || 'completed',
-        createdAt: log.createdAt || log.timestamp,
-        ipAddress: log.ip || '',
-        location: {
-            city: log.city || '',
-            country: log.countryCode || ''
-        },
-        device: {
-            browser: log.browser || '',
-            os: log.os || ''
-        },
-        metadata: log.metadata || {},
-        transaction: log.financial ? {
-            hash: log.financial.transactionId,
-            amount: log.financial.amount,
-            asset: log.financial.cryptoAsset
-        } : null
+      id: log._id,
+      type: log.actionCategory || 'account',
+      action: log.action || log.type,
+      title: getActivityTitle(log),
+      description: getActivityDescription(log),
+      status: log.status || 'completed',
+      createdAt: log.createdAt || log.timestamp,
+      ipAddress: log.ip || '',
+      location: {
+        city: log.city || '',
+        country: log.countryCode || ''
+      },
+      device: {
+        browser: log.browser || '',
+        os: log.os || ''
+      },
+      metadata: log.metadata || {},
+      transaction: log.financial ? {
+        hash: log.financial.transactionId,
+        amount: log.financial.amount,
+        asset: log.financial.cryptoAsset
+      } : null
     }));
 
     const hasMore = skip + activities.length < totalCount;
 
     res.json({
-        success: true,
-        data: {
-            activities: formattedActivities,
-            pagination: {
-                page: page,
-                limit: limit,
-                total: totalCount,
-                hasNext: hasMore,
-                hasPrev: page > 1
-            }
+      success: true,
+      data: {
+        activities: formattedActivities,
+        pagination: {
+          page: page,
+          limit: limit,
+          total: totalCount,
+          hasNext: hasMore,
+          hasPrev: page > 1
         }
+      }
     });
-} catch (err) {
+  } catch (err) {
     console.error('Error fetching activities:', err);
-    res.status(500).json({ 
-        success: false,
-        code: 'INTERNAL_ERROR', 
-        message: 'Failed to load activity history' 
+    res.status(500).json({
+      success: false,
+      code: 'INTERNAL_ERROR',
+      message: 'Failed to load activity history'
     });
-}
-
+  }
 });
 
 // Helper function to get activity title
 function getActivityTitle(log) {
-const titles = {
-'signup': 'Account Created',
-'login': 'Login',
-'failed_login': 'Failed Login Attempt',
-'logout': 'Logout',
-'deposit_created': 'Deposit Initiated',
-'deposit_completed': 'Deposit Completed',
-'deposit_failed': 'Deposit Failed',
-'deposit_pending': 'Deposit Pending',
-'deposit_cancelled': 'Deposit Cancelled',
-'withdrawal_created': 'Withdrawal Requested',
-'withdrawal_completed': 'Withdrawal Completed',
-'withdrawal_failed': 'Withdrawal Failed',
-'withdrawal_pending': 'Withdrawal Pending',
-'withdrawal_cancelled': 'Withdrawal Cancelled',
-'password_changed': 'Password Changed',
-'2fa_enable': 'Two-Factor Authentication Enabled',
-'2fa_disable': 'Two-Factor Authentication Disabled',
-'wallet_connected': 'Wallet Connected',
-'wallet_disconnected': 'Wallet Disconnected',
-'wallet_linked': 'Wallet Linked',
-'wallet_unlinked': 'Wallet Unlinked',
-'device_login': 'New Device Login',
-'device_logout': 'Device Logout',
-'session_created': 'New Session Created',
-'session_timeout': 'Session Expired',
-'devices_logged_out_all': 'All Devices Logged Out',
-'kyc_submission': 'KYC Submitted',
-'kyc_approved': 'KYC Approved',
-'kyc_rejected': 'KYC Rejected',
-'kyc_pending': 'KYC Under Review',
-'identity_verification': 'Identity Verified',
-'address_verification': 'Address Verified',
-'api_key_create': 'API Key Created',
-'api_key_revoke': 'API Key Revoked',
-'api_key_regenerate': 'API Key Regenerated',
-'profile_update': 'Profile Updated',
-'account_settings_update': 'Settings Updated',
-'email_verification': 'Email Verified'
-};
-return titles[log.action] || log.action || 'Activity';
+  const titles = {
+    'signup': 'Account Created',
+    'login': 'Login',
+    'failed_login': 'Failed Login Attempt',
+    'logout': 'Logout',
+    'deposit_created': 'Deposit Initiated',
+    'deposit_completed': 'Deposit Completed',
+    'deposit_failed': 'Deposit Failed',
+    'deposit_pending': 'Deposit Pending',
+    'deposit_cancelled': 'Deposit Cancelled',
+    'withdrawal_created': 'Withdrawal Requested',
+    'withdrawal_completed': 'Withdrawal Completed',
+    'withdrawal_failed': 'Withdrawal Failed',
+    'withdrawal_pending': 'Withdrawal Pending',
+    'withdrawal_cancelled': 'Withdrawal Cancelled',
+    'password_changed': 'Password Changed',
+    '2fa_enable': 'Two-Factor Authentication Enabled',
+    '2fa_disable': 'Two-Factor Authentication Disabled',
+    'wallet_connected': 'Wallet Connected',
+    'wallet_disconnected': 'Wallet Disconnected',
+    'wallet_linked': 'Wallet Linked',
+    'wallet_unlinked': 'Wallet Unlinked',
+    'device_login': 'New Device Login',
+    'device_logout': 'Device Logout',
+    'session_created': 'New Session Created',
+    'session_timeout': 'Session Expired',
+    'devices_logged_out_all': 'All Devices Logged Out',
+    'kyc_submission': 'KYC Submitted',
+    'kyc_approved': 'KYC Approved',
+    'kyc_rejected': 'KYC Rejected',
+    'kyc_pending': 'KYC Under Review',
+    'identity_verification': 'Identity Verified',
+    'address_verification': 'Address Verified',
+    'api_key_create': 'API Key Created',
+    'api_key_revoke': 'API Key Revoked',
+    'api_key_regenerate': 'API Key Regenerated',
+    'profile_update': 'Profile Updated',
+    'account_settings_update': 'Settings Updated',
+    'email_verification': 'Email Verified'
+  };
+  return titles[log.action] || log.action || 'Activity';
 }
 
 // Helper function to get activity description
 function getActivityDescription(log) {
-const descriptions = {
-'signup': 'You created your BitHash account',
-'login': 'You signed in to your account',
-'failed_login': 'An unsuccessful login attempt was made',
-'logout': 'You signed out of your account',
-'deposit_created': 'Funds deposited to your account',
-'deposit_completed': 'Deposit completed successfully',
-'deposit_failed': 'Deposit failed',
-'deposit_pending': 'Deposit is pending confirmation',
-'deposit_cancelled': 'Deposit was cancelled',
-'withdrawal_created': 'Funds withdrawn from your account',
-'withdrawal_completed': 'Withdrawal completed successfully',
-'withdrawal_failed': 'Withdrawal failed',
-'withdrawal_pending': 'Withdrawal is pending approval',
-'withdrawal_cancelled': 'Withdrawal was cancelled',
-'password_changed': 'Your account password was changed',
-'2fa_enable': 'Two-factor authentication was enabled',
-'2fa_disable': 'Two-factor authentication was disabled',
-'wallet_connected': 'A new wallet was connected to your account',
-'wallet_disconnected': 'A wallet was disconnected from your account',
-'wallet_linked': 'A new wallet was linked to your account',
-'wallet_unlinked': 'A wallet was unlinked from your account',
-'device_login': 'A new device signed in to your account',
-'device_logout': 'A device was logged out of your account',
-'session_created': 'A new session was created',
-'session_timeout': 'A session expired',
-'devices_logged_out_all': 'All devices were logged out of your account',
-'kyc_submission': 'Your KYC application was submitted for review',
-'kyc_approved': 'Your KYC application was approved',
-'kyc_rejected': 'Your KYC application was rejected',
-'kyc_pending': 'Your KYC application is under review',
-'identity_verification': 'Your identity was verified',
-'address_verification': 'Your address was verified',
-'api_key_create': 'A new API key was created',
-'api_key_revoke': 'An API key was revoked',
-'api_key_regenerate': 'An API key was regenerated',
-'profile_update': 'Your profile was updated',
-'account_settings_update': 'Your account settings were updated',
-'email_verification': 'Your email address was verified'
-};
-return descriptions[log.action] || log.action || 'Activity performed';
+  const descriptions = {
+    'signup': 'You created your BitHash account',
+    'login': 'You signed in to your account',
+    'failed_login': 'An unsuccessful login attempt was made',
+    'logout': 'You signed out of your account',
+    'deposit_created': 'Funds deposited to your account',
+    'deposit_completed': 'Deposit completed successfully',
+    'deposit_failed': 'Deposit failed',
+    'deposit_pending': 'Deposit is pending confirmation',
+    'deposit_cancelled': 'Deposit was cancelled',
+    'withdrawal_created': 'Funds withdrawn from your account',
+    'withdrawal_completed': 'Withdrawal completed successfully',
+    'withdrawal_failed': 'Withdrawal failed',
+    'withdrawal_pending': 'Withdrawal is pending approval',
+    'withdrawal_cancelled': 'Withdrawal was cancelled',
+    'password_changed': 'Your account password was changed',
+    '2fa_enable': 'Two-factor authentication was enabled',
+    '2fa_disable': 'Two-factor authentication was disabled',
+    'wallet_connected': 'A new wallet was connected to your account',
+    'wallet_disconnected': 'A wallet was disconnected from your account',
+    'wallet_linked': 'A new wallet was linked to your account',
+    'wallet_unlinked': 'A wallet was unlinked from your account',
+    'device_login': 'A new device signed in to your account',
+    'device_logout': 'A device was logged out of your account',
+    'session_created': 'A new session was created',
+    'session_timeout': 'A session expired',
+    'devices_logged_out_all': 'All devices were logged out of your account',
+    'kyc_submission': 'Your KYC application was submitted for review',
+    'kyc_approved': 'Your KYC application was approved',
+    'kyc_rejected': 'Your KYC application was rejected',
+    'kyc_pending': 'Your KYC application is under review',
+    'identity_verification': 'Your identity was verified',
+    'address_verification': 'Your address was verified',
+    'api_key_create': 'A new API key was created',
+    'api_key_revoke': 'An API key was revoked',
+    'api_key_regenerate': 'An API key was regenerated',
+    'profile_update': 'Your profile information was updated',
+    'account_settings_update': 'Your account settings were updated',
+    'email_verification': 'Your email address was verified'
+  };
+  return descriptions[log.action] || log.action || 'Activity';
 }
-
-// =============================================
-// TWO-FACTOR AUTHENTICATOR SETUP ENDPOINT
-// =============================================
-app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
-try {
-const user = await User.findById(req.user._id).select('+twoFactorAuth.secret');
-
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            code: 'USER_NOT_FOUND',
-            message: 'User not found'
-        });
-    }
-
-    // Check if 2FA is already enabled
-    if (user.twoFactorAuth && user.twoFactorAuth.enabled) {
-        return res.status(409).json({
-            success: false,
-            code: 'ALREADY_ENABLED',
-            message: 'Two-factor authentication is already enabled for this account'
-        });
-    }
-
-    // Generate TOTP secret
-    const secret = speakeasy.generateSecret({
-        length: 20,
-        name: 'BitHash',
-        issuer: 'BitHash Capital'
-    });
-
-    // Store the secret temporarily
-    const enrollment = await UserEnrollment.create({
-        userId: user._id,
-        enrollmentId: `enroll_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        secret: secret.base32,
-        type: 'totp_setup',
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-        status: 'pending'
-    });
-
-    // Generate QR code URL
-    const otpauthUrl = `otpauth://totp/BitHash%20Capital:${user.email}?secret=${secret.base32}&issuer=BitHash%20Capital`;
-
-    res.status(200).json({
-        success: true,
-        data: {
-            enrollmentId: enrollment.enrollmentId,
-            manualKey: secret.base32,
-            otpauthUri: otpauthUrl,
-            qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUrl)}`
-        }
-    });
-} catch (err) {
-    console.error('Authenticator setup error:', err);
-    res.status(500).json({
-        success: false,
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to set up authenticator'
-    });
-}
-
-});
-
-// =============================================
-// TWO-FACTOR AUTHENTICATOR VERIFY ENDPOINT
-// =============================================
-app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res) => {
-try {
-const { enrollmentId, code } = req.body;
-
-    if (!enrollmentId || !code) {
-        return res.status(400).json({
-            success: false,
-            code: 'MISSING_FIELDS',
-            message: 'Enrollment ID and verification code are required'
-        });
-    }
-
-    const user = await User.findById(req.user._id).select('+twoFactorAuth.secret');
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            code: 'USER_NOT_FOUND',
-            message: 'User not found'
-        });
-    }
-
-    // Find the enrollment
-    const enrollment = await UserEnrollment.findOne({
-        enrollmentId: enrollmentId,
-        userId: user._id,
-        status: 'pending',
-        expiresAt: { $gt: new Date() }
-    });
-
-    if (!enrollment) {
-        return res.status(400).json({
-            success: false,
-            code: 'INVALID_ENROLLMENT',
-            message: 'Invalid or expired enrollment. Please start over.'
-        });
-    }
-
-    // Verify the code
-    const isValid = speakeasy.totp.verify({
-        secret: enrollment.secret,
-        encoding: 'base32',
-        token: code,
-        window: 2
-    });
-
-    if (!isValid) {
-        return res.status(400).json({
-            success: false,
-            code: 'INVALID_CODE',
-            message: 'Invalid verification code. Please try again.'
-        });
-    }
-
-    // Enable 2FA for the user
-    user.twoFactorAuth = {
-        enabled: true,
-        secret: enrollment.secret,
-        enabledAt: new Date()
-    };
-    await user.save();
-
-    // Mark enrollment as used
-    enrollment.status = 'used';
-    await enrollment.save();
-
-    // Generate recovery codes
-    const recoveryCodes = [];
-    for (let i = 0; i < 10; i++) {
-        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
-        const formatted = `${code.substring(0, 4)}-${code.substring(4, 8)}`;
-        recoveryCodes.push(formatted);
-    }
-
-    // Hash and store recovery codes
-    const hashedRecoveryCodes = recoveryCodes.map(code => 
-        crypto.createHash('sha256').update(code).digest('hex')
-    );
-
-    await UserRecoveryCodes.findOneAndUpdate(
-        { userId: user._id },
-        { hashes: hashedRecoveryCodes, generatedAt: new Date() },
-        { upsert: true, new: true }
-    );
-
-    // Log activity
-    await SystemLog.create({
-        action: '2fa_enable',
-        entity: 'User',
-        entityId: user._id,
-        performedBy: user._id,
-        performedByModel: 'User',
-        performedByEmail: user.email,
-        performedByName: `${user.firstName} ${user.lastName}`,
-        status: 'success',
-        metadata: {
-            method: 'authenticator',
-            enabledAt: new Date()
-        }
-    });
-
-    // Emit Socket.IO event
-    const io = req.app.get('io');
-    if (io) {
-        io.to(`user_${user._id}`).emit('security_update', {
-            type: 'authenticator',
-            enabled: true
-        });
-    }
-
-    res.status(200).json({
-        success: true,
-        message: 'Authenticator enabled successfully',
-        data: {
-            recoveryCodes: recoveryCodes
-        }
-    });
-} catch (err) {
-    console.error('Authenticator verify error:', err);
-    res.status(500).json({
-        success: false,
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to verify authenticator'
-    });
-}
-
-});
-
-// =============================================
-// TWO-FACTOR AUTHENTICATOR DISABLE CHALLENGE
-// =============================================
-app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async (req, res) => {
-try {
-const user = await User.findById(req.user._id).select('+twoFactorAuth.secret email');
-
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            code: 'USER_NOT_FOUND',
-            message: 'User not found'
-        });
-    }
-
-    if (!user.twoFactorAuth || !user.twoFactorAuth.enabled) {
-        return res.status(400).json({
-            success: false,
-            code: 'NOT_ENABLED',
-            message: 'Two-factor authentication is not enabled'
-        });
-    }
-
-    // Generate OTP challenge
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-    // Store challenge
-    const challenge = await UserChallenge.create({
-        userId: user._id,
-        challengeId: `challenge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        type: 'disable_authenticator',
-        otpHash: crypto.createHash('sha256').update(otp).digest('hex'),
-        expiresAt: expiresAt
-    });
-
-    // Send OTP email
-    await sendProfessionalEmail({
-        email: user.email,
-        template: 'otp',
-        data: {
-            name: user.firstName,
-            otp: otp,
-            action: 'disable authenticator'
-        }
-    });
-
-    res.status(200).json({
-        success: true,
-        data: {
-            challengeId: challenge.challengeId,
-            expiresAt: expiresAt,
-            email: user.email
-        }
-    });
-} catch (err) {
-    console.error('Disable challenge error:', err);
-    res.status(500).json({
-        success: false,
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to create disable challenge'
-    });
-}
-
-});
-
-// =============================================
-// TWO-FACTOR AUTHENTICATOR DISABLE VERIFY
-// =============================================
-app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (req, res) => {
-try {
-const { method, otp, code, challengeId } = req.body;
-
-    const user = await User.findById(req.user._id).select('+twoFactorAuth.secret email');
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            code: 'USER_NOT_FOUND',
-            message: 'User not found'
-        });
-    }
-
-    if (!user.twoFactorAuth || !user.twoFactorAuth.enabled) {
-        return res.status(400).json({
-            success: false,
-            code: 'NOT_ENABLED',
-            message: 'Two-factor authentication is not enabled'
-        });
-    }
-
-    let isValid = false;
-
-    if (method === 'otp') {
-        // Verify OTP challenge
-        const challenge = await UserChallenge.findOne({
-            challengeId: challengeId,
-            userId: user._id,
-            type: 'disable_authenticator',
-            expiresAt: { $gt: new Date() }
-        });
-
-        if (!challenge) {
-            return res.status(400).json({
-                success: false,
-                code: 'INVALID_CHALLENGE',
-                message: 'Invalid or expired challenge'
-            });
-        }
-
-        const hashedOtp = crypto.createHash('sha256').update(otp).digest('hex');
-        isValid = challenge.otpHash === hashedOtp;
-
-        if (!isValid) {
-            challenge.attempts += 1;
-            await challenge.save();
-
-            if (challenge.attempts >= 5) {
-                await challenge.deleteOne();
-                return res.status(400).json({
-                    success: false,
-                    code: 'TOO_MANY_ATTEMPTS',
-                    message: 'Too many failed attempts. Please start over.'
-                });
-            }
-        }
-
-        await challenge.deleteOne();
-
-    } else if (method === 'authenticator') {
-        // Verify authenticator code
-        if (!user.twoFactorAuth.secret) {
-            return res.status(400).json({
-                success: false,
-                code: 'NO_SECRET',
-                message: 'No authenticator secret found'
-            });
-        }
-
-        isValid = speakeasy.totp.verify({
-            secret: user.twoFactorAuth.secret,
-            encoding: 'base32',
-            token: code,
-            window: 2
-        });
-    }
-
-    if (!isValid) {
-        return res.status(400).json({
-            success: false,
-            code: 'INVALID_CODE',
-            message: method === 'otp' ? 'Invalid verification code. Please try again.' : 'Invalid authenticator code. Please try again.'
-        });
-    }
-
-    // Disable 2FA
-    user.twoFactorAuth = {
-        enabled: false,
-        secret: null,
-        enabledAt: null
-    };
-    await user.save();
-
-    // Delete recovery codes
-    await UserRecoveryCodes.findOneAndDelete({ userId: user._id });
-
-    // Log activity
-    await SystemLog.create({
-        action: '2fa_disable',
-        entity: 'User',
-        entityId: user._id,
-        performedBy: user._id,
-        performedByModel: 'User',
-        performedByEmail: user.email,
-        performedByName: `${user.firstName} ${user.lastName}`,
-        status: 'success',
-        metadata: {
-            method: method
-        }
-    });
-
-    // Emit Socket.IO event
-    const io = req.app.get('io');
-    if (io) {
-        io.to(`user_${user._id}`).emit('security_update', {
-            type: 'authenticator',
-            enabled: false
-        });
-    }
-
-    res.status(200).json({
-        success: true,
-        message: 'Authenticator disabled successfully'
-    });
-} catch (err) {
-    console.error('Disable verify error:', err);
-    res.status(500).json({
-        success: false,
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to disable authenticator'
-    });
-}
-
-});
-
-// =============================================
-// RECOVERY CODES CHALLENGE
-// =============================================
-app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, res) => {
-try {
-const user = await User.findById(req.user._id).select('email');
-
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            code: 'USER_NOT_FOUND',
-            message: 'User not found'
-        });
-    }
-
-    // Generate OTP challenge
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-    const challenge = await UserChallenge.create({
-        userId: user._id,
-        challengeId: `challenge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        type: 'recovery_codes',
-        otpHash: crypto.createHash('sha256').update(otp).digest('hex'),
-        expiresAt: expiresAt
-    });
-
-    await sendProfessionalEmail({
-        email: user.email,
-        template: 'otp',
-        data: {
-            name: user.firstName,
-            otp: otp,
-            action: 'regenerate recovery codes'
-        }
-    });
-
-    res.status(200).json({
-        success: true,
-        data: {
-            challengeId: challenge.challengeId,
-            expiresAt: expiresAt,
-            email: user.email
-        }
-    });
-} catch (err) {
-    console.error('Recovery codes challenge error:', err);
-    res.status(500).json({
-        success: false,
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to create recovery codes challenge'
-    });
-}
-
-});
-
-// =============================================
-// RECOVERY CODES VERIFY
-// =============================================
-app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res) => {
-try {
-const { method, otp, code, challengeId } = req.body;
-
-    const user = await User.findById(req.user._id).select('email');
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            code: 'USER_NOT_FOUND',
-            message: 'User not found'
-        });
-    }
-
-    let isValid = false;
-
-    if (method === 'otp') {
-        const challenge = await UserChallenge.findOne({
-            challengeId: challengeId,
-            userId: user._id,
-            type: 'recovery_codes',
-            expiresAt: { $gt: new Date() }
-        });
-
-        if (!challenge) {
-            return res.status(400).json({
-                success: false,
-                code: 'INVALID_CHALLENGE',
-                message: 'Invalid or expired challenge'
-            });
-        }
-
-        const hashedOtp = crypto.createHash('sha256').update(otp).digest('hex');
-        isValid = challenge.otpHash === hashedOtp;
-
-        if (!isValid) {
-            challenge.attempts += 1;
-            await challenge.save();
-
-            if (challenge.attempts >= 5) {
-                await challenge.deleteOne();
-                return res.status(400).json({
-                    success: false,
-                    code: 'TOO_MANY_ATTEMPTS',
-                    message: 'Too many failed attempts. Please start over.'
-                });
-            }
-        }
-
-        await challenge.deleteOne();
-
-    } else if (method === 'authenticator') {
-        // Verify authenticator code
-        const userWithSecret = await User.findById(user._id).select('+twoFactorAuth.secret');
-        if (!userWithSecret.twoFactorAuth || !userWithSecret.twoFactorAuth.secret) {
-            return res.status(400).json({
-                success: false,
-                code: 'NO_SECRET',
-                message: 'No authenticator secret found'
-            });
-        }
-
-        isValid = speakeasy.totp.verify({
-            secret: userWithSecret.twoFactorAuth.secret,
-            encoding: 'base32',
-            token: code,
-            window: 2
-        });
-    }
-
-    if (!isValid) {
-        return res.status(400).json({
-            success: false,
-            code: 'INVALID_CODE',
-            message: 'Invalid verification code. Please try again.'
-        });
-    }
-
-    // Generate new recovery codes
-    const recoveryCodes = [];
-    for (let i = 0; i < 10; i++) {
-        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
-        const formatted = `${code.substring(0, 4)}-${code.substring(4, 8)}`;
-        recoveryCodes.push(formatted);
-    }
-
-    const hashedRecoveryCodes = recoveryCodes.map(code => 
-        crypto.createHash('sha256').update(code).digest('hex')
-    );
-
-    await UserRecoveryCodes.findOneAndUpdate(
-        { userId: user._id },
-        { hashes: hashedRecoveryCodes, generatedAt: new Date() },
-        { upsert: true, new: true }
-    );
-
-    // Log activity
-    await SystemLog.create({
-        action: 'recovery_codes_regenerated',
-        entity: 'User',
-        entityId: user._id,
-        performedBy: user._id,
-        performedByModel: 'User',
-        performedByEmail: user.email,
-        performedByName: `${user.firstName} ${user.lastName}`,
-        status: 'success',
-        metadata: {
-            method: method
-        }
-    });
-
-    res.status(200).json({
-        success: true,
-        data: {
-            recoveryCodes: recoveryCodes
-        }
-    });
-} catch (err) {
-    console.error('Recovery codes verify error:', err);
-    res.status(500).json({
-        success: false,
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to verify recovery codes'
-    });
-}
-
-});
 
 // =============================================
 // USER PROFILE ENDPOINTS
 // =============================================
 app.get('/api/users/profile', protect, async (req, res) => {
-try {
-const user = await User.findById(req.user._id).select('firstName lastName email phone country address');
+  try {
+    const user = await User.findById(req.user._id)
+      .select('firstName lastName email phone country address');
 
     if (!user) {
-        return res.status(404).json({
-            status: 'fail',
-            message: 'User not found'
-        });
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
     }
 
     res.status(200).json({
-        firstName: user.firstName || '',
-        lastName: user.lastName || '',
-        email: user.email || '',
-        phone: user.phone || '',
-        country: user.country || '',
-        address: {
-            street: user.address?.street || '',
-            city: user.address?.city || '',
-            state: user.address?.state || '',
-            postalCode: user.address?.postalCode || '',
-            country: user.address?.country || ''
-        }
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      country: user.country || '',
+      address: {
+        street: user.address?.street || '',
+        city: user.address?.city || '',
+        state: user.address?.state || '',
+        postalCode: user.address?.postalCode || '',
+        country: user.address?.country || ''
+      }
     });
-} catch (err) {
+  } catch (err) {
     console.error('Get profile error:', err);
     res.status(500).json({
-        status: 'error',
-        message: 'Failed to fetch profile'
+      status: 'error',
+      message: 'Failed to fetch profile'
     });
-}
-
+  }
 });
 
 app.put('/api/users/profile', protect, async (req, res) => {
-try {
-const { firstName, lastName, phone, country } = req.body;
+  try {
+    const { firstName, lastName, phone, country } = req.body;
 
     const updates = {};
     if (firstName !== undefined) updates.firstName = firstName;
@@ -46159,264 +45448,966 @@ const { firstName, lastName, phone, country } = req.body;
     if (country !== undefined) updates.country = country;
 
     const user = await User.findByIdAndUpdate(
-        req.user._id,
-        { $set: updates },
-        { new: true }
+      req.user._id,
+      { $set: updates },
+      { new: true, runValidators: true }
     ).select('firstName lastName email phone country address');
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
 
     // Log activity
     await SystemLog.create({
-        action: 'profile_update',
-        entity: 'User',
-        entityId: req.user._id,
-        performedBy: req.user._id,
-        performedByModel: 'User',
-        performedByEmail: req.user.email,
-        performedByName: `${req.user.firstName} ${req.user.lastName}`,
-        status: 'success',
-        metadata: {
-            changes: updates
-        }
+      action: 'profile_update',
+      entity: 'User',
+      entityId: user._id,
+      performedBy: user._id,
+      performedByModel: 'User',
+      performedByEmail: user.email,
+      performedByName: `${user.firstName} ${user.lastName}`,
+      status: 'success',
+      metadata: {
+        updatedFields: Object.keys(updates)
+      }
     });
 
     res.status(200).json({
-        status: 'success',
-        data: {
-            firstName: user.firstName,
-            lastName: user.lastName,
-            email: user.email,
-            phone: user.phone,
-            country: user.country,
-            address: user.address
-        }
+      status: 'success',
+      message: 'Profile updated successfully',
+      data: {
+        firstName: user.firstName,
+        lastName: user.lastName,
+        phone: user.phone,
+        country: user.country
+      }
     });
-} catch (err) {
+  } catch (err) {
     console.error('Update profile error:', err);
     res.status(500).json({
-        status: 'error',
-        message: 'Failed to update profile'
+      status: 'error',
+      message: 'Failed to update profile'
     });
-}
-
+  }
 });
 
 app.put('/api/users/address', protect, async (req, res) => {
-try {
-const { street, city, state, postalCode, country } = req.body;
+  try {
+    const { street, city, state, postalCode, country } = req.body;
 
-    const updates = {};
-    if (street !== undefined) updates['address.street'] = street;
-    if (city !== undefined) updates['address.city'] = city;
-    if (state !== undefined) updates['address.state'] = state;
-    if (postalCode !== undefined) updates['address.postalCode'] = postalCode;
-    if (country !== undefined) updates['address.country'] = country;
+    const updates = {
+      'address.street': street,
+      'address.city': city,
+      'address.state': state,
+      'address.postalCode': postalCode,
+      'address.country': country
+    };
 
     const user = await User.findByIdAndUpdate(
-        req.user._id,
-        { $set: updates },
-        { new: true }
-    ).select('firstName lastName email phone country address');
+      req.user._id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('firstName lastName email address');
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
 
     // Log activity
     await SystemLog.create({
-        action: 'profile_update',
-        entity: 'User',
-        entityId: req.user._id,
-        performedBy: req.user._id,
-        performedByModel: 'User',
-        performedByEmail: req.user.email,
-        performedByName: `${req.user.firstName} ${req.user.lastName}`,
-        status: 'success',
-        metadata: {
-            changes: updates
-        }
+      action: 'profile_update',
+      entity: 'User',
+      entityId: user._id,
+      performedBy: user._id,
+      performedByModel: 'User',
+      performedByEmail: user.email,
+      performedByName: `${user.firstName} ${user.lastName}`,
+      status: 'success',
+      metadata: {
+        updatedFields: ['address']
+      }
     });
 
     res.status(200).json({
-        status: 'success',
-        data: {
-            address: user.address
-        }
+      status: 'success',
+      message: 'Address updated successfully',
+      data: {
+        address: user.address
+      }
     });
-} catch (err) {
+  } catch (err) {
     console.error('Update address error:', err);
     res.status(500).json({
-        status: 'error',
-        message: 'Failed to update address'
+      status: 'error',
+      message: 'Failed to update address'
     });
-}
-
+  }
 });
 
 // =============================================
-// CHANGE PASSWORD ENDPOINT
+// USER PASSWORD ENDPOINT
 // =============================================
 app.put('/api/users/password', protect, async (req, res) => {
-try {
-const { currentPassword, newPassword } = req.body;
+  try {
+    const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {
-        return res.status(400).json({
-            status: 'fail',
-            message: 'Current password and new password are required'
-        });
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Current password and new password are required'
+      });
     }
 
     if (newPassword.length < 8) {
-        return res.status(400).json({
-            status: 'fail',
-            message: 'New password must be at least 8 characters'
-        });
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Password must be at least 8 characters'
+      });
     }
 
     const user = await User.findById(req.user._id).select('+password');
+
     if (!user) {
-        return res.status(404).json({
-            status: 'fail',
-            message: 'User not found'
-        });
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
     }
 
     // Verify current password
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
-        return res.status(401).json({
-            status: 'fail',
-            message: 'Current password is incorrect'
-        });
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Current password is incorrect'
+      });
     }
 
     // Hash and save new password
     user.password = await bcrypt.hash(newPassword, 12);
-    user.passwordChangedAt = Date.now();
+    user.passwordChangedAt = new Date();
     await user.save();
 
     // Log activity
     await SystemLog.create({
-        action: 'password_changed',
-        entity: 'User',
-        entityId: user._id,
-        performedBy: user._id,
-        performedByModel: 'User',
-        performedByEmail: user.email,
-        performedByName: `${user.firstName} ${user.lastName}`,
-        status: 'success',
-        metadata: {
-            changedAt: new Date()
-        }
+      action: 'password_changed',
+      entity: 'User',
+      entityId: user._id,
+      performedBy: user._id,
+      performedByModel: 'User',
+      performedByEmail: user.email,
+      performedByName: `${user.firstName} ${user.lastName}`,
+      status: 'success',
+      metadata: {
+        changedAt: user.passwordChangedAt
+      }
     });
 
-    // Emit Socket.IO event
-    const io = req.app.get('io');
-    if (io) {
-        io.to(`user_${user._id}`).emit('security_update', {
-            type: 'password',
-            changed: true
-        });
+    res.status(200).json({
+      status: 'success',
+      message: 'Password changed successfully'
+    });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to change password'
+    });
+  }
+});
+
+// =============================================
+// USER SETTINGS (LANGUAGE & TIMEZONE)
+// =============================================
+app.get('/api/users/settings', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('preferences');
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
     }
 
     res.status(200).json({
-        status: 'success',
-        message: 'Password changed successfully'
+      status: 'success',
+      data: {
+        language: user.preferences?.language || 'en',
+        timezone: user.preferences?.timezone || 'UTC'
+      }
     });
-} catch (err) {
-    console.error('Change password error:', err);
+  } catch (err) {
+    console.error('Get settings error:', err);
     res.status(500).json({
-        status: 'error',
-        message: 'Failed to change password'
+      status: 'error',
+      message: 'Failed to fetch settings'
     });
-}
+  }
+});
 
+app.put('/api/users/settings', protect, async (req, res) => {
+  try {
+    const { language, timezone } = req.body;
+
+    // Validate language exists
+    if (language) {
+      const langExists = await Language.findOne({ code: language.toUpperCase(), isActive: true });
+      if (!langExists) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid language code'
+        });
+      }
+    }
+
+    // Validate timezone exists
+    if (timezone) {
+      const tzExists = await Timezone.findOne({ id: timezone, isActive: true });
+      if (!tzExists) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid timezone'
+        });
+      }
+    }
+
+    const updates = {};
+    if (language) updates['preferences.language'] = language;
+    if (timezone) updates['preferences.timezone'] = timezone;
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updates },
+      { new: true }
+    ).select('preferences');
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Log activity
+    const changes = [];
+    if (language) changes.push('language');
+    if (timezone) changes.push('timezone');
+
+    await SystemLog.create({
+      action: 'account_settings_update',
+      entity: 'User',
+      entityId: user._id,
+      performedBy: user._id,
+      performedByModel: 'User',
+      performedByEmail: req.user.email,
+      performedByName: `${req.user.firstName} ${req.user.lastName}`,
+      status: 'success',
+      metadata: {
+        updatedFields: changes,
+        newValues: { language, timezone }
+      }
+    });
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('preferences_update', {
+        language: user.preferences?.language,
+        timezone: user.preferences?.timezone
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Settings updated successfully',
+      data: {
+        language: user.preferences?.language,
+        timezone: user.preferences?.timezone
+      }
+    });
+  } catch (err) {
+    console.error('Update settings error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update settings'
+    });
+  }
 });
 
 // =============================================
-// KYC STATUS ENDPOINT
+// TWO-FACTOR AUTHENTICATION ENDPOINTS
+// =============================================
+
+// Setup authenticator
+app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Check if already enabled
+    if (user.twoFactorAuth?.enabled) {
+      return res.status(409).json({
+        success: false,
+        code: 'ALREADY_ENABLED',
+        message: 'Two-factor authentication is already enabled for this account'
+      });
+    }
+
+    const secret = speakeasy.generateSecret({
+      length: 20,
+      name: 'BitHash',
+      issuer: 'BitHash LLC'
+    });
+
+    // Store the secret temporarily (will be confirmed on verification)
+    user.twoFactorAuth = {
+      enabled: false,
+      secret: secret.base32,
+      enabledAt: null
+    };
+    await user.save();
+
+    // Generate QR code URL
+    const otpauthUrl = secret.otpauth_url;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        enrollmentId: user._id,
+        manualKey: secret.base32,
+        qrCode: otpauthUrl,
+        otpauthUri: otpauthUrl
+      }
+    });
+  } catch (err) {
+    console.error('Setup authenticator error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to setup authenticator'
+    });
+  }
+});
+
+// Verify authenticator OTP
+app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res) => {
+  try {
+    const { enrollmentId, code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Verification code is required'
+      });
+    }
+
+    const user = await User.findById(req.user._id).select('+twoFactorAuth.secret');
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Verify the code
+    const isValid = speakeasy.totp.verify({
+      secret: user.twoFactorAuth.secret,
+      encoding: 'base32',
+      token: code,
+      window: 2
+    });
+
+    if (!isValid) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid verification code'
+      });
+    }
+
+    // Enable 2FA
+    user.twoFactorAuth.enabled = true;
+    user.twoFactorAuth.enabledAt = new Date();
+    await user.save();
+
+    // Generate recovery codes
+    const recoveryCodes = [];
+    for (let i = 0; i < 10; i++) {
+      const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+      recoveryCodes.push(code);
+    }
+
+    // Store hashed recovery codes
+    const hashedCodes = recoveryCodes.map(code => {
+      return crypto.createHash('sha256').update(code).digest('hex');
+    });
+
+    // Store in separate collection or field
+    await UserRecoveryCodes.findOneAndUpdate(
+      { userId: user._id },
+      { hashes: hashedCodes },
+      { upsert: true }
+    );
+
+    // Log activity
+    await SystemLog.create({
+      action: '2fa_enable',
+      entity: 'User',
+      entityId: user._id,
+      performedBy: user._id,
+      performedByModel: 'User',
+      performedByEmail: user.email,
+      performedByName: `${user.firstName} ${user.lastName}`,
+      status: 'success',
+      metadata: {
+        enabledAt: user.twoFactorAuth.enabledAt
+      }
+    });
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('security_update', {
+        authenticator: { enabled: true }
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Authenticator enabled successfully',
+      data: {
+        recoveryCodes: recoveryCodes
+      }
+    });
+  } catch (err) {
+    console.error('Verify authenticator error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to verify authenticator'
+    });
+  }
+});
+
+// Disable authenticator - challenge
+app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    if (!user.twoFactorAuth?.enabled) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Two-factor authentication is not enabled'
+      });
+    }
+
+    // Generate OTP and send to email
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    // Store challenge
+    const challenge = await UserChallenge.create({
+      userId: user._id,
+      challengeId: `disable-${Date.now()}`,
+      type: 'disable_authenticator',
+      otpHash: crypto.createHash('sha256').update(otp).digest('hex'),
+      expiresAt: expiresAt
+    });
+
+    // Send OTP email
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'otp',
+      data: {
+        name: user.firstName,
+        otp: otp,
+        action: 'disable two-factor authentication'
+      }
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        challengeId: challenge.challengeId,
+        email: user.email,
+        expiresAt: expiresAt
+      }
+    });
+  } catch (err) {
+    console.error('Disable challenge error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to initiate disable process'
+    });
+  }
+});
+
+// Disable authenticator - verify
+app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (req, res) => {
+  try {
+    const { method, otp, code, challengeId } = req.body;
+
+    const user = await User.findById(req.user._id).select('+twoFactorAuth.secret');
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    if (!user.twoFactorAuth?.enabled) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Two-factor authentication is not enabled'
+      });
+    }
+
+    let verified = false;
+
+    if (method === 'otp') {
+      // Verify OTP
+      if (!otp || !challengeId) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'OTP and challenge ID are required'
+        });
+      }
+
+      const challenge = await UserChallenge.findOne({
+        challengeId: challengeId,
+        type: 'disable_authenticator',
+        used: false,
+        expiresAt: { $gt: new Date() }
+      });
+
+      if (!challenge) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid or expired challenge'
+        });
+      }
+
+      const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+      if (challenge.otpHash !== otpHash) {
+        challenge.attempts += 1;
+        await challenge.save();
+
+        if (challenge.attempts >= 5) {
+          challenge.used = true;
+          await challenge.save();
+          return res.status(400).json({
+            status: 'fail',
+            message: 'Too many attempts. Please request a new code.'
+          });
+        }
+
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid verification code'
+        });
+      }
+
+      challenge.used = true;
+      await challenge.save();
+      verified = true;
+
+    } else if (method === 'authenticator') {
+      // Verify authenticator code
+      if (!code) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Authenticator code is required'
+        });
+      }
+
+      const isValid = speakeasy.totp.verify({
+        secret: user.twoFactorAuth.secret,
+        encoding: 'base32',
+        token: code,
+        window: 2
+      });
+
+      if (!isValid) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid authenticator code'
+        });
+      }
+
+      verified = true;
+    } else {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid verification method'
+      });
+    }
+
+    if (!verified) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Verification failed'
+      });
+    }
+
+    // Disable 2FA
+    user.twoFactorAuth.enabled = false;
+    user.twoFactorAuth.secret = null;
+    user.twoFactorAuth.enabledAt = null;
+    await user.save();
+
+    // Delete recovery codes
+    await UserRecoveryCodes.findOneAndDelete({ userId: user._id });
+
+    // Log activity
+    await SystemLog.create({
+      action: '2fa_disable',
+      entity: 'User',
+      entityId: user._id,
+      performedBy: user._id,
+      performedByModel: 'User',
+      performedByEmail: user.email,
+      performedByName: `${user.firstName} ${user.lastName}`,
+      status: 'success',
+      metadata: {
+        method: method,
+        disabledAt: new Date()
+      }
+    });
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('security_update', {
+        authenticator: { enabled: false }
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Two-factor authentication disabled successfully'
+    });
+  } catch (err) {
+    console.error('Disable verify error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to disable two-factor authentication'
+    });
+  }
+});
+
+// =============================================
+// RECOVERY CODES ENDPOINTS
+// =============================================
+
+// Regenerate recovery codes - challenge
+app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    if (!user.twoFactorAuth?.enabled) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Two-factor authentication is not enabled'
+      });
+    }
+
+    // Generate OTP and send to email
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    // Store challenge
+    const challenge = await UserChallenge.create({
+      userId: user._id,
+      challengeId: `recovery-${Date.now()}`,
+      type: 'recovery_codes',
+      otpHash: crypto.createHash('sha256').update(otp).digest('hex'),
+      expiresAt: expiresAt
+    });
+
+    // Send OTP email
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'otp',
+      data: {
+        name: user.firstName,
+        otp: otp,
+        action: 'regenerate recovery codes'
+      }
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        challengeId: challenge.challengeId,
+        email: user.email,
+        expiresAt: expiresAt
+      }
+    });
+  } catch (err) {
+    console.error('Recovery challenge error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to initiate recovery code process'
+    });
+  }
+});
+
+// Regenerate recovery codes - verify
+app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res) => {
+  try {
+    const { method, otp, code, challengeId } = req.body;
+
+    const user = await User.findById(req.user._id).select('+twoFactorAuth.secret');
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    if (!user.twoFactorAuth?.enabled) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Two-factor authentication is not enabled'
+      });
+    }
+
+    let verified = false;
+
+    if (method === 'otp') {
+      // Verify OTP
+      if (!otp || !challengeId) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'OTP and challenge ID are required'
+        });
+      }
+
+      const challenge = await UserChallenge.findOne({
+        challengeId: challengeId,
+        type: 'recovery_codes',
+        used: false,
+        expiresAt: { $gt: new Date() }
+      });
+
+      if (!challenge) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid or expired challenge'
+        });
+      }
+
+      const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+      if (challenge.otpHash !== otpHash) {
+        challenge.attempts += 1;
+        await challenge.save();
+
+        if (challenge.attempts >= 5) {
+          challenge.used = true;
+          await challenge.save();
+          return res.status(400).json({
+            status: 'fail',
+            message: 'Too many attempts. Please request a new code.'
+          });
+        }
+
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid verification code'
+        });
+      }
+
+      challenge.used = true;
+      await challenge.save();
+      verified = true;
+
+    } else if (method === 'authenticator') {
+      // Verify authenticator code
+      if (!code) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Authenticator code is required'
+        });
+      }
+
+      const isValid = speakeasy.totp.verify({
+        secret: user.twoFactorAuth.secret,
+        encoding: 'base32',
+        token: code,
+        window: 2
+      });
+
+      if (!isValid) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid authenticator code'
+        });
+      }
+
+      verified = true;
+    } else {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid verification method'
+      });
+    }
+
+    if (!verified) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Verification failed'
+      });
+    }
+
+    // Generate new recovery codes
+    const recoveryCodes = [];
+    for (let i = 0; i < 10; i++) {
+      const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+      recoveryCodes.push(code);
+    }
+
+    // Store hashed recovery codes
+    const hashedCodes = recoveryCodes.map(code => {
+      return crypto.createHash('sha256').update(code).digest('hex');
+    });
+
+    await UserRecoveryCodes.findOneAndUpdate(
+      { userId: user._id },
+      { hashes: hashedCodes },
+      { upsert: true }
+    );
+
+    // Log activity
+    await SystemLog.create({
+      action: 'recovery_codes_regenerated',
+      entity: 'User',
+      entityId: user._id,
+      performedBy: user._id,
+      performedByModel: 'User',
+      performedByEmail: user.email,
+      performedByName: `${user.firstName} ${user.lastName}`,
+      status: 'success',
+      metadata: {
+        regeneratedAt: new Date()
+      }
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Recovery codes regenerated successfully',
+      data: {
+        recoveryCodes: recoveryCodes
+      }
+    });
+  } catch (err) {
+    console.error('Recovery verify error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to regenerate recovery codes'
+    });
+  }
+});
+
+// =============================================
+// KYC STATUS ENDPOINT - FIXED RESPONSE STRUCTURE
 // =============================================
 app.get('/api/users/kyc/status', protect, async (req, res) => {
-try {
-const userId = req.user._id;
+  try {
+    const userId = req.user._id;
+    const kycRecord = await KYC.findOne({ user: userId });
 
-    // Get KYC record from database
-    const kycRecord = await KYC.findOne({ user: userId }).lean();
+    let status = 'unverified';
+    let message = 'Your identity is not verified.';
+    let rejectionReason = null;
+    let submittedAt = null;
+    let reviewedAt = null;
+    let verifiedAt = null;
 
-    if (!kycRecord) {
-        return res.status(200).json({
-            status: 'success',
-            data: {
-                status: 'unverified',
-                message: 'Your identity is not verified. Please complete KYC verification.',
-                canSubmit: true,
-                canResubmit: false
-            }
-        });
+    if (kycRecord) {
+      const overallStatus = kycRecord.overallStatus || 'not-started';
+
+      if (overallStatus === 'pending') {
+        status = 'pending';
+        message = 'Your KYC application is currently under review.';
+        submittedAt = kycRecord.submittedAt || kycRecord.createdAt;
+      } else if (overallStatus === 'verified') {
+        status = 'verified';
+        message = 'Your identity has been verified successfully.';
+        submittedAt = kycRecord.submittedAt;
+        reviewedAt = kycRecord.reviewedAt;
+        verifiedAt = kycRecord.updatedAt;
+      } else if (overallStatus === 'rejected') {
+        status = 'rejected';
+        message = 'Your KYC application was rejected.';
+        rejectionReason = kycRecord.adminNotes || kycRecord.identity?.rejectionReason || 'No specific reason provided.';
+        submittedAt = kycRecord.submittedAt;
+        reviewedAt = kycRecord.reviewedAt;
+      } else if (overallStatus === 'in-progress') {
+        status = 'in-progress';
+        message = 'Your KYC verification is in progress. Please complete all required steps.';
+        submittedAt = kycRecord.createdAt;
+      } else {
+        status = 'unverified';
+        message = 'Please complete your KYC verification.';
+      }
+    } else {
+      // No KYC record found
+      status = 'unverified';
+      message = 'Please complete your KYC verification to unlock full platform access.';
     }
 
-    const statusMap = {
-        'verified': 'verified',
-        'pending': 'pending',
-        'rejected': 'rejected',
-        'in-progress': 'pending',
-        'not-started': 'unverified'
-    };
+    // Determine if user can submit or resubmit
+    const canSubmit = status === 'unverified' || status === 'in-progress';
+    const canResubmit = status === 'rejected';
 
-    const status = statusMap[kycRecord.overallStatus] || 'unverified';
-
-    // Build response
-    const response = {
-        status: 'success',
-        data: {
-            status: status,
-            message: getKYCStatusMessage(status, kycRecord),
-            submittedAt: kycRecord.submittedAt || null,
-            reviewedAt: kycRecord.reviewedAt || null,
-            verifiedAt: kycRecord.overallStatus === 'verified' ? kycRecord.updatedAt : null,
-            canSubmit: status === 'unverified',
-            canResubmit: status === 'rejected'
-        }
-    };
-
-    if (status === 'rejected') {
-        const rejectionReason = kycRecord.identity?.rejectionReason || 
-                               kycRecord.address?.rejectionReason || 
-                               kycRecord.facial?.rejectionReason ||
-                               kycRecord.adminNotes ||
-                               'Your KYC application was rejected. Please contact support for more information.';
-        response.data.rejectionReason = rejectionReason;
-    }
-
-    res.status(200).json(response);
-} catch (err) {
+    res.status(200).json({
+      status: 'success',
+      data: {
+        status: status,
+        message: message,
+        rejectionReason: rejectionReason,
+        submittedAt: submittedAt,
+        reviewedAt: reviewedAt,
+        verifiedAt: verifiedAt,
+        canSubmit: canSubmit,
+        canResubmit: canResubmit
+      }
+    });
+  } catch (err) {
     console.error('Get KYC status error:', err);
     res.status(500).json({
-        status: 'error',
-        message: 'Failed to fetch KYC status'
+      status: 'error',
+      message: 'Failed to fetch KYC status'
     });
-}
-
+  }
 });
-
-function getKYCStatusMessage(status, kycRecord) {
-const messages = {
-'verified': 'Your identity has been verified. You have full access to all platform features.',
-'pending': 'Your KYC application is currently under review. We will notify you once it is processed.',
-'rejected': 'Your KYC application was rejected. Please review the feedback and resubmit.',
-'unverified': 'Your identity is not verified. Please complete KYC verification to unlock full platform access.'
-};
-return messages[status] || 'Your verification status is unknown.';
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
