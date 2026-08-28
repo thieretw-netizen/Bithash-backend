@@ -3981,6 +3981,53 @@ FinancialStatementSchema.index({ statementType: 1, 'period.endDate': -1 });
 
 const FinancialStatement = mongoose.model('FinancialStatement', FinancialStatementSchema);
 
+
+
+
+// User Enrollment Schema (for TOTP setup)
+const UserEnrollmentSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    enrollmentId: { type: String, required: true, unique: true, index: true },
+    secret: { type: String, required: true },
+    type: { type: String, enum: ['totp_setup'], default: 'totp_setup' },
+    expiresAt: { type: Date, required: true, index: { expireAfterSeconds: 0 } },
+    status: { type: String, enum: ['pending', 'used'], default: 'pending' },
+    attempts: { type: Number, default: 0 },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const UserEnrollment = mongoose.model('UserEnrollment', UserEnrollmentSchema);
+
+// User Challenge Schema (for 2FA disable/recovery)
+const UserChallengeSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    challengeId: { type: String, required: true, unique: true, index: true },
+    type: { type: String, enum: ['disable_authenticator', 'recovery_codes'], required: true },
+    otpHash: { type: String, required: true },
+    expiresAt: { type: Date, required: true, index: { expireAfterSeconds: 0 } },
+    attempts: { type: Number, default: 0 },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const UserChallenge = mongoose.model('UserChallenge', UserChallengeSchema);
+
+// User Recovery Codes Schema
+const UserRecoveryCodesSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
+    hashes: [{ type: String }],
+    generatedAt: { type: Date, default: Date.now }
+});
+
+const UserRecoveryCodes = mongoose.model('UserRecoveryCodes', UserRecoveryCodesSchema);
+
+// User Preferences Schema (extend existing)
+// Add timezone field to UserPreference if not exists
+// Also add to User schema preferences.timezone
+
+
+
+
+
 const NotificationSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -44351,1400 +44398,1388 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
-// =============================================
-// 1. GET /api/users/security - Security Overview
-// =============================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Comprehensive worldwide language catalogue with proper flag mappings
+app.get('/api/settings/languages', async (req, res) => {
+    try {
+        // Comprehensive language catalogue covering the world's commonly recognized interface languages
+        const languages = [
+            // AFRICA
+            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', isActive: true, countryCode: 'za' },
+            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', isActive: true, countryCode: 'et' },
+            { code: 'ar', name: 'Arabic', nativeName: 'العربية', isActive: true, countryCode: 'sa' },
+            { code: 'ary', name: 'Moroccan Arabic', nativeName: 'الدارجة المغربية', isActive: true, countryCode: 'ma' },
+            { code: 'ar-eg', name: 'Egyptian Arabic', nativeName: 'مصرى', isActive: true, countryCode: 'eg' },
+            { code: 'ar-sa', name: 'Saudi Arabic', nativeName: 'العربية السعودية', isActive: true, countryCode: 'sa' },
+            { code: 'ha', name: 'Hausa', nativeName: 'Hausa', isActive: true, countryCode: 'ng' },
+            { code: 'ig', name: 'Igbo', nativeName: 'Igbo', isActive: true, countryCode: 'ng' },
+            { code: 'rw', name: 'Kinyarwanda', nativeName: 'Ikinyarwanda', isActive: true, countryCode: 'rw' },
+            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', isActive: true, countryCode: 'tz' },
+            { code: 'yo', name: 'Yoruba', nativeName: 'Yorùbá', isActive: true, countryCode: 'ng' },
+            { code: 'zu', name: 'Zulu', nativeName: 'IsiZulu', isActive: true, countryCode: 'za' },
+            { code: 'st', name: 'Southern Sotho', nativeName: 'Sesotho', isActive: true, countryCode: 'ls' },
+            { code: 'tn', name: 'Tswana', nativeName: 'Setswana', isActive: true, countryCode: 'bw' },
+            { code: 'ss', name: 'Swati', nativeName: 'SiSwati', isActive: true, countryCode: 'sz' },
+            { code: 'ts', name: 'Tsonga', nativeName: 'Xitsonga', isActive: true, countryCode: 'za' },
+            { code: 've', name: 'Venda', nativeName: 'Tshivenḓa', isActive: true, countryCode: 'za' },
+            { code: 'nr', name: 'Southern Ndebele', nativeName: 'isiNdebele', isActive: true, countryCode: 'za' },
+            { code: 'xh', name: 'Xhosa', nativeName: 'isiXhosa', isActive: true, countryCode: 'za' },
+
+            // ASIA
+            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', isActive: true, countryCode: 'bd' },
+            { code: 'my', name: 'Burmese', nativeName: 'မြန်မာစာ', isActive: true, countryCode: 'mm' },
+            { code: 'zh', name: 'Chinese (Simplified)', nativeName: '简体中文', isActive: true, countryCode: 'cn' },
+            { code: 'zh-tw', name: 'Chinese (Traditional)', nativeName: '繁體中文', isActive: true, countryCode: 'tw' },
+            { code: 'zh-hk', name: 'Chinese (Hong Kong)', nativeName: '繁體中文 (香港)', isActive: true, countryCode: 'hk' },
+            { code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી', isActive: true, countryCode: 'in' },
+            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', isActive: true, countryCode: 'in' },
+            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', isActive: true, countryCode: 'id' },
+            { code: 'ja', name: 'Japanese', nativeName: '日本語', isActive: true, countryCode: 'jp' },
+            { code: 'jv', name: 'Javanese', nativeName: 'Basa Jawa', isActive: true, countryCode: 'id' },
+            { code: 'kn', name: 'Kannada', nativeName: 'ಕನ್ನಡ', isActive: true, countryCode: 'in' },
+            { code: 'km', name: 'Khmer', nativeName: 'ភាសាខ្មែរ', isActive: true, countryCode: 'kh' },
+            { code: 'ko', name: 'Korean', nativeName: '한국어', isActive: true, countryCode: 'kr' },
+            { code: 'lo', name: 'Lao', nativeName: 'ພາສາລາວ', isActive: true, countryCode: 'la' },
+            { code: 'ml', name: 'Malayalam', nativeName: 'മലയാളം', isActive: true, countryCode: 'in' },
+            { code: 'mr', name: 'Marathi', nativeName: 'मराठी', isActive: true, countryCode: 'in' },
+            { code: 'mn', name: 'Mongolian', nativeName: 'Монгол хэл', isActive: true, countryCode: 'mn' },
+            { code: 'ne', name: 'Nepali', nativeName: 'नेपाली', isActive: true, countryCode: 'np' },
+            { code: 'or', name: 'Odia', nativeName: 'ଓଡ଼ିଆ', isActive: true, countryCode: 'in' },
+            { code: 'pa', name: 'Punjabi', nativeName: 'ਪੰਜਾਬੀ', isActive: true, countryCode: 'in' },
+            { code: 'ps', name: 'Pashto', nativeName: 'پښتو', isActive: true, countryCode: 'af' },
+            { code: 'fa', name: 'Persian', nativeName: 'فارسی', isActive: true, countryCode: 'ir' },
+            { code: 'sd', name: 'Sindhi', nativeName: 'سنڌي', isActive: true, countryCode: 'pk' },
+            { code: 'si', name: 'Sinhala', nativeName: 'සිංහල', isActive: true, countryCode: 'lk' },
+            { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்', isActive: true, countryCode: 'in' },
+            { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', isActive: true, countryCode: 'in' },
+            { code: 'th', name: 'Thai', nativeName: 'ภาษาไทย', isActive: true, countryCode: 'th' },
+            { code: 'ur', name: 'Urdu', nativeName: 'اردو', isActive: true, countryCode: 'pk' },
+            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', isActive: true, countryCode: 'vn' },
+
+            // EUROPE
+            { code: 'sq', name: 'Albanian', nativeName: 'Shqip', isActive: true, countryCode: 'al' },
+            { code: 'hy', name: 'Armenian', nativeName: 'Հայերեն', isActive: true, countryCode: 'am' },
+            { code: 'az', name: 'Azerbaijani', nativeName: 'Azərbaycanca', isActive: true, countryCode: 'az' },
+            { code: 'eu', name: 'Basque', nativeName: 'Euskara', isActive: true, countryCode: 'es' },
+            { code: 'be', name: 'Belarusian', nativeName: 'Беларуская', isActive: true, countryCode: 'by' },
+            { code: 'bs', name: 'Bosnian', nativeName: 'Bosanski', isActive: true, countryCode: 'ba' },
+            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', isActive: true, countryCode: 'bg' },
+            { code: 'ca', name: 'Catalan', nativeName: 'Català', isActive: true, countryCode: 'es' },
+            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', isActive: true, countryCode: 'hr' },
+            { code: 'cs', name: 'Czech', nativeName: 'Čeština', isActive: true, countryCode: 'cz' },
+            { code: 'da', name: 'Danish', nativeName: 'Dansk', isActive: true, countryCode: 'dk' },
+            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', isActive: true, countryCode: 'nl' },
+            { code: 'en', name: 'English', nativeName: 'English', isActive: true, countryCode: 'gb' },
+            { code: 'en-us', name: 'English (US)', nativeName: 'English (US)', isActive: true, countryCode: 'us' },
+            { code: 'en-ca', name: 'English (Canada)', nativeName: 'English (Canada)', isActive: true, countryCode: 'ca' },
+            { code: 'en-au', name: 'English (Australia)', nativeName: 'English (Australia)', isActive: true, countryCode: 'au' },
+            { code: 'en-nz', name: 'English (New Zealand)', nativeName: 'English (New Zealand)', isActive: true, countryCode: 'nz' },
+            { code: 'et', name: 'Estonian', nativeName: 'Eesti', isActive: true, countryCode: 'ee' },
+            { code: 'fo', name: 'Faroese', nativeName: 'Føroyskt', isActive: true, countryCode: 'fo' },
+            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', isActive: true, countryCode: 'fi' },
+            { code: 'fr', name: 'French', nativeName: 'Français', isActive: true, countryCode: 'fr' },
+            { code: 'fr-ca', name: 'French (Canada)', nativeName: 'Français (Canada)', isActive: true, countryCode: 'ca' },
+            { code: 'gl', name: 'Galician', nativeName: 'Galego', isActive: true, countryCode: 'es' },
+            { code: 'ka', name: 'Georgian', nativeName: 'ქართული', isActive: true, countryCode: 'ge' },
+            { code: 'de', name: 'German', nativeName: 'Deutsch', isActive: true, countryCode: 'de' },
+            { code: 'de-at', name: 'German (Austria)', nativeName: 'Deutsch (Österreich)', isActive: true, countryCode: 'at' },
+            { code: 'de-ch', name: 'German (Switzerland)', nativeName: 'Deutsch (Schweiz)', isActive: true, countryCode: 'ch' },
+            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', isActive: true, countryCode: 'gr' },
+            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', isActive: true, countryCode: 'hu' },
+            { code: 'is', name: 'Icelandic', nativeName: 'Íslenska', isActive: true, countryCode: 'is' },
+            { code: 'ga', name: 'Irish', nativeName: 'Gaeilge', isActive: true, countryCode: 'ie' },
+            { code: 'it', name: 'Italian', nativeName: 'Italiano', isActive: true, countryCode: 'it' },
+            { code: 'it-ch', name: 'Italian (Switzerland)', nativeName: 'Italiano (Svizzera)', isActive: true, countryCode: 'ch' },
+            { code: 'lv', name: 'Latvian', nativeName: 'Latviešu', isActive: true, countryCode: 'lv' },
+            { code: 'lt', name: 'Lithuanian', nativeName: 'Lietuvių', isActive: true, countryCode: 'lt' },
+            { code: 'lb', name: 'Luxembourgish', nativeName: 'Lëtzebuergesch', isActive: true, countryCode: 'lu' },
+            { code: 'mk', name: 'Macedonian', nativeName: 'Македонски', isActive: true, countryCode: 'mk' },
+            { code: 'mt', name: 'Maltese', nativeName: 'Malti', isActive: true, countryCode: 'mt' },
+            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', isActive: true, countryCode: 'no' },
+            { code: 'nn', name: 'Norwegian Nynorsk', nativeName: 'Nynorsk', isActive: true, countryCode: 'no' },
+            { code: 'pl', name: 'Polish', nativeName: 'Polski', isActive: true, countryCode: 'pl' },
+            { code: 'pt', name: 'Portuguese', nativeName: 'Português', isActive: true, countryCode: 'pt' },
+            { code: 'pt-br', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)', isActive: true, countryCode: 'br' },
+            { code: 'ro', name: 'Romanian', nativeName: 'Română', isActive: true, countryCode: 'ro' },
+            { code: 'ru', name: 'Russian', nativeName: 'Русский', isActive: true, countryCode: 'ru' },
+            { code: 'sr', name: 'Serbian', nativeName: 'Српски', isActive: true, countryCode: 'rs' },
+            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', isActive: true, countryCode: 'sk' },
+            { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina', isActive: true, countryCode: 'si' },
+            { code: 'es', name: 'Spanish', nativeName: 'Español', isActive: true, countryCode: 'es' },
+            { code: 'es-mx', name: 'Spanish (Mexico)', nativeName: 'Español (México)', isActive: true, countryCode: 'mx' },
+            { code: 'es-ar', name: 'Spanish (Argentina)', nativeName: 'Español (Argentina)', isActive: true, countryCode: 'ar' },
+            { code: 'es-co', name: 'Spanish (Colombia)', nativeName: 'Español (Colombia)', isActive: true, countryCode: 'co' },
+            { code: 'es-cl', name: 'Spanish (Chile)', nativeName: 'Español (Chile)', isActive: true, countryCode: 'cl' },
+            { code: 'es-pe', name: 'Spanish (Peru)', nativeName: 'Español (Perú)', isActive: true, countryCode: 'pe' },
+            { code: 'es-ve', name: 'Spanish (Venezuela)', nativeName: 'Español (Venezuela)', isActive: true, countryCode: 've' },
+            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', isActive: true, countryCode: 'se' },
+            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', isActive: true, countryCode: 'tr' },
+            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', isActive: true, countryCode: 'ua' },
+            { code: 'cy', name: 'Welsh', nativeName: 'Cymraeg', isActive: true, countryCode: 'gb' },
+
+            // MIDDLE EAST
+            { code: 'he', name: 'Hebrew', nativeName: 'עברית', isActive: true, countryCode: 'il' },
+            { code: 'ku', name: 'Kurdish', nativeName: 'Kurdî', isActive: true, countryCode: 'iq' },
+            { code: 'ckb', name: 'Kurdish (Sorani)', nativeName: 'سۆرانی', isActive: true, countryCode: 'iq' },
+
+            // NORTH AMERICA
+            { code: 'fr-ca', name: 'French (Canada)', nativeName: 'Français (Canada)', isActive: true, countryCode: 'ca' },
+            { code: 'en-ca', name: 'English (Canada)', nativeName: 'English (Canada)', isActive: true, countryCode: 'ca' },
+            { code: 'es-us', name: 'Spanish (US)', nativeName: 'Español (EE.UU.)', isActive: true, countryCode: 'us' },
+
+            // OCEANIA
+            { code: 'en-au', name: 'English (Australia)', nativeName: 'English (Australia)', isActive: true, countryCode: 'au' },
+            { code: 'en-nz', name: 'English (New Zealand)', nativeName: 'English (New Zealand)', isActive: true, countryCode: 'nz' },
+            { code: 'mi', name: 'Māori', nativeName: 'Te Reo Māori', isActive: true, countryCode: 'nz' },
+            { code: 'sm', name: 'Samoan', nativeName: 'Gagana Sāmoa', isActive: true, countryCode: 'ws' },
+            { code: 'to', name: 'Tongan', nativeName: 'Faka-Tonga', isActive: true, countryCode: 'to' },
+            { code: 'fj', name: 'Fijian', nativeName: 'Na Vosa Vakaviti', isActive: true, countryCode: 'fj' },
+
+            // SOUTH AMERICA / CENTRAL AMERICA
+            { code: 'es-ar', name: 'Spanish (Argentina)', nativeName: 'Español (Argentina)', isActive: true, countryCode: 'ar' },
+            { code: 'es-bo', name: 'Spanish (Bolivia)', nativeName: 'Español (Bolivia)', isActive: true, countryCode: 'bo' },
+            { code: 'es-cl', name: 'Spanish (Chile)', nativeName: 'Español (Chile)', isActive: true, countryCode: 'cl' },
+            { code: 'es-co', name: 'Spanish (Colombia)', nativeName: 'Español (Colombia)', isActive: true, countryCode: 'co' },
+            { code: 'es-cr', name: 'Spanish (Costa Rica)', nativeName: 'Español (Costa Rica)', isActive: true, countryCode: 'cr' },
+            { code: 'es-cu', name: 'Spanish (Cuba)', nativeName: 'Español (Cuba)', isActive: true, countryCode: 'cu' },
+            { code: 'es-do', name: 'Spanish (Dominican Republic)', nativeName: 'Español (República Dominicana)', isActive: true, countryCode: 'do' },
+            { code: 'es-ec', name: 'Spanish (Ecuador)', nativeName: 'Español (Ecuador)', isActive: true, countryCode: 'ec' },
+            { code: 'es-gt', name: 'Spanish (Guatemala)', nativeName: 'Español (Guatemala)', isActive: true, countryCode: 'gt' },
+            { code: 'es-hn', name: 'Spanish (Honduras)', nativeName: 'Español (Honduras)', isActive: true, countryCode: 'hn' },
+            { code: 'es-ni', name: 'Spanish (Nicaragua)', nativeName: 'Español (Nicaragua)', isActive: true, countryCode: 'ni' },
+            { code: 'es-pa', name: 'Spanish (Panama)', nativeName: 'Español (Panamá)', isActive: true, countryCode: 'pa' },
+            { code: 'es-py', name: 'Spanish (Paraguay)', nativeName: 'Español (Paraguay)', isActive: true, countryCode: 'py' },
+            { code: 'es-pe', name: 'Spanish (Peru)', nativeName: 'Español (Perú)', isActive: true, countryCode: 'pe' },
+            { code: 'es-pr', name: 'Spanish (Puerto Rico)', nativeName: 'Español (Puerto Rico)', isActive: true, countryCode: 'pr' },
+            { code: 'es-uy', name: 'Spanish (Uruguay)', nativeName: 'Español (Uruguay)', isActive: true, countryCode: 'uy' },
+            { code: 'es-ve', name: 'Spanish (Venezuela)', nativeName: 'Español (Venezuela)', isActive: true, countryCode: 've' },
+            { code: 'qu', name: 'Quechua', nativeName: 'Runasimi', isActive: true, countryCode: 'pe' },
+            { code: 'gn', name: 'Guarani', nativeName: 'Avañe\'ẽ', isActive: true, countryCode: 'py' },
+            { code: 'ay', name: 'Aymara', nativeName: 'Aymar aru', isActive: true, countryCode: 'bo' },
+            { code: 'pt-br', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)', isActive: true, countryCode: 'br' },
+            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', isActive: true, countryCode: 'nl' },
+
+            // ADDITIONAL EUROPEAN
+            { code: 'fy', name: 'Frisian', nativeName: 'Frysk', isActive: true, countryCode: 'nl' },
+            { code: 'gd', name: 'Scottish Gaelic', nativeName: 'Gàidhlig', isActive: true, countryCode: 'gb' },
+            { code: 'gv', name: 'Manx', nativeName: 'Gaelg', isActive: true, countryCode: 'im' },
+            { code: 'hsb', name: 'Upper Sorbian', nativeName: 'Hornjoserbšćina', isActive: true, countryCode: 'de' },
+            { code: 'dsb', name: 'Lower Sorbian', nativeName: 'Dolnoserbšćina', isActive: true, countryCode: 'de' },
+            { code: 'se', name: 'Northern Sami', nativeName: 'Davvisámegiella', isActive: true, countryCode: 'no' },
+            { code: 'sma', name: 'Southern Sami', nativeName: 'Åarjelsaemien', isActive: true, countryCode: 'se' },
+            { code: 'smj', name: 'Lule Sami', nativeName: 'Julevusámegiella', isActive: true, countryCode: 'se' },
+            { code: 'smn', name: 'Inari Sami', nativeName: 'Anarâškielâ', isActive: true, countryCode: 'fi' },
+            { code: 'sms', name: 'Skolt Sami', nativeName: 'Sääʹmǩiõll', isActive: true, countryCode: 'fi' },
+
+            // ADDITIONAL ASIAN
+            { code: 'as', name: 'Assamese', nativeName: 'অসমীয়া', isActive: true, countryCode: 'in' },
+            { code: 'bho', name: 'Bhojpuri', nativeName: 'भोजपुरी', isActive: true, countryCode: 'in' },
+            { code: 'doi', name: 'Dogri', nativeName: 'डोगरी', isActive: true, countryCode: 'in' },
+            { code: 'gom', name: 'Konkani', nativeName: 'कोंकणी', isActive: true, countryCode: 'in' },
+            { code: 'kok', name: 'Konkani', nativeName: 'कोंकणी', isActive: true, countryCode: 'in' },
+            { code: 'ks', name: 'Kashmiri', nativeName: 'कॉशुर', isActive: true, countryCode: 'in' },
+            { code: 'lus', name: 'Mizo', nativeName: 'Mizo ṭawng', isActive: true, countryCode: 'in' },
+            { code: 'mai', name: 'Maithili', nativeName: 'मैथिली', isActive: true, countryCode: 'in' },
+            { code: 'sa', name: 'Sanskrit', nativeName: 'संस्कृतम्', isActive: true, countryCode: 'in' },
+            { code: 'sat', name: 'Santali', nativeName: 'ᱥᱟᱱᱛᱟᱲᱤ', isActive: true, countryCode: 'in' },
+            { code: 'tcy', name: 'Tulu', nativeName: 'ತುಳು', isActive: true, countryCode: 'in' },
+            { code: 'ur', name: 'Urdu', nativeName: 'اردو', isActive: true, countryCode: 'pk' },
+            { code: 'ug', name: 'Uyghur', nativeName: 'ئۇيغۇرچە', isActive: true, countryCode: 'cn' },
+            { code: 'bo', name: 'Tibetan', nativeName: 'བོད་སྐད་', isActive: true, countryCode: 'cn' },
+            { code: 'dz', name: 'Dzongkha', nativeName: 'རྫོང་ཁ', isActive: true, countryCode: 'bt' },
+            { code: 'kk', name: 'Kazakh', nativeName: 'Қазақша', isActive: true, countryCode: 'kz' },
+            { code: 'ky', name: 'Kyrgyz', nativeName: 'Кыргызча', isActive: true, countryCode: 'kg' },
+            { code: 'tg', name: 'Tajik', nativeName: 'Тоҷикӣ', isActive: true, countryCode: 'tj' },
+            { code: 'tk', name: 'Turkmen', nativeName: 'Türkmençe', isActive: true, countryCode: 'tm' },
+            { code: 'uz', name: 'Uzbek', nativeName: 'Oʻzbekcha', isActive: true, countryCode: 'uz' },
+            { code: 'tt', name: 'Tatar', nativeName: 'Татарча', isActive: true, countryCode: 'ru' },
+            { code: 'ba', name: 'Bashkir', nativeName: 'Башҡортса', isActive: true, countryCode: 'ru' },
+            { code: 'cv', name: 'Chuvash', nativeName: 'Чӑвашла', isActive: true, countryCode: 'ru' },
+            { code: 'sah', name: 'Yakut', nativeName: 'Саха тыла', isActive: true, countryCode: 'ru' }
+        ];
+
+        res.json({ languages });
+    } catch (err) {
+        console.error('Error fetching languages:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to load languages' });
+    }
+});
+
+app.get('/api/settings/timezones', async (req, res) => {
+    try {
+        // Comprehensive IANA timezone catalogue with real offsets
+        const timezones = [
+            // UTC
+            { id: 'UTC', label: 'UTC', utcOffset: '+00:00' },
+            
+            // Africa
+            { id: 'Africa/Abidjan', label: 'Abidjan', utcOffset: getCurrentOffset('Africa/Abidjan') },
+            { id: 'Africa/Accra', label: 'Accra', utcOffset: getCurrentOffset('Africa/Accra') },
+            { id: 'Africa/Addis_Ababa', label: 'Addis Ababa', utcOffset: getCurrentOffset('Africa/Addis_Ababa') },
+            { id: 'Africa/Algiers', label: 'Algiers', utcOffset: getCurrentOffset('Africa/Algiers') },
+            { id: 'Africa/Asmara', label: 'Asmara', utcOffset: getCurrentOffset('Africa/Asmara') },
+            { id: 'Africa/Bamako', label: 'Bamako', utcOffset: getCurrentOffset('Africa/Bamako') },
+            { id: 'Africa/Bangui', label: 'Bangui', utcOffset: getCurrentOffset('Africa/Bangui') },
+            { id: 'Africa/Banjul', label: 'Banjul', utcOffset: getCurrentOffset('Africa/Banjul') },
+            { id: 'Africa/Bissau', label: 'Bissau', utcOffset: getCurrentOffset('Africa/Bissau') },
+            { id: 'Africa/Blantyre', label: 'Blantyre', utcOffset: getCurrentOffset('Africa/Blantyre') },
+            { id: 'Africa/Brazzaville', label: 'Brazzaville', utcOffset: getCurrentOffset('Africa/Brazzaville') },
+            { id: 'Africa/Bujumbura', label: 'Bujumbura', utcOffset: getCurrentOffset('Africa/Bujumbura') },
+            { id: 'Africa/Cairo', label: 'Cairo', utcOffset: getCurrentOffset('Africa/Cairo') },
+            { id: 'Africa/Casablanca', label: 'Casablanca', utcOffset: getCurrentOffset('Africa/Casablanca') },
+            { id: 'Africa/Ceuta', label: 'Ceuta', utcOffset: getCurrentOffset('Africa/Ceuta') },
+            { id: 'Africa/Conakry', label: 'Conakry', utcOffset: getCurrentOffset('Africa/Conakry') },
+            { id: 'Africa/Dakar', label: 'Dakar', utcOffset: getCurrentOffset('Africa/Dakar') },
+            { id: 'Africa/Dar_es_Salaam', label: 'Dar es Salaam', utcOffset: getCurrentOffset('Africa/Dar_es_Salaam') },
+            { id: 'Africa/Djibouti', label: 'Djibouti', utcOffset: getCurrentOffset('Africa/Djibouti') },
+            { id: 'Africa/Douala', label: 'Douala', utcOffset: getCurrentOffset('Africa/Douala') },
+            { id: 'Africa/El_Aaiun', label: 'El Aaiun', utcOffset: getCurrentOffset('Africa/El_Aaiun') },
+            { id: 'Africa/Freetown', label: 'Freetown', utcOffset: getCurrentOffset('Africa/Freetown') },
+            { id: 'Africa/Gaborone', label: 'Gaborone', utcOffset: getCurrentOffset('Africa/Gaborone') },
+            { id: 'Africa/Harare', label: 'Harare', utcOffset: getCurrentOffset('Africa/Harare') },
+            { id: 'Africa/Johannesburg', label: 'Johannesburg', utcOffset: getCurrentOffset('Africa/Johannesburg') },
+            { id: 'Africa/Juba', label: 'Juba', utcOffset: getCurrentOffset('Africa/Juba') },
+            { id: 'Africa/Kampala', label: 'Kampala', utcOffset: getCurrentOffset('Africa/Kampala') },
+            { id: 'Africa/Khartoum', label: 'Khartoum', utcOffset: getCurrentOffset('Africa/Khartoum') },
+            { id: 'Africa/Kigali', label: 'Kigali', utcOffset: getCurrentOffset('Africa/Kigali') },
+            { id: 'Africa/Kinshasa', label: 'Kinshasa', utcOffset: getCurrentOffset('Africa/Kinshasa') },
+            { id: 'Africa/Lagos', label: 'Lagos', utcOffset: getCurrentOffset('Africa/Lagos') },
+            { id: 'Africa/Libreville', label: 'Libreville', utcOffset: getCurrentOffset('Africa/Libreville') },
+            { id: 'Africa/Lome', label: 'Lome', utcOffset: getCurrentOffset('Africa/Lome') },
+            { id: 'Africa/Luanda', label: 'Luanda', utcOffset: getCurrentOffset('Africa/Luanda') },
+            { id: 'Africa/Lubumbashi', label: 'Lubumbashi', utcOffset: getCurrentOffset('Africa/Lubumbashi') },
+            { id: 'Africa/Lusaka', label: 'Lusaka', utcOffset: getCurrentOffset('Africa/Lusaka') },
+            { id: 'Africa/Malabo', label: 'Malabo', utcOffset: getCurrentOffset('Africa/Malabo') },
+            { id: 'Africa/Maputo', label: 'Maputo', utcOffset: getCurrentOffset('Africa/Maputo') },
+            { id: 'Africa/Maseru', label: 'Maseru', utcOffset: getCurrentOffset('Africa/Maseru') },
+            { id: 'Africa/Mbabane', label: 'Mbabane', utcOffset: getCurrentOffset('Africa/Mbabane') },
+            { id: 'Africa/Mogadishu', label: 'Mogadishu', utcOffset: getCurrentOffset('Africa/Mogadishu') },
+            { id: 'Africa/Monrovia', label: 'Monrovia', utcOffset: getCurrentOffset('Africa/Monrovia') },
+            { id: 'Africa/Nairobi', label: 'Nairobi', utcOffset: getCurrentOffset('Africa/Nairobi') },
+            { id: 'Africa/Ndjamena', label: 'Ndjamena', utcOffset: getCurrentOffset('Africa/Ndjamena') },
+            { id: 'Africa/Niamey', label: 'Niamey', utcOffset: getCurrentOffset('Africa/Niamey') },
+            { id: 'Africa/Nouakchott', label: 'Nouakchott', utcOffset: getCurrentOffset('Africa/Nouakchott') },
+            { id: 'Africa/Ouagadougou', label: 'Ouagadougou', utcOffset: getCurrentOffset('Africa/Ouagadougou') },
+            { id: 'Africa/Porto-Novo', label: 'Porto-Novo', utcOffset: getCurrentOffset('Africa/Porto-Novo') },
+            { id: 'Africa/Sao_Tome', label: 'Sao Tome', utcOffset: getCurrentOffset('Africa/Sao_Tome') },
+            { id: 'Africa/Tripoli', label: 'Tripoli', utcOffset: getCurrentOffset('Africa/Tripoli') },
+            { id: 'Africa/Tunis', label: 'Tunis', utcOffset: getCurrentOffset('Africa/Tunis') },
+            { id: 'Africa/Windhoek', label: 'Windhoek', utcOffset: getCurrentOffset('Africa/Windhoek') },
+
+            // Americas
+            { id: 'America/Adak', label: 'Adak', utcOffset: getCurrentOffset('America/Adak') },
+            { id: 'America/Anchorage', label: 'Anchorage', utcOffset: getCurrentOffset('America/Anchorage') },
+            { id: 'America/Anguilla', label: 'Anguilla', utcOffset: getCurrentOffset('America/Anguilla') },
+            { id: 'America/Antigua', label: 'Antigua', utcOffset: getCurrentOffset('America/Antigua') },
+            { id: 'America/Araguaina', label: 'Araguaina', utcOffset: getCurrentOffset('America/Araguaina') },
+            { id: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires', utcOffset: getCurrentOffset('America/Argentina/Buenos_Aires') },
+            { id: 'America/Argentina/Catamarca', label: 'Catamarca', utcOffset: getCurrentOffset('America/Argentina/Catamarca') },
+            { id: 'America/Argentina/Cordoba', label: 'Cordoba', utcOffset: getCurrentOffset('America/Argentina/Cordoba') },
+            { id: 'America/Argentina/Jujuy', label: 'Jujuy', utcOffset: getCurrentOffset('America/Argentina/Jujuy') },
+            { id: 'America/Argentina/La_Rioja', label: 'La Rioja', utcOffset: getCurrentOffset('America/Argentina/La_Rioja') },
+            { id: 'America/Argentina/Mendoza', label: 'Mendoza', utcOffset: getCurrentOffset('America/Argentina/Mendoza') },
+            { id: 'America/Argentina/Rio_Gallegos', label: 'Rio Gallegos', utcOffset: getCurrentOffset('America/Argentina/Rio_Gallegos') },
+            { id: 'America/Argentina/Salta', label: 'Salta', utcOffset: getCurrentOffset('America/Argentina/Salta') },
+            { id: 'America/Argentina/San_Juan', label: 'San Juan', utcOffset: getCurrentOffset('America/Argentina/San_Juan') },
+            { id: 'America/Argentina/San_Luis', label: 'San Luis', utcOffset: getCurrentOffset('America/Argentina/San_Luis') },
+            { id: 'America/Argentina/Tucuman', label: 'Tucuman', utcOffset: getCurrentOffset('America/Argentina/Tucuman') },
+            { id: 'America/Argentina/Ushuaia', label: 'Ushuaia', utcOffset: getCurrentOffset('America/Argentina/Ushuaia') },
+            { id: 'America/Aruba', label: 'Aruba', utcOffset: getCurrentOffset('America/Aruba') },
+            { id: 'America/Asuncion', label: 'Asuncion', utcOffset: getCurrentOffset('America/Asuncion') },
+            { id: 'America/Atikokan', label: 'Atikokan', utcOffset: getCurrentOffset('America/Atikokan') },
+            { id: 'America/Bahia', label: 'Bahia', utcOffset: getCurrentOffset('America/Bahia') },
+            { id: 'America/Bahia_Banderas', label: 'Bahia Banderas', utcOffset: getCurrentOffset('America/Bahia_Banderas') },
+            { id: 'America/Barbados', label: 'Barbados', utcOffset: getCurrentOffset('America/Barbados') },
+            { id: 'America/Belem', label: 'Belem', utcOffset: getCurrentOffset('America/Belem') },
+            { id: 'America/Belize', label: 'Belize', utcOffset: getCurrentOffset('America/Belize') },
+            { id: 'America/Blanc-Sablon', label: 'Blanc-Sablon', utcOffset: getCurrentOffset('America/Blanc-Sablon') },
+            { id: 'America/Boa_Vista', label: 'Boa Vista', utcOffset: getCurrentOffset('America/Boa_Vista') },
+            { id: 'America/Bogota', label: 'Bogota', utcOffset: getCurrentOffset('America/Bogota') },
+            { id: 'America/Boise', label: 'Boise', utcOffset: getCurrentOffset('America/Boise') },
+            { id: 'America/Cambridge_Bay', label: 'Cambridge Bay', utcOffset: getCurrentOffset('America/Cambridge_Bay') },
+            { id: 'America/Campo_Grande', label: 'Campo Grande', utcOffset: getCurrentOffset('America/Campo_Grande') },
+            { id: 'America/Cancun', label: 'Cancun', utcOffset: getCurrentOffset('America/Cancun') },
+            { id: 'America/Caracas', label: 'Caracas', utcOffset: getCurrentOffset('America/Caracas') },
+            { id: 'America/Cayenne', label: 'Cayenne', utcOffset: getCurrentOffset('America/Cayenne') },
+            { id: 'America/Cayman', label: 'Cayman', utcOffset: getCurrentOffset('America/Cayman') },
+            { id: 'America/Chicago', label: 'Chicago', utcOffset: getCurrentOffset('America/Chicago') },
+            { id: 'America/Chihuahua', label: 'Chihuahua', utcOffset: getCurrentOffset('America/Chihuahua') },
+            { id: 'America/Costa_Rica', label: 'Costa Rica', utcOffset: getCurrentOffset('America/Costa_Rica') },
+            { id: 'America/Cuiaba', label: 'Cuiaba', utcOffset: getCurrentOffset('America/Cuiaba') },
+            { id: 'America/Curacao', label: 'Curacao', utcOffset: getCurrentOffset('America/Curacao') },
+            { id: 'America/Danmarkshavn', label: 'Danmarkshavn', utcOffset: getCurrentOffset('America/Danmarkshavn') },
+            { id: 'America/Dawson', label: 'Dawson', utcOffset: getCurrentOffset('America/Dawson') },
+            { id: 'America/Dawson_Creek', label: 'Dawson Creek', utcOffset: getCurrentOffset('America/Dawson_Creek') },
+            { id: 'America/Denver', label: 'Denver', utcOffset: getCurrentOffset('America/Denver') },
+            { id: 'America/Detroit', label: 'Detroit', utcOffset: getCurrentOffset('America/Detroit') },
+            { id: 'America/Dominica', label: 'Dominica', utcOffset: getCurrentOffset('America/Dominica') },
+            { id: 'America/Edmonton', label: 'Edmonton', utcOffset: getCurrentOffset('America/Edmonton') },
+            { id: 'America/Eirunepe', label: 'Eirunepe', utcOffset: getCurrentOffset('America/Eirunepe') },
+            { id: 'America/El_Salvador', label: 'El Salvador', utcOffset: getCurrentOffset('America/El_Salvador') },
+            { id: 'America/Fort_Nelson', label: 'Fort Nelson', utcOffset: getCurrentOffset('America/Fort_Nelson') },
+            { id: 'America/Fortaleza', label: 'Fortaleza', utcOffset: getCurrentOffset('America/Fortaleza') },
+            { id: 'America/Glace_Bay', label: 'Glace Bay', utcOffset: getCurrentOffset('America/Glace_Bay') },
+            { id: 'America/Goose_Bay', label: 'Goose Bay', utcOffset: getCurrentOffset('America/Goose_Bay') },
+            { id: 'America/Grand_Turk', label: 'Grand Turk', utcOffset: getCurrentOffset('America/Grand_Turk') },
+            { id: 'America/Grenada', label: 'Grenada', utcOffset: getCurrentOffset('America/Grenada') },
+            { id: 'America/Guadeloupe', label: 'Guadeloupe', utcOffset: getCurrentOffset('America/Guadeloupe') },
+            { id: 'America/Guatemala', label: 'Guatemala', utcOffset: getCurrentOffset('America/Guatemala') },
+            { id: 'America/Guayaquil', label: 'Guayaquil', utcOffset: getCurrentOffset('America/Guayaquil') },
+            { id: 'America/Guyana', label: 'Guyana', utcOffset: getCurrentOffset('America/Guyana') },
+            { id: 'America/Halifax', label: 'Halifax', utcOffset: getCurrentOffset('America/Halifax') },
+            { id: 'America/Havana', label: 'Havana', utcOffset: getCurrentOffset('America/Havana') },
+            { id: 'America/Hermosillo', label: 'Hermosillo', utcOffset: getCurrentOffset('America/Hermosillo') },
+            { id: 'America/Indiana/Indianapolis', label: 'Indianapolis', utcOffset: getCurrentOffset('America/Indiana/Indianapolis') },
+            { id: 'America/Indiana/Knox', label: 'Knox', utcOffset: getCurrentOffset('America/Indiana/Knox') },
+            { id: 'America/Indiana/Marengo', label: 'Marengo', utcOffset: getCurrentOffset('America/Indiana/Marengo') },
+            { id: 'America/Indiana/Petersburg', label: 'Petersburg', utcOffset: getCurrentOffset('America/Indiana/Petersburg') },
+            { id: 'America/Indiana/Tell_City', label: 'Tell City', utcOffset: getCurrentOffset('America/Indiana/Tell_City') },
+            { id: 'America/Indiana/Vevay', label: 'Vevay', utcOffset: getCurrentOffset('America/Indiana/Vevay') },
+            { id: 'America/Indiana/Vincennes', label: 'Vincennes', utcOffset: getCurrentOffset('America/Indiana/Vincennes') },
+            { id: 'America/Indiana/Winamac', label: 'Winamac', utcOffset: getCurrentOffset('America/Indiana/Winamac') },
+            { id: 'America/Inuvik', label: 'Inuvik', utcOffset: getCurrentOffset('America/Inuvik') },
+            { id: 'America/Iqaluit', label: 'Iqaluit', utcOffset: getCurrentOffset('America/Iqaluit') },
+            { id: 'America/Jamaica', label: 'Jamaica', utcOffset: getCurrentOffset('America/Jamaica') },
+            { id: 'America/Juneau', label: 'Juneau', utcOffset: getCurrentOffset('America/Juneau') },
+            { id: 'America/Kentucky/Louisville', label: 'Louisville', utcOffset: getCurrentOffset('America/Kentucky/Louisville') },
+            { id: 'America/Kentucky/Monticello', label: 'Monticello', utcOffset: getCurrentOffset('America/Kentucky/Monticello') },
+            { id: 'America/Kralendijk', label: 'Kralendijk', utcOffset: getCurrentOffset('America/Kralendijk') },
+            { id: 'America/La_Paz', label: 'La Paz', utcOffset: getCurrentOffset('America/La_Paz') },
+            { id: 'America/Lima', label: 'Lima', utcOffset: getCurrentOffset('America/Lima') },
+            { id: 'America/Los_Angeles', label: 'Los Angeles', utcOffset: getCurrentOffset('America/Los_Angeles') },
+            { id: 'America/Lower_Princes', label: 'Lower Princes', utcOffset: getCurrentOffset('America/Lower_Princes') },
+            { id: 'America/Maceio', label: 'Maceio', utcOffset: getCurrentOffset('America/Maceio') },
+            { id: 'America/Managua', label: 'Managua', utcOffset: getCurrentOffset('America/Managua') },
+            { id: 'America/Manaus', label: 'Manaus', utcOffset: getCurrentOffset('America/Manaus') },
+            { id: 'America/Marigot', label: 'Marigot', utcOffset: getCurrentOffset('America/Marigot') },
+            { id: 'America/Martinique', label: 'Martinique', utcOffset: getCurrentOffset('America/Martinique') },
+            { id: 'America/Matamoros', label: 'Matamoros', utcOffset: getCurrentOffset('America/Matamoros') },
+            { id: 'America/Mazatlan', label: 'Mazatlan', utcOffset: getCurrentOffset('America/Mazatlan') },
+            { id: 'America/Menominee', label: 'Menominee', utcOffset: getCurrentOffset('America/Menominee') },
+            { id: 'America/Merida', label: 'Merida', utcOffset: getCurrentOffset('America/Merida') },
+            { id: 'America/Metlakatla', label: 'Metlakatla', utcOffset: getCurrentOffset('America/Metlakatla') },
+            { id: 'America/Mexico_City', label: 'Mexico City', utcOffset: getCurrentOffset('America/Mexico_City') },
+            { id: 'America/Miquelon', label: 'Miquelon', utcOffset: getCurrentOffset('America/Miquelon') },
+            { id: 'America/Moncton', label: 'Moncton', utcOffset: getCurrentOffset('America/Moncton') },
+            { id: 'America/Monterrey', label: 'Monterrey', utcOffset: getCurrentOffset('America/Monterrey') },
+            { id: 'America/Montevideo', label: 'Montevideo', utcOffset: getCurrentOffset('America/Montevideo') },
+            { id: 'America/Montreal', label: 'Montreal', utcOffset: getCurrentOffset('America/Montreal') },
+            { id: 'America/Montserrat', label: 'Montserrat', utcOffset: getCurrentOffset('America/Montserrat') },
+            { id: 'America/Nassau', label: 'Nassau', utcOffset: getCurrentOffset('America/Nassau') },
+            { id: 'America/New_York', label: 'New York', utcOffset: getCurrentOffset('America/New_York') },
+            { id: 'America/Nipigon', label: 'Nipigon', utcOffset: getCurrentOffset('America/Nipigon') },
+            { id: 'America/Nome', label: 'Nome', utcOffset: getCurrentOffset('America/Nome') },
+            { id: 'America/Noronha', label: 'Noronha', utcOffset: getCurrentOffset('America/Noronha') },
+            { id: 'America/North_Dakota/Beulah', label: 'Beulah', utcOffset: getCurrentOffset('America/North_Dakota/Beulah') },
+            { id: 'America/North_Dakota/Center', label: 'Center', utcOffset: getCurrentOffset('America/North_Dakota/Center') },
+            { id: 'America/North_Dakota/New_Salem', label: 'New Salem', utcOffset: getCurrentOffset('America/North_Dakota/New_Salem') },
+            { id: 'America/Nuuk', label: 'Nuuk', utcOffset: getCurrentOffset('America/Nuuk') },
+            { id: 'America/Ojinaga', label: 'Ojinaga', utcOffset: getCurrentOffset('America/Ojinaga') },
+            { id: 'America/Panama', label: 'Panama', utcOffset: getCurrentOffset('America/Panama') },
+            { id: 'America/Pangnirtung', label: 'Pangnirtung', utcOffset: getCurrentOffset('America/Pangnirtung') },
+            { id: 'America/Paramaribo', label: 'Paramaribo', utcOffset: getCurrentOffset('America/Paramaribo') },
+            { id: 'America/Phoenix', label: 'Phoenix', utcOffset: getCurrentOffset('America/Phoenix') },
+            { id: 'America/Port-au-Prince', label: 'Port-au-Prince', utcOffset: getCurrentOffset('America/Port-au-Prince') },
+            { id: 'America/Port_of_Spain', label: 'Port of Spain', utcOffset: getCurrentOffset('America/Port_of_Spain') },
+            { id: 'America/Porto_Velho', label: 'Porto Velho', utcOffset: getCurrentOffset('America/Porto_Velho') },
+            { id: 'America/Puerto_Rico', label: 'Puerto Rico', utcOffset: getCurrentOffset('America/Puerto_Rico') },
+            { id: 'America/Punta_Arenas', label: 'Punta Arenas', utcOffset: getCurrentOffset('America/Punta_Arenas') },
+            { id: 'America/Rainy_River', label: 'Rainy River', utcOffset: getCurrentOffset('America/Rainy_River') },
+            { id: 'America/Rankin_Inlet', label: 'Rankin Inlet', utcOffset: getCurrentOffset('America/Rankin_Inlet') },
+            { id: 'America/Recife', label: 'Recife', utcOffset: getCurrentOffset('America/Recife') },
+            { id: 'America/Regina', label: 'Regina', utcOffset: getCurrentOffset('America/Regina') },
+            { id: 'America/Resolute', label: 'Resolute', utcOffset: getCurrentOffset('America/Resolute') },
+            { id: 'America/Rio_Branco', label: 'Rio Branco', utcOffset: getCurrentOffset('America/Rio_Branco') },
+            { id: 'America/Santarem', label: 'Santarem', utcOffset: getCurrentOffset('America/Santarem') },
+            { id: 'America/Santiago', label: 'Santiago', utcOffset: getCurrentOffset('America/Santiago') },
+            { id: 'America/Santo_Domingo', label: 'Santo Domingo', utcOffset: getCurrentOffset('America/Santo_Domingo') },
+            { id: 'America/Sao_Paulo', label: 'Sao Paulo', utcOffset: getCurrentOffset('America/Sao_Paulo') },
+            { id: 'America/Scoresbysund', label: 'Scoresbysund', utcOffset: getCurrentOffset('America/Scoresbysund') },
+            { id: 'America/Sitka', label: 'Sitka', utcOffset: getCurrentOffset('America/Sitka') },
+            { id: 'America/St_Barthelemy', label: 'St Barthelemy', utcOffset: getCurrentOffset('America/St_Barthelemy') },
+            { id: 'America/St_Johns', label: 'St Johns', utcOffset: getCurrentOffset('America/St_Johns') },
+            { id: 'America/St_Kitts', label: 'St Kitts', utcOffset: getCurrentOffset('America/St_Kitts') },
+            { id: 'America/St_Lucia', label: 'St Lucia', utcOffset: getCurrentOffset('America/St_Lucia') },
+            { id: 'America/St_Thomas', label: 'St Thomas', utcOffset: getCurrentOffset('America/St_Thomas') },
+            { id: 'America/St_Vincent', label: 'St Vincent', utcOffset: getCurrentOffset('America/St_Vincent') },
+            { id: 'America/Swift_Current', label: 'Swift Current', utcOffset: getCurrentOffset('America/Swift_Current') },
+            { id: 'America/Tegucigalpa', label: 'Tegucigalpa', utcOffset: getCurrentOffset('America/Tegucigalpa') },
+            { id: 'America/Thule', label: 'Thule', utcOffset: getCurrentOffset('America/Thule') },
+            { id: 'America/Thunder_Bay', label: 'Thunder Bay', utcOffset: getCurrentOffset('America/Thunder_Bay') },
+            { id: 'America/Tijuana', label: 'Tijuana', utcOffset: getCurrentOffset('America/Tijuana') },
+            { id: 'America/Toronto', label: 'Toronto', utcOffset: getCurrentOffset('America/Toronto') },
+            { id: 'America/Tortola', label: 'Tortola', utcOffset: getCurrentOffset('America/Tortola') },
+            { id: 'America/Vancouver', label: 'Vancouver', utcOffset: getCurrentOffset('America/Vancouver') },
+            { id: 'America/Whitehorse', label: 'Whitehorse', utcOffset: getCurrentOffset('America/Whitehorse') },
+            { id: 'America/Winnipeg', label: 'Winnipeg', utcOffset: getCurrentOffset('America/Winnipeg') },
+            { id: 'America/Yakutat', label: 'Yakutat', utcOffset: getCurrentOffset('America/Yakutat') },
+            { id: 'America/Yellowknife', label: 'Yellowknife', utcOffset: getCurrentOffset('America/Yellowknife') },
+
+            // Antarctica
+            { id: 'Antarctica/Casey', label: 'Casey', utcOffset: getCurrentOffset('Antarctica/Casey') },
+            { id: 'Antarctica/Davis', label: 'Davis', utcOffset: getCurrentOffset('Antarctica/Davis') },
+            { id: 'Antarctica/DumontDUrville', label: 'Dumont DUrville', utcOffset: getCurrentOffset('Antarctica/DumontDUrville') },
+            { id: 'Antarctica/Macquarie', label: 'Macquarie', utcOffset: getCurrentOffset('Antarctica/Macquarie') },
+            { id: 'Antarctica/Mawson', label: 'Mawson', utcOffset: getCurrentOffset('Antarctica/Mawson') },
+            { id: 'Antarctica/McMurdo', label: 'McMurdo', utcOffset: getCurrentOffset('Antarctica/McMurdo') },
+            { id: 'Antarctica/Palmer', label: 'Palmer', utcOffset: getCurrentOffset('Antarctica/Palmer') },
+            { id: 'Antarctica/Rothera', label: 'Rothera', utcOffset: getCurrentOffset('Antarctica/Rothera') },
+            { id: 'Antarctica/Syowa', label: 'Syowa', utcOffset: getCurrentOffset('Antarctica/Syowa') },
+            { id: 'Antarctica/Troll', label: 'Troll', utcOffset: getCurrentOffset('Antarctica/Troll') },
+            { id: 'Antarctica/Vostok', label: 'Vostok', utcOffset: getCurrentOffset('Antarctica/Vostok') },
+
+            // Asia
+            { id: 'Asia/Aden', label: 'Aden', utcOffset: getCurrentOffset('Asia/Aden') },
+            { id: 'Asia/Almaty', label: 'Almaty', utcOffset: getCurrentOffset('Asia/Almaty') },
+            { id: 'Asia/Amman', label: 'Amman', utcOffset: getCurrentOffset('Asia/Amman') },
+            { id: 'Asia/Anadyr', label: 'Anadyr', utcOffset: getCurrentOffset('Asia/Anadyr') },
+            { id: 'Asia/Aqtau', label: 'Aqtau', utcOffset: getCurrentOffset('Asia/Aqtau') },
+            { id: 'Asia/Aqtobe', label: 'Aqtobe', utcOffset: getCurrentOffset('Asia/Aqtobe') },
+            { id: 'Asia/Ashgabat', label: 'Ashgabat', utcOffset: getCurrentOffset('Asia/Ashgabat') },
+            { id: 'Asia/Atyrau', label: 'Atyrau', utcOffset: getCurrentOffset('Asia/Atyrau') },
+            { id: 'Asia/Baghdad', label: 'Baghdad', utcOffset: getCurrentOffset('Asia/Baghdad') },
+            { id: 'Asia/Bahrain', label: 'Bahrain', utcOffset: getCurrentOffset('Asia/Bahrain') },
+            { id: 'Asia/Baku', label: 'Baku', utcOffset: getCurrentOffset('Asia/Baku') },
+            { id: 'Asia/Bangkok', label: 'Bangkok', utcOffset: getCurrentOffset('Asia/Bangkok') },
+            { id: 'Asia/Barnaul', label: 'Barnaul', utcOffset: getCurrentOffset('Asia/Barnaul') },
+            { id: 'Asia/Beirut', label: 'Beirut', utcOffset: getCurrentOffset('Asia/Beirut') },
+            { id: 'Asia/Bishkek', label: 'Bishkek', utcOffset: getCurrentOffset('Asia/Bishkek') },
+            { id: 'Asia/Brunei', label: 'Brunei', utcOffset: getCurrentOffset('Asia/Brunei') },
+            { id: 'Asia/Chita', label: 'Chita', utcOffset: getCurrentOffset('Asia/Chita') },
+            { id: 'Asia/Choibalsan', label: 'Choibalsan', utcOffset: getCurrentOffset('Asia/Choibalsan') },
+            { id: 'Asia/Colombo', label: 'Colombo', utcOffset: getCurrentOffset('Asia/Colombo') },
+            { id: 'Asia/Damascus', label: 'Damascus', utcOffset: getCurrentOffset('Asia/Damascus') },
+            { id: 'Asia/Dhaka', label: 'Dhaka', utcOffset: getCurrentOffset('Asia/Dhaka') },
+            { id: 'Asia/Dili', label: 'Dili', utcOffset: getCurrentOffset('Asia/Dili') },
+            { id: 'Asia/Dubai', label: 'Dubai', utcOffset: getCurrentOffset('Asia/Dubai') },
+            { id: 'Asia/Dushanbe', label: 'Dushanbe', utcOffset: getCurrentOffset('Asia/Dushanbe') },
+            { id: 'Asia/Famagusta', label: 'Famagusta', utcOffset: getCurrentOffset('Asia/Famagusta') },
+            { id: 'Asia/Gaza', label: 'Gaza', utcOffset: getCurrentOffset('Asia/Gaza') },
+            { id: 'Asia/Hebron', label: 'Hebron', utcOffset: getCurrentOffset('Asia/Hebron') },
+            { id: 'Asia/Ho_Chi_Minh', label: 'Ho Chi Minh', utcOffset: getCurrentOffset('Asia/Ho_Chi_Minh') },
+            { id: 'Asia/Hong_Kong', label: 'Hong Kong', utcOffset: getCurrentOffset('Asia/Hong_Kong') },
+            { id: 'Asia/Hovd', label: 'Hovd', utcOffset: getCurrentOffset('Asia/Hovd') },
+            { id: 'Asia/Irkutsk', label: 'Irkutsk', utcOffset: getCurrentOffset('Asia/Irkutsk') },
+            { id: 'Asia/Jakarta', label: 'Jakarta', utcOffset: getCurrentOffset('Asia/Jakarta') },
+            { id: 'Asia/Jayapura', label: 'Jayapura', utcOffset: getCurrentOffset('Asia/Jayapura') },
+            { id: 'Asia/Jerusalem', label: 'Jerusalem', utcOffset: getCurrentOffset('Asia/Jerusalem') },
+            { id: 'Asia/Kabul', label: 'Kabul', utcOffset: getCurrentOffset('Asia/Kabul') },
+            { id: 'Asia/Kamchatka', label: 'Kamchatka', utcOffset: getCurrentOffset('Asia/Kamchatka') },
+            { id: 'Asia/Karachi', label: 'Karachi', utcOffset: getCurrentOffset('Asia/Karachi') },
+            { id: 'Asia/Kathmandu', label: 'Kathmandu', utcOffset: getCurrentOffset('Asia/Kathmandu') },
+            { id: 'Asia/Khandyga', label: 'Khandyga', utcOffset: getCurrentOffset('Asia/Khandyga') },
+            { id: 'Asia/Kolkata', label: 'Kolkata', utcOffset: getCurrentOffset('Asia/Kolkata') },
+            { id: 'Asia/Krasnoyarsk', label: 'Krasnoyarsk', utcOffset: getCurrentOffset('Asia/Krasnoyarsk') },
+            { id: 'Asia/Kuala_Lumpur', label: 'Kuala Lumpur', utcOffset: getCurrentOffset('Asia/Kuala_Lumpur') },
+            { id: 'Asia/Kuching', label: 'Kuching', utcOffset: getCurrentOffset('Asia/Kuching') },
+            { id: 'Asia/Kuwait', label: 'Kuwait', utcOffset: getCurrentOffset('Asia/Kuwait') },
+            { id: 'Asia/Macau', label: 'Macau', utcOffset: getCurrentOffset('Asia/Macau') },
+            { id: 'Asia/Magadan', label: 'Magadan', utcOffset: getCurrentOffset('Asia/Magadan') },
+            { id: 'Asia/Makassar', label: 'Makassar', utcOffset: getCurrentOffset('Asia/Makassar') },
+            { id: 'Asia/Manila', label: 'Manila', utcOffset: getCurrentOffset('Asia/Manila') },
+            { id: 'Asia/Muscat', label: 'Muscat', utcOffset: getCurrentOffset('Asia/Muscat') },
+            { id: 'Asia/Nicosia', label: 'Nicosia', utcOffset: getCurrentOffset('Asia/Nicosia') },
+            { id: 'Asia/Novokuznetsk', label: 'Novokuznetsk', utcOffset: getCurrentOffset('Asia/Novokuznetsk') },
+            { id: 'Asia/Novosibirsk', label: 'Novosibirsk', utcOffset: getCurrentOffset('Asia/Novosibirsk') },
+            { id: 'Asia/Omsk', label: 'Omsk', utcOffset: getCurrentOffset('Asia/Omsk') },
+            { id: 'Asia/Oral', label: 'Oral', utcOffset: getCurrentOffset('Asia/Oral') },
+            { id: 'Asia/Phnom_Penh', label: 'Phnom Penh', utcOffset: getCurrentOffset('Asia/Phnom_Penh') },
+            { id: 'Asia/Pontianak', label: 'Pontianak', utcOffset: getCurrentOffset('Asia/Pontianak') },
+            { id: 'Asia/Pyongyang', label: 'Pyongyang', utcOffset: getCurrentOffset('Asia/Pyongyang') },
+            { id: 'Asia/Qatar', label: 'Qatar', utcOffset: getCurrentOffset('Asia/Qatar') },
+            { id: 'Asia/Qostanay', label: 'Qostanay', utcOffset: getCurrentOffset('Asia/Qostanay') },
+            { id: 'Asia/Qyzylorda', label: 'Qyzylorda', utcOffset: getCurrentOffset('Asia/Qyzylorda') },
+            { id: 'Asia/Riyadh', label: 'Riyadh', utcOffset: getCurrentOffset('Asia/Riyadh') },
+            { id: 'Asia/Sakhalin', label: 'Sakhalin', utcOffset: getCurrentOffset('Asia/Sakhalin') },
+            { id: 'Asia/Samarkand', label: 'Samarkand', utcOffset: getCurrentOffset('Asia/Samarkand') },
+            { id: 'Asia/Seoul', label: 'Seoul', utcOffset: getCurrentOffset('Asia/Seoul') },
+            { id: 'Asia/Shanghai', label: 'Shanghai', utcOffset: getCurrentOffset('Asia/Shanghai') },
+            { id: 'Asia/Singapore', label: 'Singapore', utcOffset: getCurrentOffset('Asia/Singapore') },
+            { id: 'Asia/Srednekolymsk', label: 'Srednekolymsk', utcOffset: getCurrentOffset('Asia/Srednekolymsk') },
+            { id: 'Asia/Taipei', label: 'Taipei', utcOffset: getCurrentOffset('Asia/Taipei') },
+            { id: 'Asia/Tashkent', label: 'Tashkent', utcOffset: getCurrentOffset('Asia/Tashkent') },
+            { id: 'Asia/Tbilisi', label: 'Tbilisi', utcOffset: getCurrentOffset('Asia/Tbilisi') },
+            { id: 'Asia/Tehran', label: 'Tehran', utcOffset: getCurrentOffset('Asia/Tehran') },
+            { id: 'Asia/Thimphu', label: 'Thimphu', utcOffset: getCurrentOffset('Asia/Thimphu') },
+            { id: 'Asia/Tokyo', label: 'Tokyo', utcOffset: getCurrentOffset('Asia/Tokyo') },
+            { id: 'Asia/Tomsk', label: 'Tomsk', utcOffset: getCurrentOffset('Asia/Tomsk') },
+            { id: 'Asia/Ulaanbaatar', label: 'Ulaanbaatar', utcOffset: getCurrentOffset('Asia/Ulaanbaatar') },
+            { id: 'Asia/Urumqi', label: 'Urumqi', utcOffset: getCurrentOffset('Asia/Urumqi') },
+            { id: 'Asia/Ust-Nera', label: 'Ust-Nera', utcOffset: getCurrentOffset('Asia/Ust-Nera') },
+            { id: 'Asia/Vientiane', label: 'Vientiane', utcOffset: getCurrentOffset('Asia/Vientiane') },
+            { id: 'Asia/Vladivostok', label: 'Vladivostok', utcOffset: getCurrentOffset('Asia/Vladivostok') },
+            { id: 'Asia/Yakutsk', label: 'Yakutsk', utcOffset: getCurrentOffset('Asia/Yakutsk') },
+            { id: 'Asia/Yangon', label: 'Yangon', utcOffset: getCurrentOffset('Asia/Yangon') },
+            { id: 'Asia/Yekaterinburg', label: 'Yekaterinburg', utcOffset: getCurrentOffset('Asia/Yekaterinburg') },
+            { id: 'Asia/Yerevan', label: 'Yerevan', utcOffset: getCurrentOffset('Asia/Yerevan') },
+
+            // Atlantic
+            { id: 'Atlantic/Azores', label: 'Azores', utcOffset: getCurrentOffset('Atlantic/Azores') },
+            { id: 'Atlantic/Bermuda', label: 'Bermuda', utcOffset: getCurrentOffset('Atlantic/Bermuda') },
+            { id: 'Atlantic/Canary', label: 'Canary', utcOffset: getCurrentOffset('Atlantic/Canary') },
+            { id: 'Atlantic/Cape_Verde', label: 'Cape Verde', utcOffset: getCurrentOffset('Atlantic/Cape_Verde') },
+            { id: 'Atlantic/Faroe', label: 'Faroe', utcOffset: getCurrentOffset('Atlantic/Faroe') },
+            { id: 'Atlantic/Madeira', label: 'Madeira', utcOffset: getCurrentOffset('Atlantic/Madeira') },
+            { id: 'Atlantic/Reykjavik', label: 'Reykjavik', utcOffset: getCurrentOffset('Atlantic/Reykjavik') },
+            { id: 'Atlantic/South_Georgia', label: 'South Georgia', utcOffset: getCurrentOffset('Atlantic/South_Georgia') },
+            { id: 'Atlantic/St_Helena', label: 'St Helena', utcOffset: getCurrentOffset('Atlantic/St_Helena') },
+            { id: 'Atlantic/Stanley', label: 'Stanley', utcOffset: getCurrentOffset('Atlantic/Stanley') },
+
+            // Australia
+            { id: 'Australia/Adelaide', label: 'Adelaide', utcOffset: getCurrentOffset('Australia/Adelaide') },
+            { id: 'Australia/Brisbane', label: 'Brisbane', utcOffset: getCurrentOffset('Australia/Brisbane') },
+            { id: 'Australia/Broken_Hill', label: 'Broken Hill', utcOffset: getCurrentOffset('Australia/Broken_Hill') },
+            { id: 'Australia/Currie', label: 'Currie', utcOffset: getCurrentOffset('Australia/Currie') },
+            { id: 'Australia/Darwin', label: 'Darwin', utcOffset: getCurrentOffset('Australia/Darwin') },
+            { id: 'Australia/Eucla', label: 'Eucla', utcOffset: getCurrentOffset('Australia/Eucla') },
+            { id: 'Australia/Hobart', label: 'Hobart', utcOffset: getCurrentOffset('Australia/Hobart') },
+            { id: 'Australia/Lindeman', label: 'Lindeman', utcOffset: getCurrentOffset('Australia/Lindeman') },
+            { id: 'Australia/Lord_Howe', label: 'Lord Howe', utcOffset: getCurrentOffset('Australia/Lord_Howe') },
+            { id: 'Australia/Melbourne', label: 'Melbourne', utcOffset: getCurrentOffset('Australia/Melbourne') },
+            { id: 'Australia/Perth', label: 'Perth', utcOffset: getCurrentOffset('Australia/Perth') },
+            { id: 'Australia/Sydney', label: 'Sydney', utcOffset: getCurrentOffset('Australia/Sydney') },
+
+            // Europe
+            { id: 'Europe/Amsterdam', label: 'Amsterdam', utcOffset: getCurrentOffset('Europe/Amsterdam') },
+            { id: 'Europe/Andorra', label: 'Andorra', utcOffset: getCurrentOffset('Europe/Andorra') },
+            { id: 'Europe/Astrakhan', label: 'Astrakhan', utcOffset: getCurrentOffset('Europe/Astrakhan') },
+            { id: 'Europe/Athens', label: 'Athens', utcOffset: getCurrentOffset('Europe/Athens') },
+            { id: 'Europe/Belgrade', label: 'Belgrade', utcOffset: getCurrentOffset('Europe/Belgrade') },
+            { id: 'Europe/Berlin', label: 'Berlin', utcOffset: getCurrentOffset('Europe/Berlin') },
+            { id: 'Europe/Bratislava', label: 'Bratislava', utcOffset: getCurrentOffset('Europe/Bratislava') },
+            { id: 'Europe/Brussels', label: 'Brussels', utcOffset: getCurrentOffset('Europe/Brussels') },
+            { id: 'Europe/Bucharest', label: 'Bucharest', utcOffset: getCurrentOffset('Europe/Bucharest') },
+            { id: 'Europe/Budapest', label: 'Budapest', utcOffset: getCurrentOffset('Europe/Budapest') },
+            { id: 'Europe/Busingen', label: 'Busingen', utcOffset: getCurrentOffset('Europe/Busingen') },
+            { id: 'Europe/Chisinau', label: 'Chisinau', utcOffset: getCurrentOffset('Europe/Chisinau') },
+            { id: 'Europe/Copenhagen', label: 'Copenhagen', utcOffset: getCurrentOffset('Europe/Copenhagen') },
+            { id: 'Europe/Dublin', label: 'Dublin', utcOffset: getCurrentOffset('Europe/Dublin') },
+            { id: 'Europe/Gibraltar', label: 'Gibraltar', utcOffset: getCurrentOffset('Europe/Gibraltar') },
+            { id: 'Europe/Guernsey', label: 'Guernsey', utcOffset: getCurrentOffset('Europe/Guernsey') },
+            { id: 'Europe/Helsinki', label: 'Helsinki', utcOffset: getCurrentOffset('Europe/Helsinki') },
+            { id: 'Europe/Isle_of_Man', label: 'Isle of Man', utcOffset: getCurrentOffset('Europe/Isle_of_Man') },
+            { id: 'Europe/Istanbul', label: 'Istanbul', utcOffset: getCurrentOffset('Europe/Istanbul') },
+            { id: 'Europe/Jersey', label: 'Jersey', utcOffset: getCurrentOffset('Europe/Jersey') },
+            { id: 'Europe/Kaliningrad', label: 'Kaliningrad', utcOffset: getCurrentOffset('Europe/Kaliningrad') },
+            { id: 'Europe/Kiev', label: 'Kiev', utcOffset: getCurrentOffset('Europe/Kiev') },
+            { id: 'Europe/Kirov', label: 'Kirov', utcOffset: getCurrentOffset('Europe/Kirov') },
+            { id: 'Europe/Lisbon', label: 'Lisbon', utcOffset: getCurrentOffset('Europe/Lisbon') },
+            { id: 'Europe/Ljubljana', label: 'Ljubljana', utcOffset: getCurrentOffset('Europe/Ljubljana') },
+            { id: 'Europe/London', label: 'London', utcOffset: getCurrentOffset('Europe/London') },
+            { id: 'Europe/Luxembourg', label: 'Luxembourg', utcOffset: getCurrentOffset('Europe/Luxembourg') },
+            { id: 'Europe/Madrid', label: 'Madrid', utcOffset: getCurrentOffset('Europe/Madrid') },
+            { id: 'Europe/Malta', label: 'Malta', utcOffset: getCurrentOffset('Europe/Malta') },
+            { id: 'Europe/Mariehamn', label: 'Mariehamn', utcOffset: getCurrentOffset('Europe/Mariehamn') },
+            { id: 'Europe/Minsk', label: 'Minsk', utcOffset: getCurrentOffset('Europe/Minsk') },
+            { id: 'Europe/Monaco', label: 'Monaco', utcOffset: getCurrentOffset('Europe/Monaco') },
+            { id: 'Europe/Moscow', label: 'Moscow', utcOffset: getCurrentOffset('Europe/Moscow') },
+            { id: 'Europe/Oslo', label: 'Oslo', utcOffset: getCurrentOffset('Europe/Oslo') },
+            { id: 'Europe/Paris', label: 'Paris', utcOffset: getCurrentOffset('Europe/Paris') },
+            { id: 'Europe/Podgorica', label: 'Podgorica', utcOffset: getCurrentOffset('Europe/Podgorica') },
+            { id: 'Europe/Prague', label: 'Prague', utcOffset: getCurrentOffset('Europe/Prague') },
+            { id: 'Europe/Riga', label: 'Riga', utcOffset: getCurrentOffset('Europe/Riga') },
+            { id: 'Europe/Rome', label: 'Rome', utcOffset: getCurrentOffset('Europe/Rome') },
+            { id: 'Europe/Samara', label: 'Samara', utcOffset: getCurrentOffset('Europe/Samara') },
+            { id: 'Europe/San_Marino', label: 'San Marino', utcOffset: getCurrentOffset('Europe/San_Marino') },
+            { id: 'Europe/Sarajevo', label: 'Sarajevo', utcOffset: getCurrentOffset('Europe/Sarajevo') },
+            { id: 'Europe/Saratov', label: 'Saratov', utcOffset: getCurrentOffset('Europe/Saratov') },
+            { id: 'Europe/Simferopol', label: 'Simferopol', utcOffset: getCurrentOffset('Europe/Simferopol') },
+            { id: 'Europe/Skopje', label: 'Skopje', utcOffset: getCurrentOffset('Europe/Skopje') },
+            { id: 'Europe/Sofia', label: 'Sofia', utcOffset: getCurrentOffset('Europe/Sofia') },
+            { id: 'Europe/Stockholm', label: 'Stockholm', utcOffset: getCurrentOffset('Europe/Stockholm') },
+            { id: 'Europe/Tallinn', label: 'Tallinn', utcOffset: getCurrentOffset('Europe/Tallinn') },
+            { id: 'Europe/Tirane', label: 'Tirane', utcOffset: getCurrentOffset('Europe/Tirane') },
+            { id: 'Europe/Tiraspol', label: 'Tiraspol', utcOffset: getCurrentOffset('Europe/Tiraspol') },
+            { id: 'Europe/Ulyanovsk', label: 'Ulyanovsk', utcOffset: getCurrentOffset('Europe/Ulyanovsk') },
+            { id: 'Europe/Uzhgorod', label: 'Uzhgorod', utcOffset: getCurrentOffset('Europe/Uzhgorod') },
+            { id: 'Europe/Vaduz', label: 'Vaduz', utcOffset: getCurrentOffset('Europe/Vaduz') },
+            { id: 'Europe/Vatican', label: 'Vatican', utcOffset: getCurrentOffset('Europe/Vatican') },
+            { id: 'Europe/Vienna', label: 'Vienna', utcOffset: getCurrentOffset('Europe/Vienna') },
+            { id: 'Europe/Vilnius', label: 'Vilnius', utcOffset: getCurrentOffset('Europe/Vilnius') },
+            { id: 'Europe/Volgograd', label: 'Volgograd', utcOffset: getCurrentOffset('Europe/Volgograd') },
+            { id: 'Europe/Warsaw', label: 'Warsaw', utcOffset: getCurrentOffset('Europe/Warsaw') },
+            { id: 'Europe/Zagreb', label: 'Zagreb', utcOffset: getCurrentOffset('Europe/Zagreb') },
+            { id: 'Europe/Zaporozhye', label: 'Zaporozhye', utcOffset: getCurrentOffset('Europe/Zaporozhye') },
+            { id: 'Europe/Zurich', label: 'Zurich', utcOffset: getCurrentOffset('Europe/Zurich') },
+
+            // Indian Ocean
+            { id: 'Indian/Antananarivo', label: 'Antananarivo', utcOffset: getCurrentOffset('Indian/Antananarivo') },
+            { id: 'Indian/Chagos', label: 'Chagos', utcOffset: getCurrentOffset('Indian/Chagos') },
+            { id: 'Indian/Christmas', label: 'Christmas', utcOffset: getCurrentOffset('Indian/Christmas') },
+            { id: 'Indian/Cocos', label: 'Cocos', utcOffset: getCurrentOffset('Indian/Cocos') },
+            { id: 'Indian/Comoro', label: 'Comoro', utcOffset: getCurrentOffset('Indian/Comoro') },
+            { id: 'Indian/Kerguelen', label: 'Kerguelen', utcOffset: getCurrentOffset('Indian/Kerguelen') },
+            { id: 'Indian/Mahe', label: 'Mahe', utcOffset: getCurrentOffset('Indian/Mahe') },
+            { id: 'Indian/Maldives', label: 'Maldives', utcOffset: getCurrentOffset('Indian/Maldives') },
+            { id: 'Indian/Mauritius', label: 'Mauritius', utcOffset: getCurrentOffset('Indian/Mauritius') },
+            { id: 'Indian/Mayotte', label: 'Mayotte', utcOffset: getCurrentOffset('Indian/Mayotte') },
+            { id: 'Indian/Reunion', label: 'Reunion', utcOffset: getCurrentOffset('Indian/Reunion') },
+
+            // Pacific
+            { id: 'Pacific/Apia', label: 'Apia', utcOffset: getCurrentOffset('Pacific/Apia') },
+            { id: 'Pacific/Auckland', label: 'Auckland', utcOffset: getCurrentOffset('Pacific/Auckland') },
+            { id: 'Pacific/Bougainville', label: 'Bougainville', utcOffset: getCurrentOffset('Pacific/Bougainville') },
+            { id: 'Pacific/Chatham', label: 'Chatham', utcOffset: getCurrentOffset('Pacific/Chatham') },
+            { id: 'Pacific/Chuuk', label: 'Chuuk', utcOffset: getCurrentOffset('Pacific/Chuuk') },
+            { id: 'Pacific/Easter', label: 'Easter', utcOffset: getCurrentOffset('Pacific/Easter') },
+            { id: 'Pacific/Efate', label: 'Efate', utcOffset: getCurrentOffset('Pacific/Efate') },
+            { id: 'Pacific/Fakaofo', label: 'Fakaofo', utcOffset: getCurrentOffset('Pacific/Fakaofo') },
+            { id: 'Pacific/Fiji', label: 'Fiji', utcOffset: getCurrentOffset('Pacific/Fiji') },
+            { id: 'Pacific/Funafuti', label: 'Funafuti', utcOffset: getCurrentOffset('Pacific/Funafuti') },
+            { id: 'Pacific/Galapagos', label: 'Galapagos', utcOffset: getCurrentOffset('Pacific/Galapagos') },
+            { id: 'Pacific/Gambier', label: 'Gambier', utcOffset: getCurrentOffset('Pacific/Gambier') },
+            { id: 'Pacific/Guadalcanal', label: 'Guadalcanal', utcOffset: getCurrentOffset('Pacific/Guadalcanal') },
+            { id: 'Pacific/Guam', label: 'Guam', utcOffset: getCurrentOffset('Pacific/Guam') },
+            { id: 'Pacific/Honolulu', label: 'Honolulu', utcOffset: getCurrentOffset('Pacific/Honolulu') },
+            { id: 'Pacific/Kiritimati', label: 'Kiritimati', utcOffset: getCurrentOffset('Pacific/Kiritimati') },
+            { id: 'Pacific/Kosrae', label: 'Kosrae', utcOffset: getCurrentOffset('Pacific/Kosrae') },
+            { id: 'Pacific/Kwajalein', label: 'Kwajalein', utcOffset: getCurrentOffset('Pacific/Kwajalein') },
+            { id: 'Pacific/Majuro', label: 'Majuro', utcOffset: getCurrentOffset('Pacific/Majuro') },
+            { id: 'Pacific/Marquesas', label: 'Marquesas', utcOffset: getCurrentOffset('Pacific/Marquesas') },
+            { id: 'Pacific/Midway', label: 'Midway', utcOffset: getCurrentOffset('Pacific/Midway') },
+            { id: 'Pacific/Nauru', label: 'Nauru', utcOffset: getCurrentOffset('Pacific/Nauru') },
+            { id: 'Pacific/Niue', label: 'Niue', utcOffset: getCurrentOffset('Pacific/Niue') },
+            { id: 'Pacific/Norfolk', label: 'Norfolk', utcOffset: getCurrentOffset('Pacific/Norfolk') },
+            { id: 'Pacific/Noumea', label: 'Noumea', utcOffset: getCurrentOffset('Pacific/Noumea') },
+            { id: 'Pacific/Pago_Pago', label: 'Pago Pago', utcOffset: getCurrentOffset('Pacific/Pago_Pago') },
+            { id: 'Pacific/Palau', label: 'Palau', utcOffset: getCurrentOffset('Pacific/Palau') },
+            { id: 'Pacific/Pitcairn', label: 'Pitcairn', utcOffset: getCurrentOffset('Pacific/Pitcairn') },
+            { id: 'Pacific/Pohnpei', label: 'Pohnpei', utcOffset: getCurrentOffset('Pacific/Pohnpei') },
+            { id: 'Pacific/Port_Moresby', label: 'Port Moresby', utcOffset: getCurrentOffset('Pacific/Port_Moresby') },
+            { id: 'Pacific/Rarotonga', label: 'Rarotonga', utcOffset: getCurrentOffset('Pacific/Rarotonga') },
+            { id: 'Pacific/Saipan', label: 'Saipan', utcOffset: getCurrentOffset('Pacific/Saipan') },
+            { id: 'Pacific/Tahiti', label: 'Tahiti', utcOffset: getCurrentOffset('Pacific/Tahiti') },
+            { id: 'Pacific/Tarawa', label: 'Tarawa', utcOffset: getCurrentOffset('Pacific/Tarawa') },
+            { id: 'Pacific/Tongatapu', label: 'Tongatapu', utcOffset: getCurrentOffset('Pacific/Tongatapu') },
+            { id: 'Pacific/Wake', label: 'Wake', utcOffset: getCurrentOffset('Pacific/Wake') },
+            { id: 'Pacific/Wallis', label: 'Wallis', utcOffset: getCurrentOffset('Pacific/Wallis') }
+        ];
+
+        res.json({ timezones });
+    } catch (err) {
+        console.error('Error fetching timezones:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to load timezones' });
+    }
+});
+
+// Helper function to get current offset for a timezone
+function getCurrentOffset(timezoneId) {
+    try {
+        const now = new Date();
+        const parts = now.toLocaleString('en-US', { timeZone: timezoneId, timeZoneName: 'short' }).split(' ');
+        const offsetStr = parts[parts.length - 1] || '+00:00';
+        
+        // Parse offset like GMT+3, GMT-5, etc.
+        const match = offsetStr.match(/GMT([+-])(\d+)(?::(\d+))?/);
+        if (match) {
+            const sign = match[1];
+            const hours = parseInt(match[2]);
+            const minutes = parseInt(match[3] || '0');
+            return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        }
+        
+        return '+00:00';
+    } catch {
+        return '+00:00';
+    }
+}
+
 app.get('/api/users/security', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const user = await User.findById(userId)
-.select('twoFactorAuth passwordChangedAt loginHistory')
-.lean();
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('password twoFactorAuth loginHistory');
 
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
+        if (!user) {
+            return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'User not found' });
+        }
+
+        // Calculate security level
+        const hasPassword = !!user.password;
+        const hasAuthenticator = user.twoFactorAuth?.enabled || false;
+        
+        // Get active device count from loginHistory (sessions in last 24h)
+        const activeDevices = user.loginHistory?.filter(
+            session => session.timestamp && new Date(session.timestamp) > new Date(Date.now() - 24 * 60 * 60 * 1000)
+        ) || [];
+        const activeCount = activeDevices.length;
+
+        // Determine security level
+        let securityLevel = 'weak';
+        let statusMessage = 'Your account security needs attention.';
+
+        if (hasPassword && hasAuthenticator && activeCount <= 3) {
+            securityLevel = 'strong';
+            statusMessage = 'Your account security configuration is excellent.';
+        } else if (hasPassword && hasAuthenticator) {
+            securityLevel = 'medium';
+            statusMessage = 'Your account is secure but has many active devices.';
+        } else if (hasPassword) {
+            securityLevel = 'medium';
+            statusMessage = 'Enable 2FA for better protection.';
+        } else {
+            securityLevel = 'weak';
+            statusMessage = 'Set a password and enable 2FA for full protection.';
+        }
+
+        res.json({
+            securityLevel,
+            statusMessage,
+            password: {
+                configured: hasPassword
+            },
+            authenticator: {
+                enabled: hasAuthenticator,
+                enabledAt: user.twoFactorAuth?.enabledAt || null
+            },
+            devices: {
+                activeCount: activeCount
             }
         });
+    } catch (err) {
+        console.error('Error fetching security overview:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to load security status' });
     }
+});
+app.put('/api/users/settings', protect, async (req, res) => {
+    try {
+        const { language, timezone } = req.body;
+        const userId = req.user._id;
 
-    // Count active devices from loginHistory
-    const activeDevices = user.loginHistory || [];
-    const activeCount = activeDevices.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired').length || 1;
+        // Validate language exists in catalogue
+        const languageExists = await Language.findOne({ code: language, isActive: true });
+        if (!languageExists) {
+            return res.status(400).json({ code: 'INVALID_LANGUAGE', message: 'Invalid language code' });
+        }
 
-    // Security checks
-    const hasPassword = true; // User always has a password
-    const hasAuthenticator = user.twoFactorAuth?.enabled || false;
-    
-    // Determine security level
-    let securityLevel = 'weak';
-    let statusMessage = 'Your security configuration needs improvement.';
-    
-    if (hasPassword && hasAuthenticator) {
-        securityLevel = 'strong';
-        statusMessage = 'Your security configuration is up to date.';
-    } else if (hasPassword) {
-        securityLevel = 'medium';
-        statusMessage = 'Enable two-factor authentication to strengthen your account security.';
+        // Validate timezone
+        try {
+            Intl.DateTimeFormat(undefined, { timeZone: timezone });
+        } catch {
+            return res.status(400).json({ code: 'INVALID_TIMEZONE', message: 'Invalid timezone' });
+        }
+
+        // Update preferences
+        const updated = await UserPreference.findOneAndUpdate(
+            { user: userId },
+            { 
+                user: userId,
+                language: language,
+                timezone: timezone,
+                updatedAt: new Date()
+            },
+            { upsert: true, new: true }
+        );
+
+        // Also update user's main preferences
+        await User.findByIdAndUpdate(userId, {
+            'preferences.language': language,
+            'preferences.timezone': timezone
+        });
+
+        res.json({
+            language: updated.language,
+            timezone: updated.timezone
+        });
+    } catch (err) {
+        console.error('Error saving user settings:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to save settings' });
     }
-
-    res.status(200).json({
-        securityLevel: securityLevel,
-        statusMessage: statusMessage,
-        password: {
-            enabled: hasPassword
-        },
-        authenticator: {
-            enabled: hasAuthenticator,
-            enabledAt: user.twoFactorAuth?.enabledAt || null
-        },
-        devices: {
-            activeCount: activeCount
-        }
-    });
-
-} catch (err) {
-    console.error('Error fetching security overview:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to fetch security overview'
-        }
-    });
-}
 });
 
-// =============================================
-// 2. POST /api/users/two-factor/authenticator/setup
-// =============================================
 app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const user = await User.findById(userId);
-
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
-            }
-        });
-    }
-
-    // If authenticator is already enabled
-    if (user.twoFactorAuth?.enabled) {
-        return res.status(409).json({
-            success: false,
-            error: {
-                code: 'ALREADY_ENABLED',
-                message: 'Authenticator is already enabled'
-            }
-        });
-    }
-
-    // Generate TOTP secret using speakeasy
-    const secret = speakeasy.generateSecret({
-        length: 20,
-        name: 'BitHash',
-        issuer: 'BitHash LLC'
-    });
-
-    // Create enrollment record
-    const enrollmentId = `enr_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    
-    // Store enrollment in Redis with 10 minute expiration
-    const enrollmentKey = `2fa_enrollment:${userId}`;
-    const enrollmentData = {
-        enrollmentId: enrollmentId,
-        secret: secret.base32,
-        expiresAt: Date.now() + 10 * 60 * 1000
-    };
-    
-    await redis.setex(enrollmentKey, 600, JSON.stringify(enrollmentData));
-
-    // Generate OTP Auth URI
-    const otpauthUri = secret.otpauth_url || 
-        `otpauth://totp/₿itHash:${user.email}?secret=${secret.base32}&issuer=₿itHash`;
-
-    // Generate QR code (using external API since we don't have qr-image)
-    const qrCode = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUri)}`;
-
-    res.status(200).json({
-        enrollmentId: enrollmentId,
-        manualKey: secret.base32,
-        otpauthUri: otpauthUri,
-        qrCode: qrCode
-    });
-
-} catch (err) {
-    console.error('Error setting up authenticator:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to setup authenticator'
-        }
-    });
-}
-});
-
-// =============================================
-// 3. POST /api/users/two-factor/authenticator/verify
-// =============================================
-app.post('/api/users/two-factor/authenticator/verify', protect, [
-body('enrollmentId').notEmpty().withMessage('Enrollment ID is required'),
-body('code').isLength({ min: 6, max: 6 }).withMessage('Code must be 6 digits')
-], async (req, res) => {
-const errors = validationResult(req);
-if (!errors.isEmpty()) {
-return res.status(400).json({
-success: false,
-error: {
-code: 'VALIDATION_ERROR',
-message: errors.array()[0]?.msg || 'Invalid input'
-}
-});
-}
-
-try {
-    const { enrollmentId, code } = req.body;
-    const userId = req.user._id;
-    const user = await User.findById(userId);
-
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
-            }
-        });
-    }
-
-    // Get enrollment from Redis
-    const enrollmentKey = `2fa_enrollment:${userId}`;
-    const enrollmentData = await redis.get(enrollmentKey);
-    
-    if (!enrollmentData) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'ENROLLMENT_NOT_FOUND',
-                message: 'No pending enrollment found. Please start setup again.'
-            }
-        });
-    }
-
-    const enrollment = JSON.parse(enrollmentData);
-
-    // Verify enrollment matches
-    if (enrollment.enrollmentId !== enrollmentId) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'INVALID_ENROLLMENT',
-                message: 'Invalid enrollment ID'
-            }
-        });
-    }
-
-    // Check if enrollment expired
-    if (enrollment.expiresAt < Date.now()) {
-        await redis.del(enrollmentKey);
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'ENROLLMENT_EXPIRED',
-                message: 'Enrollment has expired. Please start setup again.'
-            }
-        });
-    }
-
-    // Rate limiting for verification attempts
-    const attemptsKey = `2fa_attempts:${userId}`;
-    const attempts = await redis.incr(attemptsKey);
-    await redis.expire(attemptsKey, 300); // 5 minutes window
-    
-    if (attempts > 5) {
-        await redis.del(enrollmentKey);
-        await redis.del(attemptsKey);
-        return res.status(429).json({
-            success: false,
-            error: {
-                code: 'TOO_MANY_ATTEMPTS',
-                message: 'Too many failed attempts. Please start setup again.'
-            }
-        });
-    }
-
-    // Verify TOTP code
-    const isValid = speakeasy.totp.verify({
-        secret: enrollment.secret,
-        encoding: 'base32',
-        token: code,
-        window: 2
-    });
-
-    if (!isValid) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'INVALID_CODE',
-                message: 'Invalid verification code. Please try again.'
-            }
-        });
-    }
-
-    // Generate recovery codes (8 codes, 4-character segments)
-    const recoveryCodes = [];
-    const hashedRecoveryCodes = [];
-    
-    for (let i = 0; i < 8; i++) {
-        const segment1 = generateRecoverySegment();
-        const segment2 = generateRecoverySegment();
-        const code = `${segment1}-${segment2}`;
-        recoveryCodes.push(code);
-        hashedRecoveryCodes.push({
-            hash: crypto.createHash('sha256').update(code).digest('hex'),
-            used: false
-        });
-    }
-
-    // Enable 2FA
-    if (!user.twoFactorAuth) {
-        user.twoFactorAuth = { enabled: false };
-    }
-    
-    user.twoFactorAuth.enabled = true;
-    user.twoFactorAuth.secret = enrollment.secret;
-    user.twoFactorAuth.recoveryCodes = hashedRecoveryCodes;
-    user.twoFactorAuth.enabledAt = new Date();
-
-    await user.save();
-
-    // Clean up Redis
-    await redis.del(enrollmentKey);
-    await redis.del(attemptsKey);
-
-    // Log activity
-    await logActivity('authenticator_enabled', 'User', userId, userId, 'User', req);
-
-    res.status(200).json({
-        success: true,
-        message: 'Authenticator enabled successfully.',
-        recoveryCodes: recoveryCodes
-    });
-
-} catch (err) {
-    console.error('Error verifying authenticator:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to verify authenticator'
-        }
-    });
-}
-});
-
-// =============================================
-// 4. POST /api/users/two-factor/authenticator/send-otp - NEW ENDPOINT FOR OTP BACKUP
-// =============================================
-app.post('/api/users/two-factor/authenticator/send-otp', protect, async (req, res) => {
     try {
         const userId = req.user._id;
         const user = await User.findById(userId);
-        
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: { code: 'USER_NOT_FOUND', message: 'User not found' }
+
+        // Check if already enabled
+        if (user.twoFactorAuth?.enabled) {
+            return res.status(409).json({
+                code: 'ALREADY_ENABLED',
+                message: 'Authenticator is already enabled for your account.'
             });
         }
+
+        // Generate TOTP secret
+        const secret = speakeasy.generateSecret({
+            length: 20,
+            name: '₿itHash',
+            issuer: '₿itHash'
+        });
+
+        // Create enrollment record
+        const enrollmentId = crypto.randomBytes(16).toString('hex');
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        // Store encrypted secret (use your encryption method)
+        const encryptedSecret = encryptSecret(secret.base32);
+        
+        await UserEnrollment.create({
+            userId,
+            enrollmentId,
+            secret: encryptedSecret,
+            type: 'totp_setup',
+            expiresAt,
+            status: 'pending'
+        });
+
+        // Generate otpauth URI
+        const otpauthUri = `otpauth://totp/BitHash:${encodeURIComponent(user.email)}?secret=${secret.base32}&issuer=BitHash`;
+
+        // Generate QR code (if you have QR code generation)
+        // For simplicity, we return the URI and let frontend generate QR
+        const qrCode = await generateQRCode(otpauthUri);
+
+        res.json({
+            enrollmentId,
+            manualKey: secret.base32,
+            qrCode: qrCode, // Base64 or URL
+            otpauthUri: otpauthUri
+        });
+    } catch (err) {
+        console.error('Error setting up authenticator:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to setup authenticator' });
+    }
+});
+
+// Helper functions
+function encryptSecret(secret) {
+    // Use your encryption method
+    const cipher = crypto.createCipher('aes-256-gcm', process.env.ENCRYPTION_KEY);
+    let encrypted = cipher.update(secret, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return encrypted + ':' + cipher.getAuthTag().toString('hex');
+}
+
+function decryptSecret(encryptedSecret) {
+    const parts = encryptedSecret.split(':');
+    const decipher = crypto.createDecipher('aes-256-gcm', process.env.ENCRYPTION_KEY);
+    decipher.setAuthTag(Buffer.from(parts[1], 'hex'));
+    let decrypted = decipher.update(parts[0], 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+}
+
+async function generateQRCode(otpauthUri) {
+    try {
+        const QRCode = require('qrcode');
+        return await QRCode.toDataURL(otpauthUri);
+    } catch {
+        return null;
+    }
+}
+
+app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res) => {
+    try {
+        const { enrollmentId, code } = req.body;
+        const userId = req.user._id;
+
+        if (!enrollmentId || !code) {
+            return res.status(400).json({ code: 'MISSING_FIELDS', message: 'Enrollment ID and code are required' });
+        }
+
+        // Find enrollment
+        const enrollment = await UserEnrollment.findOne({
+            enrollmentId,
+            userId,
+            type: 'totp_setup',
+            status: 'pending'
+        });
+
+        if (!enrollment) {
+            return res.status(404).json({ code: 'ENROLLMENT_NOT_FOUND', message: 'Enrollment not found or already used' });
+        }
+
+        if (enrollment.expiresAt < new Date()) {
+            return res.status(400).json({ code: 'ENROLLMENT_EXPIRED', message: 'Enrollment has expired' });
+        }
+
+        // Decrypt secret
+        const secret = decryptSecret(enrollment.secret);
+
+        // Verify TOTP code
+        const verified = speakeasy.totp.verify({
+            secret: secret,
+            encoding: 'base32',
+            token: code,
+            window: 1
+        });
+
+        if (!verified) {
+            // Track failed attempts
+            await UserEnrollment.findByIdAndUpdate(enrollment._id, {
+                $inc: { attempts: 1 }
+            });
+
+            if (enrollment.attempts >= 5) {
+                await UserEnrollment.findByIdAndDelete(enrollment._id);
+                return res.status(400).json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts' });
+            }
+
+            return res.status(400).json({ code: 'INVALID_OTP', message: 'Invalid verification code' });
+        }
+
+        // Generate recovery codes
+        const recoveryCodes = generateRecoveryCodes();
+        const hashedCodes = recoveryCodes.map(code => crypto.createHash('sha256').update(code).digest('hex'));
+
+        // Enable 2FA atomically
+        await User.findByIdAndUpdate(userId, {
+            'twoFactorAuth.enabled': true,
+            'twoFactorAuth.secret': enrollment.secret,
+            'twoFactorAuth.enabledAt': new Date()
+        });
+
+        // Store recovery code hashes
+        await UserRecoveryCodes.create({
+            userId,
+            hashes: hashedCodes,
+            generatedAt: new Date()
+        });
+
+        // Delete enrollment
+        await UserEnrollment.findByIdAndDelete(enrollment._id);
+
+        // Log activity
+        await SystemLog.create({
+            action: 'authenticator_enabled',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            status: 'success',
+            metadata: { userId: userId.toString() }
+        });
+
+        res.json({ recoveryCodes });
+    } catch (err) {
+        console.error('Error verifying authenticator:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to verify authenticator' });
+    }
+});
+
+function generateRecoveryCodes(count = 10) {
+    const codes = [];
+    for (let i = 0; i < count; i++) {
+        const part1 = crypto.randomBytes(2).toString('hex').toUpperCase();
+        const part2 = crypto.randomBytes(2).toString('hex').toUpperCase();
+        codes.push(`${part1}-${part2}`);
+    }
+    return codes;
+}
+
+app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId);
 
         if (!user.twoFactorAuth?.enabled) {
             return res.status(400).json({
-                success: false,
-                error: { code: 'NOT_ENABLED', message: 'Authenticator is not enabled' }
+                code: 'AUTHENTICATOR_NOT_ENABLED',
+                message: 'Authenticator is not enabled for this account'
             });
         }
 
-        // Generate OTP
+        // Generate challenge
+        const challengeId = crypto.randomBytes(16).toString('hex');
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        const otpId = `auth_disable_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
-        // Store OTP in Redis
-        const otpKey = `auth_disable_otp:${userId}`;
-        await redis.setex(otpKey, 300, JSON.stringify({
-            otp: otp,
-            otpId: otpId,
-            expiresAt: expiresAt.toISOString(),
-            attempts: 0,
-            maxAttempts: 5
-        }));
-
-        // Get user's email
-        const email = user.email;
-        if (!email) {
-            return res.status(400).json({
-                success: false,
-                error: { code: 'NO_EMAIL', message: 'No email address found for this account' }
-            });
-        }
+        // Store challenge
+        await UserChallenge.create({
+            userId,
+            challengeId,
+            type: 'disable_authenticator',
+            otpHash: crypto.createHash('sha256').update(otp).digest('hex'),
+            expiresAt,
+            attempts: 0
+        });
 
         // Send OTP email
         await sendProfessionalEmail({
-            email: email,
+            email: user.email,
             template: 'otp',
             data: {
-                name: user.firstName || 'User',
+                name: user.firstName,
                 otp: otp,
-                action: 'disable two-factor authentication'
+                action: 'disable authenticator'
             }
         });
 
-        // Log the activity
-        await logActivity('authenticator_disable_otp_sent', 'User', userId, userId, 'User', req);
+        // Log activity
+        await SystemLog.create({
+            action: 'authenticator_disable_challenge',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            status: 'pending',
+            metadata: { userId: userId.toString() }
+        });
 
-        console.log(`📧 Authenticator disable OTP sent to ${email}`);
-
-        res.status(200).json({
-            success: true,
-            message: 'Verification code sent to your email',
+        res.json({
+            challengeId,
             data: {
-                otpId: otpId,
-                expiresAt: expiresAt.toISOString(),
-                email: email
+                email: user.email,
+                expiresAt: expiresAt.toISOString()
             }
         });
-
     } catch (err) {
-        console.error('Error sending authenticator disable OTP:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: err.message || 'Failed to send verification code'
-            }
-        });
+        console.error('Error creating disable challenge:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to create challenge' });
     }
 });
 
-// =============================================
-// 5. POST /api/users/two-factor/authenticator/disable - FIXED: SUPPORTS OTP + 2FA CODE
-// =============================================
-app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res) => {
+app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (req, res) => {
     try {
+        const { method, otp, challengeId, code } = req.body;
         const userId = req.user._id;
         const user = await User.findById(userId);
-        const { code, otp, otpId, method } = req.body; // method: 'authenticator' or 'otp'
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: { code: 'USER_NOT_FOUND', message: 'User not found' }
-            });
-        }
 
         if (!user.twoFactorAuth?.enabled) {
             return res.status(400).json({
-                success: false,
-                error: { code: 'NOT_ENABLED', message: 'Authenticator is not enabled' }
+                code: 'AUTHENTICATOR_NOT_ENABLED',
+                message: 'Authenticator is not enabled for this account'
             });
         }
 
-        // Validate required fields based on method
+        let verified = false;
+
         if (method === 'otp') {
-            if (!otp || !otpId) {
-                return res.status(400).json({
-                    success: false,
-                    error: { code: 'MISSING_FIELDS', message: 'OTP and OTP ID are required' }
-                });
+            // Verify email OTP
+            const challenge = await UserChallenge.findOne({
+                challengeId,
+                userId,
+                type: 'disable_authenticator',
+                expiresAt: { $gt: new Date() }
+            });
+
+            if (!challenge) {
+                return res.status(400).json({ code: 'CHALLENGE_INVALID', message: 'Invalid or expired challenge' });
             }
 
-            // Verify OTP from Redis
-            const otpKey = `auth_disable_otp:${userId}`;
-            const storedData = await redis.get(otpKey);
-            
-            if (!storedData) {
-                return res.status(400).json({
-                    success: false,
-                    error: { code: 'OTP_EXPIRED', message: 'Verification code expired. Please request a new one.' }
-                });
+            if (challenge.attempts >= 3) {
+                await UserChallenge.findByIdAndDelete(challenge._id);
+                return res.status(400).json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts' });
             }
 
-            const data = JSON.parse(storedData);
-            
-            // Check OTP ID matches
-            if (data.otpId !== otpId) {
-                return res.status(400).json({
-                    success: false,
-                    error: { code: 'INVALID_OTP', message: 'Invalid verification code.' }
-                });
+            const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+            if (otpHash !== challenge.otpHash) {
+                await UserChallenge.findByIdAndUpdate(challenge._id, { $inc: { attempts: 1 } });
+                return res.status(400).json({ code: 'INVALID_OTP', message: 'Invalid OTP' });
             }
 
-            // Check attempts
-            if (data.attempts >= data.maxAttempts) {
-                await redis.del(otpKey);
-                return res.status(400).json({
-                    success: false,
-                    error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts. Please request a new code.' }
-                });
-            }
-
-            // Verify OTP
-            if (data.otp !== otp) {
-                data.attempts += 1;
-                await redis.setex(otpKey, 300, JSON.stringify(data));
-                return res.status(400).json({
-                    success: false,
-                    error: { code: 'INVALID_OTP', message: `Invalid verification code. ${data.maxAttempts - data.attempts} attempts remaining.` }
-                });
-            }
-
-            // OTP verified - clean up
-            await redis.del(otpKey);
+            verified = true;
+            await UserChallenge.findByIdAndDelete(challenge._id);
 
         } else if (method === 'authenticator') {
-            // Use authenticator code (for password users who prefer this method)
-            if (!code || code.length !== 6) {
-                return res.status(400).json({
-                    success: false,
-                    error: { code: 'CODE_REQUIRED', message: 'Valid 6-digit authenticator code required' }
-                });
-            }
-
-            // Verify TOTP code against stored secret
-            const isCodeValid = speakeasy.totp.verify({
-                secret: user.twoFactorAuth.secret,
+            // Verify authenticator code
+            const secret = decryptSecret(user.twoFactorAuth.secret);
+            verified = speakeasy.totp.verify({
+                secret: secret,
                 encoding: 'base32',
                 token: code,
-                window: 2
+                window: 1
             });
 
-            if (!isCodeValid) {
-                return res.status(401).json({
-                    success: false,
-                    error: { code: 'INVALID_2FA_CODE', message: 'Invalid authenticator code' }
-                });
+            if (!verified) {
+                return res.status(400).json({ code: 'INVALID_OTP', message: 'Invalid authenticator code' });
             }
-
-        } else {
-            return res.status(400).json({
-                success: false,
-                error: { code: 'INVALID_METHOD', message: 'Method must be "authenticator" or "otp"' }
-            });
         }
 
-        // Disable 2FA
-        user.twoFactorAuth.enabled = false;
-        user.twoFactorAuth.secret = undefined;
-        user.twoFactorAuth.recoveryCodes = [];
-        user.twoFactorAuth.enabledAt = null;
-        
-        await user.save();
+        if (!verified) {
+            return res.status(400).json({ code: 'VERIFICATION_FAILED', message: 'Verification failed' });
+        }
+
+        // Disable authenticator atomically
+        await User.findByIdAndUpdate(userId, {
+            'twoFactorAuth.enabled': false,
+            'twoFactorAuth.secret': null,
+            'twoFactorAuth.enabledAt': null
+        });
+
+        // Invalidate recovery codes
+        await UserRecoveryCodes.deleteMany({ userId });
 
         // Log activity
-        await logActivity('authenticator_disabled', 'User', userId, userId, 'User', req, {
-            method: method,
-            disabledAt: new Date().toISOString()
+        await SystemLog.create({
+            action: 'authenticator_disabled',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            status: 'success',
+            metadata: { userId: userId.toString(), method }
         });
 
-        // Send notification email
-        try {
-            await sendProfessionalEmail({
-                email: user.email,
-                template: 'default',
-                data: {
-                    name: user.firstName || 'User',
-                    subject: 'Two-Factor Authentication Disabled',
-                    message: 'Two-factor authentication has been disabled on your account.',
-                    actionRequired: 'If you did not disable 2FA, please contact support immediately.',
-                    actionLink: 'https://www.bithashcapital.live/security',
-                    buttonText: 'Review Security'
-                }
-            });
-        } catch (emailError) {
-            console.error('Failed to send disable notification email:', emailError);
-        }
-
-        res.status(200).json({
-            success: true,
-            message: 'Authenticator disabled successfully.'
-        });
-
+        res.json({ success: true });
     } catch (err) {
         console.error('Error disabling authenticator:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: err.message || 'Failed to disable authenticator'
-            }
-        });
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to disable authenticator' });
     }
 });
 
-// =============================================
-// 6. POST /api/users/two-factor/authenticator/recovery-codes
-// =============================================
-app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const user = await User.findById(userId);
+app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId);
 
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
-            }
-        });
-    }
-
-    if (!user.twoFactorAuth?.enabled) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'NOT_ENABLED',
-                message: 'Authenticator is not enabled'
-            }
-        });
-    }
-
-    // Require password AND 2FA code for regeneration
-    const { password, code } = req.body;
-    
-    if (!password) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'PASSWORD_REQUIRED',
-                message: 'Password required to regenerate recovery codes'
-            }
-        });
-    }
-
-    if (!code || code.length !== 6) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'CODE_REQUIRED',
-                message: 'Valid 6-digit authenticator code required'
-            }
-        });
-    }
-
-    // Verify password
-    const userWithPassword = await User.findById(userId).select('+password');
-    const isPasswordValid = await bcrypt.compare(password, userWithPassword.password);
-    
-    if (!isPasswordValid) {
-        return res.status(401).json({
-            success: false,
-            error: {
-                code: 'INVALID_PASSWORD',
-                message: 'Invalid password'
-            }
-        });
-    }
-
-    // Verify TOTP code against stored secret
-    const isCodeValid = speakeasy.totp.verify({
-        secret: user.twoFactorAuth.secret,
-        encoding: 'base32',
-        token: code,
-        window: 2
-    });
-
-    if (!isCodeValid) {
-        return res.status(401).json({
-            success: false,
-            error: {
-                code: 'INVALID_2FA_CODE',
-                message: 'Invalid authenticator code'
-            }
-        });
-    }
-
-    // Generate new recovery codes
-    const recoveryCodes = [];
-    const hashedRecoveryCodes = [];
-    
-    for (let i = 0; i < 8; i++) {
-        const segment1 = generateRecoverySegment();
-        const segment2 = generateRecoverySegment();
-        const code = `${segment1}-${segment2}`;
-        recoveryCodes.push(code);
-        hashedRecoveryCodes.push({
-            hash: crypto.createHash('sha256').update(code).digest('hex'),
-            used: false
-        });
-    }
-
-    user.twoFactorAuth.recoveryCodes = hashedRecoveryCodes;
-    await user.save();
-
-    // Log activity
-    await logActivity('recovery_codes_regenerated', 'User', userId, userId, 'User', req);
-
-    res.status(200).json({
-        success: true,
-        recoveryCodes: recoveryCodes
-    });
-
-} catch (err) {
-    console.error('Error regenerating recovery codes:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to regenerate recovery codes'
-        }
-    });
-}
-});
-
-// =============================================
-// 7. GET /api/users/devices - Active Devices - FIXED
-// =============================================
-app.get('/api/users/devices', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const user = await User.findById(userId)
-.select('loginHistory')
-.lean();
-
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
-            }
-        });
-    }
-
-    // Get current session identifier
-    const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
-
-    // Format devices from loginHistory
-    const devices = [];
-
-    // Process loginHistory entries
-    if (user.loginHistory && user.loginHistory.length > 0) {
-        for (const device of user.loginHistory) {
-            const isCurrent = device.sessionId === currentSessionId || 
-                             (device._id && device._id.toString() === currentSessionId);
-            const isActive = device.sessionStatus !== 'revoked' && 
-                             device.sessionStatus !== 'expired' &&
-                             device.sessionStatus !== 'inactive';
-
-            // Extract device info
-            const userAgent = device.userAgent || device.device || '';
-            const browser = detectBrowser(userAgent);
-            const os = detectOS(userAgent);
-            const deviceType = detectDeviceType(userAgent);
-
-            // Get last active time
-            const lastActive = device.lastActiveAt || device.timestamp || device.createdAt || new Date();
-
-            // Build location string
-            const locationParts = [];
-            if (device.location?.city) locationParts.push(device.location.city);
-            if (device.location?.region) locationParts.push(device.location.region);
-            if (device.location?.country) locationParts.push(device.location.country);
-            const locationStr = locationParts.length > 0 ? locationParts.join(', ') : 'Unknown location';
-
-            devices.push({
-                id: device._id?.toString() || `device_${devices.length}`,
-                name: device.name || `${browser} on ${os}`,
-                deviceType: deviceType,
-                sessionStatus: isActive ? 'active' : 'revoked',
-                current: isCurrent,
-                lastActiveAt: lastActive,
-                createdAt: device.createdAt || device.timestamp || lastActive,
-                location: {
-                    city: device.location?.city || 'Unknown',
-                    country: device.location?.country || 'Unknown',
-                    region: device.location?.region || 'Unknown',
-                    formatted: locationStr
-                },
-                browser: browser,
-                os: os,
-                ip: device.ip || device.ipAddress || 'Unknown',
-                userAgent: userAgent
+        if (!user.twoFactorAuth?.enabled) {
+            return res.status(400).json({
+                code: 'AUTHENTICATOR_NOT_ENABLED',
+                message: 'Authenticator must be enabled to regenerate recovery codes'
             });
         }
-    }
 
-    // If no devices in history, create a default current device
-    if (devices.length === 0) {
-        const userAgent = req.headers['user-agent'] || 'Unknown Browser';
-        const browser = detectBrowser(userAgent);
-        const os = detectOS(userAgent);
-        const deviceType = detectDeviceType(userAgent);
-        
-        // Try to get location from request
-        let location = 'Unknown location';
-        let city = 'Unknown', country = 'Unknown';
-        if (req.clientLocation) {
-            location = req.clientLocation.location || 'Unknown location';
-            city = req.clientLocation.city || 'Unknown';
-            country = req.clientLocation.country || 'Unknown';
-        }
-        
-        devices.push({
-            id: 'current_device',
-            name: `${browser} on ${os}`,
-            deviceType: deviceType,
-            sessionStatus: 'active',
-            current: true,
-            lastActiveAt: new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-            location: {
-                city: city,
-                country: country,
-                formatted: location
-            },
-            browser: browser,
-            os: os,
-            ip: req.ip || 'Unknown',
-            userAgent: userAgent
+        // Generate challenge
+        const challengeId = crypto.randomBytes(16).toString('hex');
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        await UserChallenge.create({
+            userId,
+            challengeId,
+            type: 'recovery_codes',
+            otpHash: crypto.createHash('sha256').update(otp).digest('hex'),
+            expiresAt,
+            attempts: 0
         });
+
+        await sendProfessionalEmail({
+            email: user.email,
+            template: 'otp',
+            data: {
+                name: user.firstName,
+                otp: otp,
+                action: 'regenerate recovery codes'
+            }
+        });
+
+        res.json({
+            challengeId,
+            data: {
+                email: user.email,
+                expiresAt: expiresAt.toISOString()
+            }
+        });
+    } catch (err) {
+        console.error('Error creating recovery codes challenge:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to create challenge' });
     }
-
-    // Sort: current device first, then by last active
-    devices.sort((a, b) => {
-        if (a.current && !b.current) return -1;
-        if (!a.current && b.current) return 1;
-        return new Date(b.lastActiveAt) - new Date(a.lastActiveAt);
-    });
-
-    res.status(200).json({
-        success: true,
-        devices: devices
-    });
-
-} catch (err) {
-    console.error('Error fetching devices:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to fetch devices'
-        }
-    });
-}
 });
 
-// =============================================
-// 8. POST /api/users/devices/:deviceId/logout - NEW ENDPOINT
-// =============================================
+
+app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res) => {
+    try {
+        const { method, otp, challengeId, code } = req.body;
+        const userId = req.user._id;
+        const user = await User.findById(userId);
+
+        if (!user.twoFactorAuth?.enabled) {
+            return res.status(400).json({
+                code: 'AUTHENTICATOR_NOT_ENABLED',
+                message: 'Authenticator must be enabled to regenerate recovery codes'
+            });
+        }
+
+        let verified = false;
+
+        if (method === 'otp') {
+            const challenge = await UserChallenge.findOne({
+                challengeId,
+                userId,
+                type: 'recovery_codes',
+                expiresAt: { $gt: new Date() }
+            });
+
+            if (!challenge) {
+                return res.status(400).json({ code: 'CHALLENGE_INVALID', message: 'Invalid or expired challenge' });
+            }
+
+            if (challenge.attempts >= 3) {
+                await UserChallenge.findByIdAndDelete(challenge._id);
+                return res.status(400).json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts' });
+            }
+
+            const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+            if (otpHash !== challenge.otpHash) {
+                await UserChallenge.findByIdAndUpdate(challenge._id, { $inc: { attempts: 1 } });
+                return res.status(400).json({ code: 'INVALID_OTP', message: 'Invalid OTP' });
+            }
+
+            verified = true;
+            await UserChallenge.findByIdAndDelete(challenge._id);
+
+        } else if (method === 'authenticator') {
+            const secret = decryptSecret(user.twoFactorAuth.secret);
+            verified = speakeasy.totp.verify({
+                secret: secret,
+                encoding: 'base32',
+                token: code,
+                window: 1
+            });
+
+            if (!verified) {
+                return res.status(400).json({ code: 'INVALID_OTP', message: 'Invalid authenticator code' });
+            }
+        }
+
+        if (!verified) {
+            return res.status(400).json({ code: 'VERIFICATION_FAILED', message: 'Verification failed' });
+        }
+
+        // Regenerate recovery codes
+        const recoveryCodes = generateRecoveryCodes();
+        const hashedCodes = recoveryCodes.map(code => crypto.createHash('sha256').update(code).digest('hex'));
+
+        await UserRecoveryCodes.findOneAndUpdate(
+            { userId },
+            { 
+                userId,
+                hashes: hashedCodes,
+                generatedAt: new Date()
+            },
+            { upsert: true }
+        );
+
+        // Log activity
+        await SystemLog.create({
+            action: 'recovery_codes_regenerated',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            status: 'success',
+            metadata: { userId: userId.toString() }
+        });
+
+        res.json({ recoveryCodes });
+    } catch (err) {
+        console.error('Error regenerating recovery codes:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to regenerate recovery codes' });
+    }
+});
+
+
 app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
     try {
         const { deviceId } = req.params;
         const userId = req.user._id;
+
+        // Find the device session
         const user = await User.findById(userId);
-
         if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: { code: 'USER_NOT_FOUND', message: 'User not found' }
-            });
+            return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'User not found' });
         }
 
-        if (!user.loginHistory || user.loginHistory.length === 0) {
-            return res.status(404).json({
-                success: false,
-                error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found' }
-            });
+        // Find and remove the device from loginHistory
+        const deviceIndex = user.loginHistory?.findIndex(
+            session => session._id.toString() === deviceId
+        ) ?? -1;
+
+        if (deviceIndex === -1) {
+            return res.status(404).json({ code: 'DEVICE_NOT_FOUND', message: 'Device not found' });
         }
 
-        // Find and revoke the device
-        let deviceFound = false;
-        user.loginHistory = user.loginHistory.map(device => {
-            const deviceIdStr = device._id?.toString() || device.sessionId;
-            if (deviceIdStr === deviceId) {
-                deviceFound = true;
-                return {
-                    ...device,
-                    sessionStatus: 'revoked',
-                    revokedAt: new Date()
-                };
-            }
-            return device;
+        // Remove the session
+        user.loginHistory.splice(deviceIndex, 1);
+        await user.save();
+
+        // Log activity
+        await SystemLog.create({
+            action: 'device_logout',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            status: 'success',
+            metadata: { deviceId, userId: userId.toString() }
         });
 
-        if (!deviceFound) {
-            return res.status(404).json({
-                success: false,
-                error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found' }
-            });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error logging out device:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to logout device' });
+    }
+});
+
+
+app.post('/api/users/devices/logout-all', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        
+        // Get current session identifier (from token or cookie)
+        const currentSessionId = req.sessionId || req.headers['x-session-id'] || null;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'User not found' });
+        }
+
+        // Keep only the current session
+        if (currentSessionId) {
+            user.loginHistory = user.loginHistory?.filter(
+                session => session._id.toString() === currentSessionId
+            ) || [];
+        } else {
+            // If no session ID, keep only the most recent session
+            const sortedHistory = (user.loginHistory || []).sort((a, b) => 
+                new Date(b.timestamp) - new Date(a.timestamp)
+            );
+            const current = sortedHistory[0];
+            user.loginHistory = current ? [current] : [];
         }
 
         await user.save();
 
         // Log activity
-        await logActivity('device_logout', 'User', userId, userId, 'User', req, {
-            deviceId: deviceId,
-            deviceName: user.loginHistory.find(d => d._id?.toString() === deviceId || d.sessionId === deviceId)?.name || 'Unknown'
+        await SystemLog.create({
+            action: 'devices_logged_out_all',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            status: 'success',
+            metadata: { userId: userId.toString() }
         });
 
-        res.status(200).json({
-            success: true,
-            message: 'Device logged out successfully'
-        });
-
+        res.json({ success: true });
     } catch (err) {
-        console.error('Error logging out device:', err);
-        res.status(500).json({
-            success: false,
-            error: {
-                code: 'SERVER_ERROR',
-                message: err.message || 'Failed to logout device'
-            }
-        });
+        console.error('Error logging out all devices:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to logout all devices' });
     }
 });
 
-// =============================================
-// 9. POST /api/users/devices/logout-all
-// =============================================
-app.post('/api/users/devices/logout-all', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const user = await User.findById(userId);
 
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
-            }
-        });
-    }
 
-    // Get current session identifier
-    const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
 
-    // Count active devices before revocation
-    const activeDevices = user.loginHistory?.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired') || [];
-    const totalActive = activeDevices.length;
 
-    // Revoke all sessions except current
-    let revokedCount = 0;
-    if (user.loginHistory && user.loginHistory.length > 0) {
-        user.loginHistory = user.loginHistory.map(device => {
-            const deviceId = device.sessionId || device._id?.toString();
-            const isCurrent = deviceId && deviceId === currentSessionId;
-            
-            if (!isCurrent && device.sessionStatus !== 'revoked' && device.sessionStatus !== 'expired') {
-                revokedCount++;
-                return { 
-                    ...device, 
-                    sessionStatus: 'revoked', 
-                    revokedAt: new Date() 
-                };
-            }
-            return device;
-        });
-    }
 
-    await user.save();
 
-    // Blacklist current token (except current session)
-    if (revokedCount > 0) {
-        const currentToken = req.headers.authorization?.split(' ')[1];
-        if (currentToken) {
-            try {
-                const decoded = verifyJWT(currentToken);
-                const tokenExpiry = new Date(decoded.exp * 1000);
-                await redis.set(`blacklist:${currentToken}`, 'true', 'PX', tokenExpiry - Date.now());
-            } catch (err) {
-                // Token might be invalid, continue
-            }
-        }
-    }
 
-    // Log activity
-    await logActivity('logout_all_devices', 'User', userId, userId, 'User', req, {
-        revokedCount: revokedCount,
-        totalActiveBefore: totalActive
-    });
 
-    res.status(200).json({
-        success: true,
-        message: 'All other devices have been logged out.',
-        revokedCount: revokedCount
-    });
 
-} catch (err) {
-    console.error('Error logging out all devices:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to logout all devices'
-        }
-    });
-}
-});
 
-// =============================================
-// 10. GET /api/settings/languages
-// =============================================
-app.get('/api/settings/languages', async (req, res) => {
-try {
-// Comprehensive language catalog based on ISO 639 and BCP 47
-const languages = [
-{ code: 'en', name: 'English', nativeName: 'English', locale: 'en-US', territory: 'US', flag: '🇺🇸', direction: 'ltr' },
-{ code: 'es', name: 'Spanish', nativeName: 'Español', locale: 'es-ES', territory: 'ES', flag: '🇪🇸', direction: 'ltr' },
-{ code: 'fr', name: 'French', nativeName: 'Français', locale: 'fr-FR', territory: 'FR', flag: '🇫🇷', direction: 'ltr' },
-{ code: 'de', name: 'German', nativeName: 'Deutsch', locale: 'de-DE', territory: 'DE', flag: '🇩🇪', direction: 'ltr' },
-{ code: 'it', name: 'Italian', nativeName: 'Italiano', locale: 'it-IT', territory: 'IT', flag: '🇮🇹', direction: 'ltr' },
-{ code: 'pt', name: 'Portuguese', nativeName: 'Português', locale: 'pt-PT', territory: 'PT', flag: '🇵🇹', direction: 'ltr' },
-{ code: 'nl', name: 'Dutch', nativeName: 'Nederlands', locale: 'nl-NL', territory: 'NL', flag: '🇳🇱', direction: 'ltr' },
-{ code: 'ru', name: 'Russian', nativeName: 'Русский', locale: 'ru-RU', territory: 'RU', flag: '🇷🇺', direction: 'ltr' },
-{ code: 'ja', name: 'Japanese', nativeName: '日本語', locale: 'ja-JP', territory: 'JP', flag: '🇯🇵', direction: 'ltr' },
-{ code: 'ko', name: 'Korean', nativeName: '한국어', locale: 'ko-KR', territory: 'KR', flag: '🇰🇷', direction: 'ltr' },
-{ code: 'zh', name: 'Chinese', nativeName: '中文', locale: 'zh-CN', territory: 'CN', flag: '🇨🇳', direction: 'ltr' },
-{ code: 'ar', name: 'Arabic', nativeName: 'العربية', locale: 'ar-SA', territory: 'SA', flag: '🇸🇦', direction: 'rtl' },
-{ code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', locale: 'hi-IN', territory: 'IN', flag: '🇮🇳', direction: 'ltr' },
-{ code: 'bn', name: 'Bengali', nativeName: 'বাংলা', locale: 'bn-BD', territory: 'BD', flag: '🇧🇩', direction: 'ltr' },
-{ code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', locale: 'id-ID', territory: 'ID', flag: '🇮🇩', direction: 'ltr' },
-{ code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', locale: 'ms-MY', territory: 'MY', flag: '🇲🇾', direction: 'ltr' },
-{ code: 'th', name: 'Thai', nativeName: 'ไทย', locale: 'th-TH', territory: 'TH', flag: '🇹🇭', direction: 'ltr' },
-{ code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', locale: 'vi-VN', territory: 'VN', flag: '🇻🇳', direction: 'ltr' },
-{ code: 'tr', name: 'Turkish', nativeName: 'Türkçe', locale: 'tr-TR', territory: 'TR', flag: '🇹🇷', direction: 'ltr' },
-{ code: 'pl', name: 'Polish', nativeName: 'Polski', locale: 'pl-PL', territory: 'PL', flag: '🇵🇱', direction: 'ltr' },
-{ code: 'uk', name: 'Ukrainian', nativeName: 'Українська', locale: 'uk-UA', territory: 'UA', flag: '🇺🇦', direction: 'ltr' },
-{ code: 'ro', name: 'Romanian', nativeName: 'Română', locale: 'ro-RO', territory: 'RO', flag: '🇷🇴', direction: 'ltr' },
-{ code: 'hu', name: 'Hungarian', nativeName: 'Magyar', locale: 'hu-HU', territory: 'HU', flag: '🇭🇺', direction: 'ltr' },
-{ code: 'cs', name: 'Czech', nativeName: 'Čeština', locale: 'cs-CZ', territory: 'CZ', flag: '🇨🇿', direction: 'ltr' },
-{ code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', locale: 'sk-SK', territory: 'SK', flag: '🇸🇰', direction: 'ltr' },
-{ code: 'bg', name: 'Bulgarian', nativeName: 'Български', locale: 'bg-BG', territory: 'BG', flag: '🇧🇬', direction: 'ltr' },
-{ code: 'sr', name: 'Serbian', nativeName: 'Српски', locale: 'sr-RS', territory: 'RS', flag: '🇷🇸', direction: 'ltr' },
-{ code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', locale: 'hr-HR', territory: 'HR', flag: '🇭🇷', direction: 'ltr' },
-{ code: 'sv', name: 'Swedish', nativeName: 'Svenska', locale: 'sv-SE', territory: 'SE', flag: '🇸🇪', direction: 'ltr' },
-{ code: 'no', name: 'Norwegian', nativeName: 'Norsk', locale: 'nb-NO', territory: 'NO', flag: '🇳🇴', direction: 'ltr' },
-{ code: 'fi', name: 'Finnish', nativeName: 'Suomi', locale: 'fi-FI', territory: 'FI', flag: '🇫🇮', direction: 'ltr' },
-{ code: 'da', name: 'Danish', nativeName: 'Dansk', locale: 'da-DK', territory: 'DK', flag: '🇩🇰', direction: 'ltr' },
-{ code: 'el', name: 'Greek', nativeName: 'Ελληνικά', locale: 'el-GR', territory: 'GR', flag: '🇬🇷', direction: 'ltr' },
-{ code: 'he', name: 'Hebrew', nativeName: 'עברית', locale: 'he-IL', territory: 'IL', flag: '🇮🇱', direction: 'rtl' },
-{ code: 'fa', name: 'Persian', nativeName: 'فارسی', locale: 'fa-IR', territory: 'IR', flag: '🇮🇷', direction: 'rtl' },
-{ code: 'ur', name: 'Urdu', nativeName: 'اردو', locale: 'ur-PK', territory: 'PK', flag: '🇵🇰', direction: 'rtl' },
-{ code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', locale: 'sw-KE', territory: 'KE', flag: '🇰🇪', direction: 'ltr' },
-{ code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', locale: 'af-ZA', territory: 'ZA', flag: '🇿🇦', direction: 'ltr' },
-{ code: 'am', name: 'Amharic', nativeName: 'አማርኛ', locale: 'am-ET', territory: 'ET', flag: '🇪🇹', direction: 'ltr' },
-{ code: 'tl', name: 'Tagalog', nativeName: 'Tagalog', locale: 'tl-PH', territory: 'PH', flag: '🇵🇭', direction: 'ltr' }
-];
 
-    res.status(200).json({
-        languages: languages
-    });
-
-} catch (err) {
-    console.error('Error fetching languages:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to fetch languages'
-        }
-    });
-}
-});
-
-// =============================================
-// 11. GET /api/settings/timezones
-// =============================================
-app.get('/api/settings/timezones', async (req, res) => {
-try {
-// Comprehensive IANA timezone list
-const timezones = [
-// UTC
-{ id: 'UTC', name: 'UTC', region: 'UTC', offset: '+00:00' },
-
-        // Africa
-        { id: 'Africa/Nairobi', name: 'Nairobi', region: 'Africa', offset: '+03:00' },
-        { id: 'Africa/Cairo', name: 'Cairo', region: 'Africa', offset: '+03:00' },
-        { id: 'Africa/Johannesburg', name: 'Johannesburg', region: 'Africa', offset: '+02:00' },
-        { id: 'Africa/Lagos', name: 'Lagos', region: 'Africa', offset: '+01:00' },
-        { id: 'Africa/Casablanca', name: 'Casablanca', region: 'Africa', offset: '+01:00' },
-        { id: 'Africa/Tunis', name: 'Tunis', region: 'Africa', offset: '+01:00' },
-        { id: 'Africa/Algiers', name: 'Algiers', region: 'Africa', offset: '+01:00' },
-        { id: 'Africa/Khartoum', name: 'Khartoum', region: 'Africa', offset: '+02:00' },
-        { id: 'Africa/Accra', name: 'Accra', region: 'Africa', offset: '+00:00' },
-        { id: 'Africa/Douala', name: 'Douala', region: 'Africa', offset: '+01:00' },
-        { id: 'Africa/Luanda', name: 'Luanda', region: 'Africa', offset: '+01:00' },
-        { id: 'Africa/Maputo', name: 'Maputo', region: 'Africa', offset: '+02:00' },
-        { id: 'Africa/Windhoek', name: 'Windhoek', region: 'Africa', offset: '+02:00' },
-        
-        // Europe
-        { id: 'Europe/London', name: 'London', region: 'Europe', offset: '+01:00' },
-        { id: 'Europe/Paris', name: 'Paris', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Berlin', name: 'Berlin', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Rome', name: 'Rome', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Madrid', name: 'Madrid', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Bucharest', name: 'Bucharest', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Athens', name: 'Athens', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Istanbul', name: 'Istanbul', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Moscow', name: 'Moscow', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Dublin', name: 'Dublin', region: 'Europe', offset: '+01:00' },
-        { id: 'Europe/Zurich', name: 'Zurich', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Vienna', name: 'Vienna', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Brussels', name: 'Brussels', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Amsterdam', name: 'Amsterdam', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Stockholm', name: 'Stockholm', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Oslo', name: 'Oslo', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Copenhagen', name: 'Copenhagen', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Helsinki', name: 'Helsinki', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Warsaw', name: 'Warsaw', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Prague', name: 'Prague', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Budapest', name: 'Budapest', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Sofia', name: 'Sofia', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Kiev', name: 'Kiev', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Minsk', name: 'Minsk', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Riga', name: 'Riga', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Vilnius', name: 'Vilnius', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Tallinn', name: 'Tallinn', region: 'Europe', offset: '+03:00' },
-        { id: 'Europe/Lisbon', name: 'Lisbon', region: 'Europe', offset: '+01:00' },
-        { id: 'Europe/Belgrade', name: 'Belgrade', region: 'Europe', offset: '+02:00' },
-        { id: 'Europe/Sarajevo', name: 'Sarajevo', region: 'Europe', offset: '+02:00' },
-        
-        // Asia
-        { id: 'Asia/Tokyo', name: 'Tokyo', region: 'Asia', offset: '+09:00' },
-        { id: 'Asia/Seoul', name: 'Seoul', region: 'Asia', offset: '+09:00' },
-        { id: 'Asia/Shanghai', name: 'Shanghai', region: 'Asia', offset: '+08:00' },
-        { id: 'Asia/Singapore', name: 'Singapore', region: 'Asia', offset: '+08:00' },
-        { id: 'Asia/Kolkata', name: 'Kolkata', region: 'Asia', offset: '+05:30' },
-        { id: 'Asia/Dubai', name: 'Dubai', region: 'Asia', offset: '+04:00' },
-        { id: 'Asia/Riyadh', name: 'Riyadh', region: 'Asia', offset: '+03:00' },
-        { id: 'Asia/Bangkok', name: 'Bangkok', region: 'Asia', offset: '+07:00' },
-        { id: 'Asia/Jakarta', name: 'Jakarta', region: 'Asia', offset: '+07:00' },
-        { id: 'Asia/Kuala_Lumpur', name: 'Kuala Lumpur', region: 'Asia', offset: '+08:00' },
-        { id: 'Asia/Manila', name: 'Manila', region: 'Asia', offset: '+08:00' },
-        { id: 'Asia/Hong_Kong', name: 'Hong Kong', region: 'Asia', offset: '+08:00' },
-        { id: 'Asia/Taipei', name: 'Taipei', region: 'Asia', offset: '+08:00' },
-        { id: 'Asia/Dhaka', name: 'Dhaka', region: 'Asia', offset: '+06:00' },
-        { id: 'Asia/Karachi', name: 'Karachi', region: 'Asia', offset: '+05:00' },
-        { id: 'Asia/Tehran', name: 'Tehran', region: 'Asia', offset: '+04:30' },
-        { id: 'Asia/Baghdad', name: 'Baghdad', region: 'Asia', offset: '+03:00' },
-        { id: 'Asia/Beirut', name: 'Beirut', region: 'Asia', offset: '+03:00' },
-        { id: 'Asia/Jerusalem', name: 'Jerusalem', region: 'Asia', offset: '+03:00' },
-        { id: 'Asia/Kabul', name: 'Kabul', region: 'Asia', offset: '+04:30' },
-        { id: 'Asia/Kathmandu', name: 'Kathmandu', region: 'Asia', offset: '+05:45' },
-        { id: 'Asia/Colombo', name: 'Colombo', region: 'Asia', offset: '+05:30' },
-        { id: 'Asia/Rangoon', name: 'Rangoon', region: 'Asia', offset: '+06:30' },
-        { id: 'Asia/Bangkok', name: 'Bangkok', region: 'Asia', offset: '+07:00' },
-        { id: 'Asia/Ho_Chi_Minh', name: 'Ho Chi Minh', region: 'Asia', offset: '+07:00' },
-        { id: 'Asia/Ulaanbaatar', name: 'Ulaanbaatar', region: 'Asia', offset: '+08:00' },
-        
-        // Americas
-        { id: 'America/New_York', name: 'New York', region: 'Americas', offset: '-04:00' },
-        { id: 'America/Los_Angeles', name: 'Los Angeles', region: 'Americas', offset: '-07:00' },
-        { id: 'America/Chicago', name: 'Chicago', region: 'Americas', offset: '-05:00' },
-        { id: 'America/Denver', name: 'Denver', region: 'Americas', offset: '-06:00' },
-        { id: 'America/Phoenix', name: 'Phoenix', region: 'Americas', offset: '-07:00' },
-        { id: 'America/Toronto', name: 'Toronto', region: 'Americas', offset: '-04:00' },
-        { id: 'America/Vancouver', name: 'Vancouver', region: 'Americas', offset: '-07:00' },
-        { id: 'America/Sao_Paulo', name: 'Sao Paulo', region: 'Americas', offset: '-03:00' },
-        { id: 'America/Mexico_City', name: 'Mexico City', region: 'Americas', offset: '-06:00' },
-        { id: 'America/Bogota', name: 'Bogota', region: 'Americas', offset: '-05:00' },
-        { id: 'America/Buenos_Aires', name: 'Buenos Aires', region: 'Americas', offset: '-03:00' },
-        { id: 'America/Santiago', name: 'Santiago', region: 'Americas', offset: '-04:00' },
-        { id: 'America/Lima', name: 'Lima', region: 'Americas', offset: '-05:00' },
-        { id: 'America/Caracas', name: 'Caracas', region: 'Americas', offset: '-04:00' },
-        { id: 'America/Panama', name: 'Panama', region: 'Americas', offset: '-05:00' },
-        { id: 'America/Montevideo', name: 'Montevideo', region: 'Americas', offset: '-03:00' },
-        { id: 'America/Asuncion', name: 'Asuncion', region: 'Americas', offset: '-04:00' },
-        { id: 'America/La_Paz', name: 'La Paz', region: 'Americas', offset: '-04:00' },
-        { id: 'America/Guatemala', name: 'Guatemala', region: 'Americas', offset: '-06:00' },
-        { id: 'America/Managua', name: 'Managua', region: 'Americas', offset: '-06:00' },
-        { id: 'America/San_Salvador', name: 'San Salvador', region: 'Americas', offset: '-06:00' },
-        { id: 'America/Tegucigalpa', name: 'Tegucigalpa', region: 'Americas', offset: '-06:00' },
-        
-        // Pacific
-        { id: 'Australia/Sydney', name: 'Sydney', region: 'Pacific', offset: '+10:00' },
-        { id: 'Australia/Melbourne', name: 'Melbourne', region: 'Pacific', offset: '+10:00' },
-        { id: 'Australia/Brisbane', name: 'Brisbane', region: 'Pacific', offset: '+10:00' },
-        { id: 'Australia/Perth', name: 'Perth', region: 'Pacific', offset: '+08:00' },
-        { id: 'Australia/Adelaide', name: 'Adelaide', region: 'Pacific', offset: '+09:30' },
-        { id: 'Australia/Hobart', name: 'Hobart', region: 'Pacific', offset: '+10:00' },
-        { id: 'Pacific/Auckland', name: 'Auckland', region: 'Pacific', offset: '+12:00' },
-        { id: 'Pacific/Fiji', name: 'Fiji', region: 'Pacific', offset: '+12:00' },
-        { id: 'Pacific/Guam', name: 'Guam', region: 'Pacific', offset: '+10:00' },
-        { id: 'Pacific/Honolulu', name: 'Honolulu', region: 'Pacific', offset: '-10:00' },
-        { id: 'Pacific/Pago_Pago', name: 'Pago Pago', region: 'Pacific', offset: '-11:00' },
-        { id: 'Pacific/Tahiti', name: 'Tahiti', region: 'Pacific', offset: '-10:00' },
-        { id: 'Pacific/Noumea', name: 'Noumea', region: 'Pacific', offset: '+11:00' },
-        { id: 'Pacific/Port_Moresby', name: 'Port Moresby', region: 'Pacific', offset: '+10:00' }
-    ];
-
-    // Calculate actual offsets for today (handles DST)
-    const now = new Date();
-    const timezonesWithOffsets = timezones.map(tz => {
-        try {
-            const offset = getTimezoneOffset(tz.id);
-            return {
-                ...tz,
-                offset: offset
-            };
-        } catch (err) {
-            return tz;
-        }
-    });
-
-    res.status(200).json({
-        timezones: timezonesWithOffsets
-    });
-
-} catch (err) {
-    console.error('Error fetching timezones:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to fetch timezones'
-        }
-    });
-}
-});
-
-// =============================================
-// 12. GET /api/users/profile - User Profile
-// =============================================
-app.get('/api/users/profile', protect, async (req, res) => {
-try {
-const user = await User.findById(req.user._id)
-.select('firstName lastName email phone country address')
-.lean();
-
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
-            }
-        });
-    }
-
-    res.status(200).json({
-        firstName: user.firstName || '',
-        lastName: user.lastName || '',
-        email: user.email || '',
-        phone: user.phone || '',
-        country: user.country || '',
-        address: {
-            street: user.address?.street || '',
-            city: user.address?.city || '',
-            state: user.address?.state || '',
-            postalCode: user.address?.postalCode || '',
-            country: user.address?.country || ''
-        }
-    });
-
-} catch (err) {
-    console.error('Error fetching profile:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to fetch profile'
-        }
-    });
-}
-});
-
-// =============================================
-// 13. GET /api/users/settings - User Settings
-// =============================================
-app.get('/api/users/settings', protect, async (req, res) => {
-try {
-const user = await User.findById(req.user._id)
-.select('preferences')
-.lean();
-
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
-            }
-        });
-    }
-
-    const settings = user.preferences || {};
-
-    res.status(200).json({
-        language: settings.language || 'en',
-        timezone: settings.timezone || 'UTC',
-        theme: settings.theme || 'system',
-        currency: settings.currency || 'USD'
-    });
-
-} catch (err) {
-    console.error('Error fetching settings:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to fetch settings'
-        }
-    });
-}
-});
-
-// =============================================
-// 14. PUT /api/users/settings - Update User Settings
-// =============================================
-app.put('/api/users/settings', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const { language, timezone, theme, currency } = req.body;
-
-    const user = await User.findById(userId);
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
-            }
-        });
-    }
-
-    // Initialize preferences if not exists
-    if (!user.preferences) {
-        user.preferences = {};
-    }
-
-    // Validate values (simple validation)
-    if (language !== undefined) {
-        // Could validate against supported languages
-        user.preferences.language = language;
-    }
-    if (timezone !== undefined) {
-        // Could validate against supported timezones
-        user.preferences.timezone = timezone;
-    }
-    if (theme !== undefined) {
-        if (['light', 'dark', 'system'].includes(theme)) {
-            user.preferences.theme = theme;
-        }
-    }
-    if (currency !== undefined) {
-        user.preferences.currency = currency;
-    }
-
-    await user.save();
-
-    // Log activity
-    await logActivity('settings_updated', 'User', userId, userId, 'User', req);
-
-    res.status(200).json({
-        success: true,
-        message: 'Settings updated successfully',
-        settings: user.preferences
-    });
-
-} catch (err) {
-    console.error('Error updating settings:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to update settings'
-        }
-    });
-}
-});
-
-// =============================================
-// HELPER FUNCTIONS
-// =============================================
-
-/**
- * Generate a 4-character recovery code segment
- */
-function generateRecoverySegment() {
-const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-let code = '';
-for (let i = 0; i < 4; i++) {
-code += chars[Math.floor(Math.random() * chars.length)];
-}
-return code;
-}
-
-/**
- * Detect browser from user agent
- */
-function detectBrowser(userAgent) {
-if (!userAgent) return 'Unknown';
-userAgent = userAgent.toLowerCase();
-if (userAgent.includes('edge')) return 'Edge';
-if (userAgent.includes('chrome') && !userAgent.includes('edg')) return 'Chrome';
-if (userAgent.includes('safari') && !userAgent.includes('chrome')) return 'Safari';
-if (userAgent.includes('firefox')) return 'Firefox';
-if (userAgent.includes('opera') || userAgent.includes('opr')) return 'Opera';
-if (userAgent.includes('brave')) return 'Brave';
-return 'Unknown';
-}
-
-/**
- * Detect OS from user agent
- */
-function detectOS(userAgent) {
-if (!userAgent) return 'Unknown';
-userAgent = userAgent.toLowerCase();
-if (userAgent.includes('windows nt 10.0')) return 'Windows 10/11';
-if (userAgent.includes('windows nt 6.1')) return 'Windows 7';
-if (userAgent.includes('mac os x')) return 'macOS';
-if (userAgent.includes('linux')) return 'Linux';
-if (userAgent.includes('android')) return 'Android';
-if (userAgent.includes('iphone') || userAgent.includes('ipad')) return 'iOS';
-return 'Unknown';
-}
-
-/**
- * Detect device type from user agent
- */
-function detectDeviceType(userAgent) {
-if (!userAgent) return 'desktop';
-userAgent = userAgent.toLowerCase();
-if (userAgent.includes('mobile') || userAgent.includes('android') && !userAgent.includes('tablet')) return 'mobile';
-if (userAgent.includes('tablet') || userAgent.includes('ipad')) return 'tablet';
-return 'desktop';
-}
-
-/**
- * Get timezone offset for a given IANA timezone
- */
-function getTimezoneOffset(timezoneId) {
-try {
-const now = new Date();
-const dateString = now.toLocaleString('en-US', { timeZone: timezoneId });
-const date = new Date(dateString);
-const offsetMinutes = -date.getTimezoneOffset();
-const hours = Math.floor(Math.abs(offsetMinutes) / 60);
-const minutes = Math.abs(offsetMinutes) % 60;
-const sign = offsetMinutes >= 0 ? '+' : '-';
-return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-} catch (err) {
-return '+00:00';
-}
-}
 
 
 
