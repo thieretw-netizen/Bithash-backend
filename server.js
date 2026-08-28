@@ -44422,213 +44422,26 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
-
-
-
-
-
 // =============================================
-// LANGUAGE AND TIMEZONE ENDPOINTS
+// LANGUAGE AND TIMEZONE ENDPOINTS - DATABASE DRIVEN
 // =============================================
 
-// GET /api/settings/languages - Return comprehensive language catalogue with flag mappings
+// GET /api/settings/languages - Return comprehensive language catalogue with flags from database
 app.get('/api/settings/languages', async (req, res) => {
     try {
-        // Comprehensive language catalogue covering the world's commonly recognized interface languages
-        const languages = [
-            // AFRICA
-            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', isActive: true, countryCode: 'za', flag: 'za' },
-            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', isActive: true, countryCode: 'et', flag: 'et' },
-            { code: 'ar', name: 'Arabic', nativeName: 'العربية', isActive: true, countryCode: 'sa', flag: 'sa' },
-            { code: 'ary', name: 'Moroccan Arabic', nativeName: 'الدارجة المغربية', isActive: true, countryCode: 'ma', flag: 'ma' },
-            { code: 'ar-eg', name: 'Egyptian Arabic', nativeName: 'مصرى', isActive: true, countryCode: 'eg', flag: 'eg' },
-            { code: 'ar-sa', name: 'Saudi Arabic', nativeName: 'العربية السعودية', isActive: true, countryCode: 'sa', flag: 'sa' },
-            { code: 'ha', name: 'Hausa', nativeName: 'Hausa', isActive: true, countryCode: 'ng', flag: 'ng' },
-            { code: 'ig', name: 'Igbo', nativeName: 'Igbo', isActive: true, countryCode: 'ng', flag: 'ng' },
-            { code: 'rw', name: 'Kinyarwanda', nativeName: 'Ikinyarwanda', isActive: true, countryCode: 'rw', flag: 'rw' },
-            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', isActive: true, countryCode: 'tz', flag: 'tz' },
-            { code: 'yo', name: 'Yoruba', nativeName: 'Yorùbá', isActive: true, countryCode: 'ng', flag: 'ng' },
-            { code: 'zu', name: 'Zulu', nativeName: 'IsiZulu', isActive: true, countryCode: 'za', flag: 'za' },
-            { code: 'st', name: 'Southern Sotho', nativeName: 'Sesotho', isActive: true, countryCode: 'ls', flag: 'ls' },
-            { code: 'tn', name: 'Tswana', nativeName: 'Setswana', isActive: true, countryCode: 'bw', flag: 'bw' },
-            { code: 'ss', name: 'Swati', nativeName: 'SiSwati', isActive: true, countryCode: 'sz', flag: 'sz' },
-            { code: 'ts', name: 'Tsonga', nativeName: 'Xitsonga', isActive: true, countryCode: 'za', flag: 'za' },
-            { code: 've', name: 'Venda', nativeName: 'Tshivenḓa', isActive: true, countryCode: 'za', flag: 'za' },
-            { code: 'nr', name: 'Southern Ndebele', nativeName: 'isiNdebele', isActive: true, countryCode: 'za', flag: 'za' },
-            { code: 'xh', name: 'Xhosa', nativeName: 'isiXhosa', isActive: true, countryCode: 'za', flag: 'za' },
+        // Get languages from database
+        const languages = await Language.find({ isActive: true })
+            .sort({ sortOrder: 1, name: 1 })
+            .lean();
 
-            // ASIA
-            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', isActive: true, countryCode: 'bd', flag: 'bd' },
-            { code: 'my', name: 'Burmese', nativeName: 'မြန်မာစာ', isActive: true, countryCode: 'mm', flag: 'mm' },
-            { code: 'zh', name: 'Chinese (Simplified)', nativeName: '简体中文', isActive: true, countryCode: 'cn', flag: 'cn' },
-            { code: 'zh-tw', name: 'Chinese (Traditional)', nativeName: '繁體中文', isActive: true, countryCode: 'tw', flag: 'tw' },
-            { code: 'zh-hk', name: 'Chinese (Hong Kong)', nativeName: '繁體中文 (香港)', isActive: true, countryCode: 'hk', flag: 'hk' },
-            { code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', isActive: true, countryCode: 'id', flag: 'id' },
-            { code: 'ja', name: 'Japanese', nativeName: '日本語', isActive: true, countryCode: 'jp', flag: 'jp' },
-            { code: 'jv', name: 'Javanese', nativeName: 'Basa Jawa', isActive: true, countryCode: 'id', flag: 'id' },
-            { code: 'kn', name: 'Kannada', nativeName: 'ಕನ್ನಡ', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'km', name: 'Khmer', nativeName: 'ភាសាខ្មែរ', isActive: true, countryCode: 'kh', flag: 'kh' },
-            { code: 'ko', name: 'Korean', nativeName: '한국어', isActive: true, countryCode: 'kr', flag: 'kr' },
-            { code: 'lo', name: 'Lao', nativeName: 'ພາສາລາວ', isActive: true, countryCode: 'la', flag: 'la' },
-            { code: 'ml', name: 'Malayalam', nativeName: 'മലയാളം', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'mr', name: 'Marathi', nativeName: 'मराठी', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'mn', name: 'Mongolian', nativeName: 'Монгол хэл', isActive: true, countryCode: 'mn', flag: 'mn' },
-            { code: 'ne', name: 'Nepali', nativeName: 'नेपाली', isActive: true, countryCode: 'np', flag: 'np' },
-            { code: 'or', name: 'Odia', nativeName: 'ଓଡ଼ିଆ', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'pa', name: 'Punjabi', nativeName: 'ਪੰਜਾਬੀ', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'ps', name: 'Pashto', nativeName: 'پښتو', isActive: true, countryCode: 'af', flag: 'af' },
-            { code: 'fa', name: 'Persian', nativeName: 'فارسی', isActive: true, countryCode: 'ir', flag: 'ir' },
-            { code: 'sd', name: 'Sindhi', nativeName: 'سنڌي', isActive: true, countryCode: 'pk', flag: 'pk' },
-            { code: 'si', name: 'Sinhala', nativeName: 'සිංහල', isActive: true, countryCode: 'lk', flag: 'lk' },
-            { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'th', name: 'Thai', nativeName: 'ภาษาไทย', isActive: true, countryCode: 'th', flag: 'th' },
-            { code: 'ur', name: 'Urdu', nativeName: 'اردو', isActive: true, countryCode: 'pk', flag: 'pk' },
-            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', isActive: true, countryCode: 'vn', flag: 'vn' },
-
-            // EUROPE
-            { code: 'sq', name: 'Albanian', nativeName: 'Shqip', isActive: true, countryCode: 'al', flag: 'al' },
-            { code: 'hy', name: 'Armenian', nativeName: 'Հայերեն', isActive: true, countryCode: 'am', flag: 'am' },
-            { code: 'az', name: 'Azerbaijani', nativeName: 'Azərbaycanca', isActive: true, countryCode: 'az', flag: 'az' },
-            { code: 'eu', name: 'Basque', nativeName: 'Euskara', isActive: true, countryCode: 'es', flag: 'es' },
-            { code: 'be', name: 'Belarusian', nativeName: 'Беларуская', isActive: true, countryCode: 'by', flag: 'by' },
-            { code: 'bs', name: 'Bosnian', nativeName: 'Bosanski', isActive: true, countryCode: 'ba', flag: 'ba' },
-            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', isActive: true, countryCode: 'bg', flag: 'bg' },
-            { code: 'ca', name: 'Catalan', nativeName: 'Català', isActive: true, countryCode: 'es', flag: 'es' },
-            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', isActive: true, countryCode: 'hr', flag: 'hr' },
-            { code: 'cs', name: 'Czech', nativeName: 'Čeština', isActive: true, countryCode: 'cz', flag: 'cz' },
-            { code: 'da', name: 'Danish', nativeName: 'Dansk', isActive: true, countryCode: 'dk', flag: 'dk' },
-            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', isActive: true, countryCode: 'nl', flag: 'nl' },
-            { code: 'en', name: 'English', nativeName: 'English', isActive: true, countryCode: 'gb', flag: 'gb' },
-            { code: 'en-us', name: 'English (US)', nativeName: 'English (US)', isActive: true, countryCode: 'us', flag: 'us' },
-            { code: 'en-ca', name: 'English (Canada)', nativeName: 'English (Canada)', isActive: true, countryCode: 'ca', flag: 'ca' },
-            { code: 'en-au', name: 'English (Australia)', nativeName: 'English (Australia)', isActive: true, countryCode: 'au', flag: 'au' },
-            { code: 'en-nz', name: 'English (New Zealand)', nativeName: 'English (New Zealand)', isActive: true, countryCode: 'nz', flag: 'nz' },
-            { code: 'et', name: 'Estonian', nativeName: 'Eesti', isActive: true, countryCode: 'ee', flag: 'ee' },
-            { code: 'fo', name: 'Faroese', nativeName: 'Føroyskt', isActive: true, countryCode: 'fo', flag: 'fo' },
-            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', isActive: true, countryCode: 'fi', flag: 'fi' },
-            { code: 'fr', name: 'French', nativeName: 'Français', isActive: true, countryCode: 'fr', flag: 'fr' },
-            { code: 'fr-ca', name: 'French (Canada)', nativeName: 'Français (Canada)', isActive: true, countryCode: 'ca', flag: 'ca' },
-            { code: 'gl', name: 'Galician', nativeName: 'Galego', isActive: true, countryCode: 'es', flag: 'es' },
-            { code: 'ka', name: 'Georgian', nativeName: 'ქართული', isActive: true, countryCode: 'ge', flag: 'ge' },
-            { code: 'de', name: 'German', nativeName: 'Deutsch', isActive: true, countryCode: 'de', flag: 'de' },
-            { code: 'de-at', name: 'German (Austria)', nativeName: 'Deutsch (Österreich)', isActive: true, countryCode: 'at', flag: 'at' },
-            { code: 'de-ch', name: 'German (Switzerland)', nativeName: 'Deutsch (Schweiz)', isActive: true, countryCode: 'ch', flag: 'ch' },
-            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', isActive: true, countryCode: 'gr', flag: 'gr' },
-            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', isActive: true, countryCode: 'hu', flag: 'hu' },
-            { code: 'is', name: 'Icelandic', nativeName: 'Íslenska', isActive: true, countryCode: 'is', flag: 'is' },
-            { code: 'ga', name: 'Irish', nativeName: 'Gaeilge', isActive: true, countryCode: 'ie', flag: 'ie' },
-            { code: 'it', name: 'Italian', nativeName: 'Italiano', isActive: true, countryCode: 'it', flag: 'it' },
-            { code: 'it-ch', name: 'Italian (Switzerland)', nativeName: 'Italiano (Svizzera)', isActive: true, countryCode: 'ch', flag: 'ch' },
-            { code: 'lv', name: 'Latvian', nativeName: 'Latviešu', isActive: true, countryCode: 'lv', flag: 'lv' },
-            { code: 'lt', name: 'Lithuanian', nativeName: 'Lietuvių', isActive: true, countryCode: 'lt', flag: 'lt' },
-            { code: 'lb', name: 'Luxembourgish', nativeName: 'Lëtzebuergesch', isActive: true, countryCode: 'lu', flag: 'lu' },
-            { code: 'mk', name: 'Macedonian', nativeName: 'Македонски', isActive: true, countryCode: 'mk', flag: 'mk' },
-            { code: 'mt', name: 'Maltese', nativeName: 'Malti', isActive: true, countryCode: 'mt', flag: 'mt' },
-            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', isActive: true, countryCode: 'no', flag: 'no' },
-            { code: 'nn', name: 'Norwegian Nynorsk', nativeName: 'Nynorsk', isActive: true, countryCode: 'no', flag: 'no' },
-            { code: 'pl', name: 'Polish', nativeName: 'Polski', isActive: true, countryCode: 'pl', flag: 'pl' },
-            { code: 'pt', name: 'Portuguese', nativeName: 'Português', isActive: true, countryCode: 'pt', flag: 'pt' },
-            { code: 'pt-br', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)', isActive: true, countryCode: 'br', flag: 'br' },
-            { code: 'ro', name: 'Romanian', nativeName: 'Română', isActive: true, countryCode: 'ro', flag: 'ro' },
-            { code: 'ru', name: 'Russian', nativeName: 'Русский', isActive: true, countryCode: 'ru', flag: 'ru' },
-            { code: 'sr', name: 'Serbian', nativeName: 'Српски', isActive: true, countryCode: 'rs', flag: 'rs' },
-            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', isActive: true, countryCode: 'sk', flag: 'sk' },
-            { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina', isActive: true, countryCode: 'si', flag: 'si' },
-            { code: 'es', name: 'Spanish', nativeName: 'Español', isActive: true, countryCode: 'es', flag: 'es' },
-            { code: 'es-mx', name: 'Spanish (Mexico)', nativeName: 'Español (México)', isActive: true, countryCode: 'mx', flag: 'mx' },
-            { code: 'es-ar', name: 'Spanish (Argentina)', nativeName: 'Español (Argentina)', isActive: true, countryCode: 'ar', flag: 'ar' },
-            { code: 'es-co', name: 'Spanish (Colombia)', nativeName: 'Español (Colombia)', isActive: true, countryCode: 'co', flag: 'co' },
-            { code: 'es-cl', name: 'Spanish (Chile)', nativeName: 'Español (Chile)', isActive: true, countryCode: 'cl', flag: 'cl' },
-            { code: 'es-pe', name: 'Spanish (Peru)', nativeName: 'Español (Perú)', isActive: true, countryCode: 'pe', flag: 'pe' },
-            { code: 'es-ve', name: 'Spanish (Venezuela)', nativeName: 'Español (Venezuela)', isActive: true, countryCode: 've', flag: 've' },
-            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', isActive: true, countryCode: 'se', flag: 'se' },
-            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', isActive: true, countryCode: 'tr', flag: 'tr' },
-            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', isActive: true, countryCode: 'ua', flag: 'ua' },
-            { code: 'cy', name: 'Welsh', nativeName: 'Cymraeg', isActive: true, countryCode: 'gb', flag: 'gb' },
-
-            // MIDDLE EAST
-            { code: 'he', name: 'Hebrew', nativeName: 'עברית', isActive: true, countryCode: 'il', flag: 'il' },
-            { code: 'ku', name: 'Kurdish', nativeName: 'Kurdî', isActive: true, countryCode: 'iq', flag: 'iq' },
-            { code: 'ckb', name: 'Kurdish (Sorani)', nativeName: 'سۆرانی', isActive: true, countryCode: 'iq', flag: 'iq' },
-
-            // NORTH AMERICA
-            { code: 'fr-ca', name: 'French (Canada)', nativeName: 'Français (Canada)', isActive: true, countryCode: 'ca', flag: 'ca' },
-            { code: 'en-ca', name: 'English (Canada)', nativeName: 'English (Canada)', isActive: true, countryCode: 'ca', flag: 'ca' },
-            { code: 'es-us', name: 'Spanish (US)', nativeName: 'Español (EE.UU.)', isActive: true, countryCode: 'us', flag: 'us' },
-
-            // OCEANIA
-            { code: 'en-au', name: 'English (Australia)', nativeName: 'English (Australia)', isActive: true, countryCode: 'au', flag: 'au' },
-            { code: 'en-nz', name: 'English (New Zealand)', nativeName: 'English (New Zealand)', isActive: true, countryCode: 'nz', flag: 'nz' },
-            { code: 'mi', name: 'Māori', nativeName: 'Te Reo Māori', isActive: true, countryCode: 'nz', flag: 'nz' },
-            { code: 'sm', name: 'Samoan', nativeName: 'Gagana Sāmoa', isActive: true, countryCode: 'ws', flag: 'ws' },
-            { code: 'to', name: 'Tongan', nativeName: 'Faka-Tonga', isActive: true, countryCode: 'to', flag: 'to' },
-            { code: 'fj', name: 'Fijian', nativeName: 'Na Vosa Vakaviti', isActive: true, countryCode: 'fj', flag: 'fj' },
-
-            // SOUTH AMERICA / CENTRAL AMERICA
-            { code: 'es-ar', name: 'Spanish (Argentina)', nativeName: 'Español (Argentina)', isActive: true, countryCode: 'ar', flag: 'ar' },
-            { code: 'es-bo', name: 'Spanish (Bolivia)', nativeName: 'Español (Bolivia)', isActive: true, countryCode: 'bo', flag: 'bo' },
-            { code: 'es-cl', name: 'Spanish (Chile)', nativeName: 'Español (Chile)', isActive: true, countryCode: 'cl', flag: 'cl' },
-            { code: 'es-co', name: 'Spanish (Colombia)', nativeName: 'Español (Colombia)', isActive: true, countryCode: 'co', flag: 'co' },
-            { code: 'es-cr', name: 'Spanish (Costa Rica)', nativeName: 'Español (Costa Rica)', isActive: true, countryCode: 'cr', flag: 'cr' },
-            { code: 'es-cu', name: 'Spanish (Cuba)', nativeName: 'Español (Cuba)', isActive: true, countryCode: 'cu', flag: 'cu' },
-            { code: 'es-do', name: 'Spanish (Dominican Republic)', nativeName: 'Español (República Dominicana)', isActive: true, countryCode: 'do', flag: 'do' },
-            { code: 'es-ec', name: 'Spanish (Ecuador)', nativeName: 'Español (Ecuador)', isActive: true, countryCode: 'ec', flag: 'ec' },
-            { code: 'es-gt', name: 'Spanish (Guatemala)', nativeName: 'Español (Guatemala)', isActive: true, countryCode: 'gt', flag: 'gt' },
-            { code: 'es-hn', name: 'Spanish (Honduras)', nativeName: 'Español (Honduras)', isActive: true, countryCode: 'hn', flag: 'hn' },
-            { code: 'es-ni', name: 'Spanish (Nicaragua)', nativeName: 'Español (Nicaragua)', isActive: true, countryCode: 'ni', flag: 'ni' },
-            { code: 'es-pa', name: 'Spanish (Panama)', nativeName: 'Español (Panamá)', isActive: true, countryCode: 'pa', flag: 'pa' },
-            { code: 'es-py', name: 'Spanish (Paraguay)', nativeName: 'Español (Paraguay)', isActive: true, countryCode: 'py', flag: 'py' },
-            { code: 'es-pe', name: 'Spanish (Peru)', nativeName: 'Español (Perú)', isActive: true, countryCode: 'pe', flag: 'pe' },
-            { code: 'es-pr', name: 'Spanish (Puerto Rico)', nativeName: 'Español (Puerto Rico)', isActive: true, countryCode: 'pr', flag: 'pr' },
-            { code: 'es-uy', name: 'Spanish (Uruguay)', nativeName: 'Español (Uruguay)', isActive: true, countryCode: 'uy', flag: 'uy' },
-            { code: 'es-ve', name: 'Spanish (Venezuela)', nativeName: 'Español (Venezuela)', isActive: true, countryCode: 've', flag: 've' },
-            { code: 'qu', name: 'Quechua', nativeName: 'Runasimi', isActive: true, countryCode: 'pe', flag: 'pe' },
-            { code: 'gn', name: 'Guarani', nativeName: 'Avañe\'ẽ', isActive: true, countryCode: 'py', flag: 'py' },
-            { code: 'ay', name: 'Aymara', nativeName: 'Aymar aru', isActive: true, countryCode: 'bo', flag: 'bo' },
-            { code: 'pt-br', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)', isActive: true, countryCode: 'br', flag: 'br' },
-            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', isActive: true, countryCode: 'nl', flag: 'nl' },
-
-            // ADDITIONAL EUROPEAN
-            { code: 'fy', name: 'Frisian', nativeName: 'Frysk', isActive: true, countryCode: 'nl', flag: 'nl' },
-            { code: 'gd', name: 'Scottish Gaelic', nativeName: 'Gàidhlig', isActive: true, countryCode: 'gb', flag: 'gb' },
-            { code: 'gv', name: 'Manx', nativeName: 'Gaelg', isActive: true, countryCode: 'im', flag: 'im' },
-            { code: 'hsb', name: 'Upper Sorbian', nativeName: 'Hornjoserbšćina', isActive: true, countryCode: 'de', flag: 'de' },
-            { code: 'dsb', name: 'Lower Sorbian', nativeName: 'Dolnoserbšćina', isActive: true, countryCode: 'de', flag: 'de' },
-            { code: 'se', name: 'Northern Sami', nativeName: 'Davvisámegiella', isActive: true, countryCode: 'no', flag: 'no' },
-            { code: 'sma', name: 'Southern Sami', nativeName: 'Åarjelsaemien', isActive: true, countryCode: 'se', flag: 'se' },
-            { code: 'smj', name: 'Lule Sami', nativeName: 'Julevusámegiella', isActive: true, countryCode: 'se', flag: 'se' },
-            { code: 'smn', name: 'Inari Sami', nativeName: 'Anarâškielâ', isActive: true, countryCode: 'fi', flag: 'fi' },
-            { code: 'sms', name: 'Skolt Sami', nativeName: 'Sääʹmǩiõll', isActive: true, countryCode: 'fi', flag: 'fi' },
-
-            // ADDITIONAL ASIAN
-            { code: 'as', name: 'Assamese', nativeName: 'অসমীয়া', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'bho', name: 'Bhojpuri', nativeName: 'भोजपुरी', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'doi', name: 'Dogri', nativeName: 'डोगरी', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'gom', name: 'Konkani', nativeName: 'कोंकणी', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'kok', name: 'Konkani', nativeName: 'कोंकणी', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'ks', name: 'Kashmiri', nativeName: 'कॉशुर', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'lus', name: 'Mizo', nativeName: 'Mizo ṭawng', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'mai', name: 'Maithili', nativeName: 'मैथिली', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'sa', name: 'Sanskrit', nativeName: 'संस्कृतम्', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'sat', name: 'Santali', nativeName: 'ᱥᱟᱱᱛᱟᱲᱤ', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'tcy', name: 'Tulu', nativeName: 'ತುಳು', isActive: true, countryCode: 'in', flag: 'in' },
-            { code: 'ur', name: 'Urdu', nativeName: 'اردو', isActive: true, countryCode: 'pk', flag: 'pk' },
-            { code: 'ug', name: 'Uyghur', nativeName: 'ئۇيغۇرچە', isActive: true, countryCode: 'cn', flag: 'cn' },
-            { code: 'bo', name: 'Tibetan', nativeName: 'བོད་སྐད་', isActive: true, countryCode: 'cn', flag: 'cn' },
-            { code: 'dz', name: 'Dzongkha', nativeName: 'རྫོང་ཁ', isActive: true, countryCode: 'bt', flag: 'bt' },
-            { code: 'kk', name: 'Kazakh', nativeName: 'Қазақша', isActive: true, countryCode: 'kz', flag: 'kz' },
-            { code: 'ky', name: 'Kyrgyz', nativeName: 'Кыргызча', isActive: true, countryCode: 'kg', flag: 'kg' },
-            { code: 'tg', name: 'Tajik', nativeName: 'Тоҷикӣ', isActive: true, countryCode: 'tj', flag: 'tj' },
-            { code: 'tk', name: 'Turkmen', nativeName: 'Türkmençe', isActive: true, countryCode: 'tm', flag: 'tm' },
-            { code: 'uz', name: 'Uzbek', nativeName: 'Oʻzbekcha', isActive: true, countryCode: 'uz', flag: 'uz' },
-            { code: 'tt', name: 'Tatar', nativeName: 'Татарча', isActive: true, countryCode: 'ru', flag: 'ru' },
-            { code: 'ba', name: 'Bashkir', nativeName: 'Башҡортса', isActive: true, countryCode: 'ru', flag: 'ru' },
-            { code: 'cv', name: 'Chuvash', nativeName: 'Чӑвашла', isActive: true, countryCode: 'ru', flag: 'ru' },
-            { code: 'sah', name: 'Yakut', nativeName: 'Саха тыла', isActive: true, countryCode: 'ru', flag: 'ru' }
-        ];
+        // If no languages in database, seed them
+        if (languages.length === 0) {
+            await seedLanguages();
+            const seeded = await Language.find({ isActive: true })
+                .sort({ sortOrder: 1, name: 1 })
+                .lean();
+            return res.json({ languages: seeded });
+        }
 
         res.json({ languages });
     } catch (err) {
@@ -44640,460 +44453,225 @@ app.get('/api/settings/languages', async (req, res) => {
 // GET /api/settings/timezones - Return comprehensive timezone catalogue with real offsets
 app.get('/api/settings/timezones', async (req, res) => {
     try {
-        // Comprehensive IANA timezone catalogue with real offsets
-        const timezones = [
-            // UTC
-            { id: 'UTC', label: 'UTC', utcOffset: '+00:00' },
-            
-            // Africa
-            { id: 'Africa/Abidjan', label: 'Abidjan', utcOffset: '+00:00' },
-            { id: 'Africa/Accra', label: 'Accra', utcOffset: '+00:00' },
-            { id: 'Africa/Addis_Ababa', label: 'Addis Ababa', utcOffset: '+03:00' },
-            { id: 'Africa/Algiers', label: 'Algiers', utcOffset: '+01:00' },
-            { id: 'Africa/Asmara', label: 'Asmara', utcOffset: '+03:00' },
-            { id: 'Africa/Bamako', label: 'Bamako', utcOffset: '+00:00' },
-            { id: 'Africa/Bangui', label: 'Bangui', utcOffset: '+01:00' },
-            { id: 'Africa/Banjul', label: 'Banjul', utcOffset: '+00:00' },
-            { id: 'Africa/Bissau', label: 'Bissau', utcOffset: '+00:00' },
-            { id: 'Africa/Blantyre', label: 'Blantyre', utcOffset: '+02:00' },
-            { id: 'Africa/Brazzaville', label: 'Brazzaville', utcOffset: '+01:00' },
-            { id: 'Africa/Bujumbura', label: 'Bujumbura', utcOffset: '+02:00' },
-            { id: 'Africa/Cairo', label: 'Cairo', utcOffset: '+02:00' },
-            { id: 'Africa/Casablanca', label: 'Casablanca', utcOffset: '+01:00' },
-            { id: 'Africa/Ceuta', label: 'Ceuta', utcOffset: '+01:00' },
-            { id: 'Africa/Conakry', label: 'Conakry', utcOffset: '+00:00' },
-            { id: 'Africa/Dakar', label: 'Dakar', utcOffset: '+00:00' },
-            { id: 'Africa/Dar_es_Salaam', label: 'Dar es Salaam', utcOffset: '+03:00' },
-            { id: 'Africa/Djibouti', label: 'Djibouti', utcOffset: '+03:00' },
-            { id: 'Africa/Douala', label: 'Douala', utcOffset: '+01:00' },
-            { id: 'Africa/El_Aaiun', label: 'El Aaiun', utcOffset: '+01:00' },
-            { id: 'Africa/Freetown', label: 'Freetown', utcOffset: '+00:00' },
-            { id: 'Africa/Gaborone', label: 'Gaborone', utcOffset: '+02:00' },
-            { id: 'Africa/Harare', label: 'Harare', utcOffset: '+02:00' },
-            { id: 'Africa/Johannesburg', label: 'Johannesburg', utcOffset: '+02:00' },
-            { id: 'Africa/Juba', label: 'Juba', utcOffset: '+02:00' },
-            { id: 'Africa/Kampala', label: 'Kampala', utcOffset: '+03:00' },
-            { id: 'Africa/Khartoum', label: 'Khartoum', utcOffset: '+02:00' },
-            { id: 'Africa/Kigali', label: 'Kigali', utcOffset: '+02:00' },
-            { id: 'Africa/Kinshasa', label: 'Kinshasa', utcOffset: '+01:00' },
-            { id: 'Africa/Lagos', label: 'Lagos', utcOffset: '+01:00' },
-            { id: 'Africa/Libreville', label: 'Libreville', utcOffset: '+01:00' },
-            { id: 'Africa/Lome', label: 'Lome', utcOffset: '+00:00' },
-            { id: 'Africa/Luanda', label: 'Luanda', utcOffset: '+01:00' },
-            { id: 'Africa/Lubumbashi', label: 'Lubumbashi', utcOffset: '+02:00' },
-            { id: 'Africa/Lusaka', label: 'Lusaka', utcOffset: '+02:00' },
-            { id: 'Africa/Malabo', label: 'Malabo', utcOffset: '+01:00' },
-            { id: 'Africa/Maputo', label: 'Maputo', utcOffset: '+02:00' },
-            { id: 'Africa/Maseru', label: 'Maseru', utcOffset: '+02:00' },
-            { id: 'Africa/Mbabane', label: 'Mbabane', utcOffset: '+02:00' },
-            { id: 'Africa/Mogadishu', label: 'Mogadishu', utcOffset: '+03:00' },
-            { id: 'Africa/Monrovia', label: 'Monrovia', utcOffset: '+00:00' },
-            { id: 'Africa/Nairobi', label: 'Nairobi', utcOffset: '+03:00' },
-            { id: 'Africa/Ndjamena', label: 'Ndjamena', utcOffset: '+01:00' },
-            { id: 'Africa/Niamey', label: 'Niamey', utcOffset: '+01:00' },
-            { id: 'Africa/Nouakchott', label: 'Nouakchott', utcOffset: '+00:00' },
-            { id: 'Africa/Ouagadougou', label: 'Ouagadougou', utcOffset: '+00:00' },
-            { id: 'Africa/Porto-Novo', label: 'Porto-Novo', utcOffset: '+01:00' },
-            { id: 'Africa/Sao_Tome', label: 'Sao Tome', utcOffset: '+00:00' },
-            { id: 'Africa/Tripoli', label: 'Tripoli', utcOffset: '+02:00' },
-            { id: 'Africa/Tunis', label: 'Tunis', utcOffset: '+01:00' },
-            { id: 'Africa/Windhoek', label: 'Windhoek', utcOffset: '+02:00' },
+        // Get timezones from database
+        const timezones = await Timezone.find({ isActive: true })
+            .sort({ sortOrder: 1, label: 1 })
+            .lean();
 
-            // Americas
-            { id: 'America/Adak', label: 'Adak', utcOffset: '-10:00' },
-            { id: 'America/Anchorage', label: 'Anchorage', utcOffset: '-09:00' },
-            { id: 'America/Anguilla', label: 'Anguilla', utcOffset: '-04:00' },
-            { id: 'America/Antigua', label: 'Antigua', utcOffset: '-04:00' },
-            { id: 'America/Araguaina', label: 'Araguaina', utcOffset: '-03:00' },
-            { id: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires', utcOffset: '-03:00' },
-            { id: 'America/Argentina/Catamarca', label: 'Catamarca', utcOffset: '-03:00' },
-            { id: 'America/Argentina/Cordoba', label: 'Cordoba', utcOffset: '-03:00' },
-            { id: 'America/Argentina/Jujuy', label: 'Jujuy', utcOffset: '-03:00' },
-            { id: 'America/Argentina/La_Rioja', label: 'La Rioja', utcOffset: '-03:00' },
-            { id: 'America/Argentina/Mendoza', label: 'Mendoza', utcOffset: '-03:00' },
-            { id: 'America/Argentina/Rio_Gallegos', label: 'Rio Gallegos', utcOffset: '-03:00' },
-            { id: 'America/Argentina/Salta', label: 'Salta', utcOffset: '-03:00' },
-            { id: 'America/Argentina/San_Juan', label: 'San Juan', utcOffset: '-03:00' },
-            { id: 'America/Argentina/San_Luis', label: 'San Luis', utcOffset: '-03:00' },
-            { id: 'America/Argentina/Tucuman', label: 'Tucuman', utcOffset: '-03:00' },
-            { id: 'America/Argentina/Ushuaia', label: 'Ushuaia', utcOffset: '-03:00' },
-            { id: 'America/Aruba', label: 'Aruba', utcOffset: '-04:00' },
-            { id: 'America/Asuncion', label: 'Asuncion', utcOffset: '-04:00' },
-            { id: 'America/Atikokan', label: 'Atikokan', utcOffset: '-05:00' },
-            { id: 'America/Bahia', label: 'Bahia', utcOffset: '-03:00' },
-            { id: 'America/Bahia_Banderas', label: 'Bahia Banderas', utcOffset: '-06:00' },
-            { id: 'America/Barbados', label: 'Barbados', utcOffset: '-04:00' },
-            { id: 'America/Belem', label: 'Belem', utcOffset: '-03:00' },
-            { id: 'America/Belize', label: 'Belize', utcOffset: '-06:00' },
-            { id: 'America/Blanc-Sablon', label: 'Blanc-Sablon', utcOffset: '-04:00' },
-            { id: 'America/Boa_Vista', label: 'Boa Vista', utcOffset: '-04:00' },
-            { id: 'America/Bogota', label: 'Bogota', utcOffset: '-05:00' },
-            { id: 'America/Boise', label: 'Boise', utcOffset: '-07:00' },
-            { id: 'America/Cambridge_Bay', label: 'Cambridge Bay', utcOffset: '-07:00' },
-            { id: 'America/Campo_Grande', label: 'Campo Grande', utcOffset: '-04:00' },
-            { id: 'America/Cancun', label: 'Cancun', utcOffset: '-05:00' },
-            { id: 'America/Caracas', label: 'Caracas', utcOffset: '-04:00' },
-            { id: 'America/Cayenne', label: 'Cayenne', utcOffset: '-03:00' },
-            { id: 'America/Cayman', label: 'Cayman', utcOffset: '-05:00' },
-            { id: 'America/Chicago', label: 'Chicago', utcOffset: '-06:00' },
-            { id: 'America/Chihuahua', label: 'Chihuahua', utcOffset: '-06:00' },
-            { id: 'America/Costa_Rica', label: 'Costa Rica', utcOffset: '-06:00' },
-            { id: 'America/Cuiaba', label: 'Cuiaba', utcOffset: '-04:00' },
-            { id: 'America/Curacao', label: 'Curacao', utcOffset: '-04:00' },
-            { id: 'America/Danmarkshavn', label: 'Danmarkshavn', utcOffset: '+00:00' },
-            { id: 'America/Dawson', label: 'Dawson', utcOffset: '-07:00' },
-            { id: 'America/Dawson_Creek', label: 'Dawson Creek', utcOffset: '-07:00' },
-            { id: 'America/Denver', label: 'Denver', utcOffset: '-07:00' },
-            { id: 'America/Detroit', label: 'Detroit', utcOffset: '-05:00' },
-            { id: 'America/Dominica', label: 'Dominica', utcOffset: '-04:00' },
-            { id: 'America/Edmonton', label: 'Edmonton', utcOffset: '-07:00' },
-            { id: 'America/Eirunepe', label: 'Eirunepe', utcOffset: '-05:00' },
-            { id: 'America/El_Salvador', label: 'El Salvador', utcOffset: '-06:00' },
-            { id: 'America/Fort_Nelson', label: 'Fort Nelson', utcOffset: '-07:00' },
-            { id: 'America/Fortaleza', label: 'Fortaleza', utcOffset: '-03:00' },
-            { id: 'America/Glace_Bay', label: 'Glace Bay', utcOffset: '-04:00' },
-            { id: 'America/Goose_Bay', label: 'Goose Bay', utcOffset: '-04:00' },
-            { id: 'America/Grand_Turk', label: 'Grand Turk', utcOffset: '-05:00' },
-            { id: 'America/Grenada', label: 'Grenada', utcOffset: '-04:00' },
-            { id: 'America/Guadeloupe', label: 'Guadeloupe', utcOffset: '-04:00' },
-            { id: 'America/Guatemala', label: 'Guatemala', utcOffset: '-06:00' },
-            { id: 'America/Guayaquil', label: 'Guayaquil', utcOffset: '-05:00' },
-            { id: 'America/Guyana', label: 'Guyana', utcOffset: '-04:00' },
-            { id: 'America/Halifax', label: 'Halifax', utcOffset: '-04:00' },
-            { id: 'America/Havana', label: 'Havana', utcOffset: '-05:00' },
-            { id: 'America/Hermosillo', label: 'Hermosillo', utcOffset: '-07:00' },
-            { id: 'America/Indiana/Indianapolis', label: 'Indianapolis', utcOffset: '-05:00' },
-            { id: 'America/Indiana/Knox', label: 'Knox', utcOffset: '-06:00' },
-            { id: 'America/Indiana/Marengo', label: 'Marengo', utcOffset: '-05:00' },
-            { id: 'America/Indiana/Petersburg', label: 'Petersburg', utcOffset: '-05:00' },
-            { id: 'America/Indiana/Tell_City', label: 'Tell City', utcOffset: '-06:00' },
-            { id: 'America/Indiana/Vevay', label: 'Vevay', utcOffset: '-05:00' },
-            { id: 'America/Indiana/Vincennes', label: 'Vincennes', utcOffset: '-05:00' },
-            { id: 'America/Indiana/Winamac', label: 'Winamac', utcOffset: '-05:00' },
-            { id: 'America/Inuvik', label: 'Inuvik', utcOffset: '-07:00' },
-            { id: 'America/Iqaluit', label: 'Iqaluit', utcOffset: '-05:00' },
-            { id: 'America/Jamaica', label: 'Jamaica', utcOffset: '-05:00' },
-            { id: 'America/Juneau', label: 'Juneau', utcOffset: '-09:00' },
-            { id: 'America/Kentucky/Louisville', label: 'Louisville', utcOffset: '-05:00' },
-            { id: 'America/Kentucky/Monticello', label: 'Monticello', utcOffset: '-05:00' },
-            { id: 'America/Kralendijk', label: 'Kralendijk', utcOffset: '-04:00' },
-            { id: 'America/La_Paz', label: 'La Paz', utcOffset: '-04:00' },
-            { id: 'America/Lima', label: 'Lima', utcOffset: '-05:00' },
-            { id: 'America/Los_Angeles', label: 'Los Angeles', utcOffset: '-08:00' },
-            { id: 'America/Lower_Princes', label: 'Lower Princes', utcOffset: '-04:00' },
-            { id: 'America/Maceio', label: 'Maceio', utcOffset: '-03:00' },
-            { id: 'America/Managua', label: 'Managua', utcOffset: '-06:00' },
-            { id: 'America/Manaus', label: 'Manaus', utcOffset: '-04:00' },
-            { id: 'America/Marigot', label: 'Marigot', utcOffset: '-04:00' },
-            { id: 'America/Martinique', label: 'Martinique', utcOffset: '-04:00' },
-            { id: 'America/Matamoros', label: 'Matamoros', utcOffset: '-06:00' },
-            { id: 'America/Mazatlan', label: 'Mazatlan', utcOffset: '-07:00' },
-            { id: 'America/Menominee', label: 'Menominee', utcOffset: '-06:00' },
-            { id: 'America/Merida', label: 'Merida', utcOffset: '-06:00' },
-            { id: 'America/Metlakatla', label: 'Metlakatla', utcOffset: '-09:00' },
-            { id: 'America/Mexico_City', label: 'Mexico City', utcOffset: '-06:00' },
-            { id: 'America/Miquelon', label: 'Miquelon', utcOffset: '-03:00' },
-            { id: 'America/Moncton', label: 'Moncton', utcOffset: '-04:00' },
-            { id: 'America/Monterrey', label: 'Monterrey', utcOffset: '-06:00' },
-            { id: 'America/Montevideo', label: 'Montevideo', utcOffset: '-03:00' },
-            { id: 'America/Montreal', label: 'Montreal', utcOffset: '-05:00' },
-            { id: 'America/Montserrat', label: 'Montserrat', utcOffset: '-04:00' },
-            { id: 'America/Nassau', label: 'Nassau', utcOffset: '-05:00' },
-            { id: 'America/New_York', label: 'New York', utcOffset: '-05:00' },
-            { id: 'America/Nipigon', label: 'Nipigon', utcOffset: '-05:00' },
-            { id: 'America/Nome', label: 'Nome', utcOffset: '-09:00' },
-            { id: 'America/Noronha', label: 'Noronha', utcOffset: '-02:00' },
-            { id: 'America/North_Dakota/Beulah', label: 'Beulah', utcOffset: '-06:00' },
-            { id: 'America/North_Dakota/Center', label: 'Center', utcOffset: '-06:00' },
-            { id: 'America/North_Dakota/New_Salem', label: 'New Salem', utcOffset: '-06:00' },
-            { id: 'America/Nuuk', label: 'Nuuk', utcOffset: '-03:00' },
-            { id: 'America/Ojinaga', label: 'Ojinaga', utcOffset: '-06:00' },
-            { id: 'America/Panama', label: 'Panama', utcOffset: '-05:00' },
-            { id: 'America/Pangnirtung', label: 'Pangnirtung', utcOffset: '-05:00' },
-            { id: 'America/Paramaribo', label: 'Paramaribo', utcOffset: '-03:00' },
-            { id: 'America/Phoenix', label: 'Phoenix', utcOffset: '-07:00' },
-            { id: 'America/Port-au-Prince', label: 'Port-au-Prince', utcOffset: '-05:00' },
-            { id: 'America/Port_of_Spain', label: 'Port of Spain', utcOffset: '-04:00' },
-            { id: 'America/Porto_Velho', label: 'Porto Velho', utcOffset: '-04:00' },
-            { id: 'America/Puerto_Rico', label: 'Puerto Rico', utcOffset: '-04:00' },
-            { id: 'America/Punta_Arenas', label: 'Punta Arenas', utcOffset: '-03:00' },
-            { id: 'America/Rainy_River', label: 'Rainy River', utcOffset: '-06:00' },
-            { id: 'America/Rankin_Inlet', label: 'Rankin Inlet', utcOffset: '-06:00' },
-            { id: 'America/Recife', label: 'Recife', utcOffset: '-03:00' },
-            { id: 'America/Regina', label: 'Regina', utcOffset: '-06:00' },
-            { id: 'America/Resolute', label: 'Resolute', utcOffset: '-06:00' },
-            { id: 'America/Rio_Branco', label: 'Rio Branco', utcOffset: '-05:00' },
-            { id: 'America/Santarem', label: 'Santarem', utcOffset: '-03:00' },
-            { id: 'America/Santiago', label: 'Santiago', utcOffset: '-03:00' },
-            { id: 'America/Santo_Domingo', label: 'Santo Domingo', utcOffset: '-04:00' },
-            { id: 'America/Sao_Paulo', label: 'Sao Paulo', utcOffset: '-03:00' },
-            { id: 'America/Scoresbysund', label: 'Scoresbysund', utcOffset: '-01:00' },
-            { id: 'America/Sitka', label: 'Sitka', utcOffset: '-09:00' },
-            { id: 'America/St_Barthelemy', label: 'St Barthelemy', utcOffset: '-04:00' },
-            { id: 'America/St_Johns', label: 'St Johns', utcOffset: '-03:30' },
-            { id: 'America/St_Kitts', label: 'St Kitts', utcOffset: '-04:00' },
-            { id: 'America/St_Lucia', label: 'St Lucia', utcOffset: '-04:00' },
-            { id: 'America/St_Thomas', label: 'St Thomas', utcOffset: '-04:00' },
-            { id: 'America/St_Vincent', label: 'St Vincent', utcOffset: '-04:00' },
-            { id: 'America/Swift_Current', label: 'Swift Current', utcOffset: '-06:00' },
-            { id: 'America/Tegucigalpa', label: 'Tegucigalpa', utcOffset: '-06:00' },
-            { id: 'America/Thule', label: 'Thule', utcOffset: '-04:00' },
-            { id: 'America/Thunder_Bay', label: 'Thunder Bay', utcOffset: '-05:00' },
-            { id: 'America/Tijuana', label: 'Tijuana', utcOffset: '-08:00' },
-            { id: 'America/Toronto', label: 'Toronto', utcOffset: '-05:00' },
-            { id: 'America/Tortola', label: 'Tortola', utcOffset: '-04:00' },
-            { id: 'America/Vancouver', label: 'Vancouver', utcOffset: '-08:00' },
-            { id: 'America/Whitehorse', label: 'Whitehorse', utcOffset: '-07:00' },
-            { id: 'America/Winnipeg', label: 'Winnipeg', utcOffset: '-06:00' },
-            { id: 'America/Yakutat', label: 'Yakutat', utcOffset: '-09:00' },
-            { id: 'America/Yellowknife', label: 'Yellowknife', utcOffset: '-07:00' },
+        // If no timezones in database, seed them
+        if (timezones.length === 0) {
+            await seedTimezones();
+            const seeded = await Timezone.find({ isActive: true })
+                .sort({ sortOrder: 1, label: 1 })
+                .lean();
+            return res.json({ timezones: seeded });
+        }
 
-            // Antarctica
-            { id: 'Antarctica/Casey', label: 'Casey', utcOffset: '+08:00' },
-            { id: 'Antarctica/Davis', label: 'Davis', utcOffset: '+07:00' },
-            { id: 'Antarctica/DumontDUrville', label: 'Dumont DUrville', utcOffset: '+10:00' },
-            { id: 'Antarctica/Macquarie', label: 'Macquarie', utcOffset: '+11:00' },
-            { id: 'Antarctica/Mawson', label: 'Mawson', utcOffset: '+05:00' },
-            { id: 'Antarctica/McMurdo', label: 'McMurdo', utcOffset: '+13:00' },
-            { id: 'Antarctica/Palmer', label: 'Palmer', utcOffset: '-03:00' },
-            { id: 'Antarctica/Rothera', label: 'Rothera', utcOffset: '-03:00' },
-            { id: 'Antarctica/Syowa', label: 'Syowa', utcOffset: '+03:00' },
-            { id: 'Antarctica/Troll', label: 'Troll', utcOffset: '+00:00' },
-            { id: 'Antarctica/Vostok', label: 'Vostok', utcOffset: '+06:00' },
+        // Calculate current UTC offset for each timezone
+        const timezonesWithOffset = timezones.map(tz => {
+            const offset = getCurrentTimezoneOffset(tz.id);
+            return {
+                ...tz,
+                utcOffset: offset
+            };
+        });
 
-            // Asia
-            { id: 'Asia/Aden', label: 'Aden', utcOffset: '+03:00' },
-            { id: 'Asia/Almaty', label: 'Almaty', utcOffset: '+05:00' },
-            { id: 'Asia/Amman', label: 'Amman', utcOffset: '+03:00' },
-            { id: 'Asia/Anadyr', label: 'Anadyr', utcOffset: '+12:00' },
-            { id: 'Asia/Aqtau', label: 'Aqtau', utcOffset: '+05:00' },
-            { id: 'Asia/Aqtobe', label: 'Aqtobe', utcOffset: '+05:00' },
-            { id: 'Asia/Ashgabat', label: 'Ashgabat', utcOffset: '+05:00' },
-            { id: 'Asia/Atyrau', label: 'Atyrau', utcOffset: '+05:00' },
-            { id: 'Asia/Baghdad', label: 'Baghdad', utcOffset: '+03:00' },
-            { id: 'Asia/Bahrain', label: 'Bahrain', utcOffset: '+03:00' },
-            { id: 'Asia/Baku', label: 'Baku', utcOffset: '+04:00' },
-            { id: 'Asia/Bangkok', label: 'Bangkok', utcOffset: '+07:00' },
-            { id: 'Asia/Barnaul', label: 'Barnaul', utcOffset: '+07:00' },
-            { id: 'Asia/Beirut', label: 'Beirut', utcOffset: '+02:00' },
-            { id: 'Asia/Bishkek', label: 'Bishkek', utcOffset: '+06:00' },
-            { id: 'Asia/Brunei', label: 'Brunei', utcOffset: '+08:00' },
-            { id: 'Asia/Chita', label: 'Chita', utcOffset: '+09:00' },
-            { id: 'Asia/Choibalsan', label: 'Choibalsan', utcOffset: '+08:00' },
-            { id: 'Asia/Colombo', label: 'Colombo', utcOffset: '+05:30' },
-            { id: 'Asia/Damascus', label: 'Damascus', utcOffset: '+03:00' },
-            { id: 'Asia/Dhaka', label: 'Dhaka', utcOffset: '+06:00' },
-            { id: 'Asia/Dili', label: 'Dili', utcOffset: '+09:00' },
-            { id: 'Asia/Dubai', label: 'Dubai', utcOffset: '+04:00' },
-            { id: 'Asia/Dushanbe', label: 'Dushanbe', utcOffset: '+05:00' },
-            { id: 'Asia/Famagusta', label: 'Famagusta', utcOffset: '+03:00' },
-            { id: 'Asia/Gaza', label: 'Gaza', utcOffset: '+02:00' },
-            { id: 'Asia/Hebron', label: 'Hebron', utcOffset: '+02:00' },
-            { id: 'Asia/Ho_Chi_Minh', label: 'Ho Chi Minh', utcOffset: '+07:00' },
-            { id: 'Asia/Hong_Kong', label: 'Hong Kong', utcOffset: '+08:00' },
-            { id: 'Asia/Hovd', label: 'Hovd', utcOffset: '+07:00' },
-            { id: 'Asia/Irkutsk', label: 'Irkutsk', utcOffset: '+08:00' },
-            { id: 'Asia/Jakarta', label: 'Jakarta', utcOffset: '+07:00' },
-            { id: 'Asia/Jayapura', label: 'Jayapura', utcOffset: '+09:00' },
-            { id: 'Asia/Jerusalem', label: 'Jerusalem', utcOffset: '+02:00' },
-            { id: 'Asia/Kabul', label: 'Kabul', utcOffset: '+04:30' },
-            { id: 'Asia/Kamchatka', label: 'Kamchatka', utcOffset: '+12:00' },
-            { id: 'Asia/Karachi', label: 'Karachi', utcOffset: '+05:00' },
-            { id: 'Asia/Kathmandu', label: 'Kathmandu', utcOffset: '+05:45' },
-            { id: 'Asia/Khandyga', label: 'Khandyga', utcOffset: '+09:00' },
-            { id: 'Asia/Kolkata', label: 'Kolkata', utcOffset: '+05:30' },
-            { id: 'Asia/Krasnoyarsk', label: 'Krasnoyarsk', utcOffset: '+07:00' },
-            { id: 'Asia/Kuala_Lumpur', label: 'Kuala Lumpur', utcOffset: '+08:00' },
-            { id: 'Asia/Kuching', label: 'Kuching', utcOffset: '+08:00' },
-            { id: 'Asia/Kuwait', label: 'Kuwait', utcOffset: '+03:00' },
-            { id: 'Asia/Macau', label: 'Macau', utcOffset: '+08:00' },
-            { id: 'Asia/Magadan', label: 'Magadan', utcOffset: '+11:00' },
-            { id: 'Asia/Makassar', label: 'Makassar', utcOffset: '+08:00' },
-            { id: 'Asia/Manila', label: 'Manila', utcOffset: '+08:00' },
-            { id: 'Asia/Muscat', label: 'Muscat', utcOffset: '+04:00' },
-            { id: 'Asia/Nicosia', label: 'Nicosia', utcOffset: '+02:00' },
-            { id: 'Asia/Novokuznetsk', label: 'Novokuznetsk', utcOffset: '+07:00' },
-            { id: 'Asia/Novosibirsk', label: 'Novosibirsk', utcOffset: '+07:00' },
-            { id: 'Asia/Omsk', label: 'Omsk', utcOffset: '+06:00' },
-            { id: 'Asia/Oral', label: 'Oral', utcOffset: '+05:00' },
-            { id: 'Asia/Phnom_Penh', label: 'Phnom Penh', utcOffset: '+07:00' },
-            { id: 'Asia/Pontianak', label: 'Pontianak', utcOffset: '+07:00' },
-            { id: 'Asia/Pyongyang', label: 'Pyongyang', utcOffset: '+09:00' },
-            { id: 'Asia/Qatar', label: 'Qatar', utcOffset: '+03:00' },
-            { id: 'Asia/Qostanay', label: 'Qostanay', utcOffset: '+05:00' },
-            { id: 'Asia/Qyzylorda', label: 'Qyzylorda', utcOffset: '+05:00' },
-            { id: 'Asia/Riyadh', label: 'Riyadh', utcOffset: '+03:00' },
-            { id: 'Asia/Sakhalin', label: 'Sakhalin', utcOffset: '+11:00' },
-            { id: 'Asia/Samarkand', label: 'Samarkand', utcOffset: '+05:00' },
-            { id: 'Asia/Seoul', label: 'Seoul', utcOffset: '+09:00' },
-            { id: 'Asia/Shanghai', label: 'Shanghai', utcOffset: '+08:00' },
-            { id: 'Asia/Singapore', label: 'Singapore', utcOffset: '+08:00' },
-            { id: 'Asia/Srednekolymsk', label: 'Srednekolymsk', utcOffset: '+11:00' },
-            { id: 'Asia/Taipei', label: 'Taipei', utcOffset: '+08:00' },
-            { id: 'Asia/Tashkent', label: 'Tashkent', utcOffset: '+05:00' },
-            { id: 'Asia/Tbilisi', label: 'Tbilisi', utcOffset: '+04:00' },
-            { id: 'Asia/Tehran', label: 'Tehran', utcOffset: '+03:30' },
-            { id: 'Asia/Thimphu', label: 'Thimphu', utcOffset: '+06:00' },
-            { id: 'Asia/Tokyo', label: 'Tokyo', utcOffset: '+09:00' },
-            { id: 'Asia/Tomsk', label: 'Tomsk', utcOffset: '+07:00' },
-            { id: 'Asia/Ulaanbaatar', label: 'Ulaanbaatar', utcOffset: '+08:00' },
-            { id: 'Asia/Urumqi', label: 'Urumqi', utcOffset: '+06:00' },
-            { id: 'Asia/Ust-Nera', label: 'Ust-Nera', utcOffset: '+10:00' },
-            { id: 'Asia/Vientiane', label: 'Vientiane', utcOffset: '+07:00' },
-            { id: 'Asia/Vladivostok', label: 'Vladivostok', utcOffset: '+10:00' },
-            { id: 'Asia/Yakutsk', label: 'Yakutsk', utcOffset: '+09:00' },
-            { id: 'Asia/Yangon', label: 'Yangon', utcOffset: '+06:30' },
-            { id: 'Asia/Yekaterinburg', label: 'Yekaterinburg', utcOffset: '+05:00' },
-            { id: 'Asia/Yerevan', label: 'Yerevan', utcOffset: '+04:00' },
-
-            // Atlantic
-            { id: 'Atlantic/Azores', label: 'Azores', utcOffset: '-01:00' },
-            { id: 'Atlantic/Bermuda', label: 'Bermuda', utcOffset: '-04:00' },
-            { id: 'Atlantic/Canary', label: 'Canary', utcOffset: '+00:00' },
-            { id: 'Atlantic/Cape_Verde', label: 'Cape Verde', utcOffset: '-01:00' },
-            { id: 'Atlantic/Faroe', label: 'Faroe', utcOffset: '+00:00' },
-            { id: 'Atlantic/Madeira', label: 'Madeira', utcOffset: '+00:00' },
-            { id: 'Atlantic/Reykjavik', label: 'Reykjavik', utcOffset: '+00:00' },
-            { id: 'Atlantic/South_Georgia', label: 'South Georgia', utcOffset: '-02:00' },
-            { id: 'Atlantic/St_Helena', label: 'St Helena', utcOffset: '+00:00' },
-            { id: 'Atlantic/Stanley', label: 'Stanley', utcOffset: '-03:00' },
-
-            // Australia
-            { id: 'Australia/Adelaide', label: 'Adelaide', utcOffset: '+10:30' },
-            { id: 'Australia/Brisbane', label: 'Brisbane', utcOffset: '+10:00' },
-            { id: 'Australia/Broken_Hill', label: 'Broken Hill', utcOffset: '+10:30' },
-            { id: 'Australia/Currie', label: 'Currie', utcOffset: '+10:00' },
-            { id: 'Australia/Darwin', label: 'Darwin', utcOffset: '+09:30' },
-            { id: 'Australia/Eucla', label: 'Eucla', utcOffset: '+08:45' },
-            { id: 'Australia/Hobart', label: 'Hobart', utcOffset: '+10:00' },
-            { id: 'Australia/Lindeman', label: 'Lindeman', utcOffset: '+10:00' },
-            { id: 'Australia/Lord_Howe', label: 'Lord Howe', utcOffset: '+10:30' },
-            { id: 'Australia/Melbourne', label: 'Melbourne', utcOffset: '+10:00' },
-            { id: 'Australia/Perth', label: 'Perth', utcOffset: '+08:00' },
-            { id: 'Australia/Sydney', label: 'Sydney', utcOffset: '+10:00' },
-
-            // Europe
-            { id: 'Europe/Amsterdam', label: 'Amsterdam', utcOffset: '+01:00' },
-            { id: 'Europe/Andorra', label: 'Andorra', utcOffset: '+01:00' },
-            { id: 'Europe/Astrakhan', label: 'Astrakhan', utcOffset: '+04:00' },
-            { id: 'Europe/Athens', label: 'Athens', utcOffset: '+02:00' },
-            { id: 'Europe/Belgrade', label: 'Belgrade', utcOffset: '+01:00' },
-            { id: 'Europe/Berlin', label: 'Berlin', utcOffset: '+01:00' },
-            { id: 'Europe/Bratislava', label: 'Bratislava', utcOffset: '+01:00' },
-            { id: 'Europe/Brussels', label: 'Brussels', utcOffset: '+01:00' },
-            { id: 'Europe/Bucharest', label: 'Bucharest', utcOffset: '+02:00' },
-            { id: 'Europe/Budapest', label: 'Budapest', utcOffset: '+01:00' },
-            { id: 'Europe/Busingen', label: 'Busingen', utcOffset: '+01:00' },
-            { id: 'Europe/Chisinau', label: 'Chisinau', utcOffset: '+02:00' },
-            { id: 'Europe/Copenhagen', label: 'Copenhagen', utcOffset: '+01:00' },
-            { id: 'Europe/Dublin', label: 'Dublin', utcOffset: '+00:00' },
-            { id: 'Europe/Gibraltar', label: 'Gibraltar', utcOffset: '+01:00' },
-            { id: 'Europe/Guernsey', label: 'Guernsey', utcOffset: '+00:00' },
-            { id: 'Europe/Helsinki', label: 'Helsinki', utcOffset: '+02:00' },
-            { id: 'Europe/Isle_of_Man', label: 'Isle of Man', utcOffset: '+00:00' },
-            { id: 'Europe/Istanbul', label: 'Istanbul', utcOffset: '+03:00' },
-            { id: 'Europe/Jersey', label: 'Jersey', utcOffset: '+00:00' },
-            { id: 'Europe/Kaliningrad', label: 'Kaliningrad', utcOffset: '+02:00' },
-            { id: 'Europe/Kiev', label: 'Kiev', utcOffset: '+02:00' },
-            { id: 'Europe/Kirov', label: 'Kirov', utcOffset: '+03:00' },
-            { id: 'Europe/Lisbon', label: 'Lisbon', utcOffset: '+00:00' },
-            { id: 'Europe/Ljubljana', label: 'Ljubljana', utcOffset: '+01:00' },
-            { id: 'Europe/London', label: 'London', utcOffset: '+00:00' },
-            { id: 'Europe/Luxembourg', label: 'Luxembourg', utcOffset: '+01:00' },
-            { id: 'Europe/Madrid', label: 'Madrid', utcOffset: '+01:00' },
-            { id: 'Europe/Malta', label: 'Malta', utcOffset: '+01:00' },
-            { id: 'Europe/Mariehamn', label: 'Mariehamn', utcOffset: '+02:00' },
-            { id: 'Europe/Minsk', label: 'Minsk', utcOffset: '+03:00' },
-            { id: 'Europe/Monaco', label: 'Monaco', utcOffset: '+01:00' },
-            { id: 'Europe/Moscow', label: 'Moscow', utcOffset: '+03:00' },
-            { id: 'Europe/Oslo', label: 'Oslo', utcOffset: '+01:00' },
-            { id: 'Europe/Paris', label: 'Paris', utcOffset: '+01:00' },
-            { id: 'Europe/Podgorica', label: 'Podgorica', utcOffset: '+01:00' },
-            { id: 'Europe/Prague', label: 'Prague', utcOffset: '+01:00' },
-            { id: 'Europe/Riga', label: 'Riga', utcOffset: '+02:00' },
-            { id: 'Europe/Rome', label: 'Rome', utcOffset: '+01:00' },
-            { id: 'Europe/Samara', label: 'Samara', utcOffset: '+04:00' },
-            { id: 'Europe/San_Marino', label: 'San Marino', utcOffset: '+01:00' },
-            { id: 'Europe/Sarajevo', label: 'Sarajevo', utcOffset: '+01:00' },
-            { id: 'Europe/Saratov', label: 'Saratov', utcOffset: '+04:00' },
-            { id: 'Europe/Simferopol', label: 'Simferopol', utcOffset: '+03:00' },
-            { id: 'Europe/Skopje', label: 'Skopje', utcOffset: '+01:00' },
-            { id: 'Europe/Sofia', label: 'Sofia', utcOffset: '+02:00' },
-            { id: 'Europe/Stockholm', label: 'Stockholm', utcOffset: '+01:00' },
-            { id: 'Europe/Tallinn', label: 'Tallinn', utcOffset: '+02:00' },
-            { id: 'Europe/Tirane', label: 'Tirane', utcOffset: '+01:00' },
-            { id: 'Europe/Tiraspol', label: 'Tiraspol', utcOffset: '+02:00' },
-            { id: 'Europe/Ulyanovsk', label: 'Ulyanovsk', utcOffset: '+04:00' },
-            { id: 'Europe/Uzhgorod', label: 'Uzhgorod', utcOffset: '+02:00' },
-            { id: 'Europe/Vaduz', label: 'Vaduz', utcOffset: '+01:00' },
-            { id: 'Europe/Vatican', label: 'Vatican', utcOffset: '+01:00' },
-            { id: 'Europe/Vienna', label: 'Vienna', utcOffset: '+01:00' },
-            { id: 'Europe/Vilnius', label: 'Vilnius', utcOffset: '+02:00' },
-            { id: 'Europe/Volgograd', label: 'Volgograd', utcOffset: '+03:00' },
-            { id: 'Europe/Warsaw', label: 'Warsaw', utcOffset: '+01:00' },
-            { id: 'Europe/Zagreb', label: 'Zagreb', utcOffset: '+01:00' },
-            { id: 'Europe/Zaporozhye', label: 'Zaporozhye', utcOffset: '+02:00' },
-            { id: 'Europe/Zurich', label: 'Zurich', utcOffset: '+01:00' },
-
-            // Indian Ocean
-            { id: 'Indian/Antananarivo', label: 'Antananarivo', utcOffset: '+03:00' },
-            { id: 'Indian/Chagos', label: 'Chagos', utcOffset: '+06:00' },
-            { id: 'Indian/Christmas', label: 'Christmas', utcOffset: '+07:00' },
-            { id: 'Indian/Cocos', label: 'Cocos', utcOffset: '+06:30' },
-            { id: 'Indian/Comoro', label: 'Comoro', utcOffset: '+03:00' },
-            { id: 'Indian/Kerguelen', label: 'Kerguelen', utcOffset: '+05:00' },
-            { id: 'Indian/Mahe', label: 'Mahe', utcOffset: '+04:00' },
-            { id: 'Indian/Maldives', label: 'Maldives', utcOffset: '+05:00' },
-            { id: 'Indian/Mauritius', label: 'Mauritius', utcOffset: '+04:00' },
-            { id: 'Indian/Mayotte', label: 'Mayotte', utcOffset: '+03:00' },
-            { id: 'Indian/Reunion', label: 'Reunion', utcOffset: '+04:00' },
-
-            // Pacific
-            { id: 'Pacific/Apia', label: 'Apia', utcOffset: '+13:00' },
-            { id: 'Pacific/Auckland', label: 'Auckland', utcOffset: '+13:00' },
-            { id: 'Pacific/Bougainville', label: 'Bougainville', utcOffset: '+11:00' },
-            { id: 'Pacific/Chatham', label: 'Chatham', utcOffset: '+13:45' },
-            { id: 'Pacific/Chuuk', label: 'Chuuk', utcOffset: '+10:00' },
-            { id: 'Pacific/Easter', label: 'Easter', utcOffset: '-06:00' },
-            { id: 'Pacific/Efate', label: 'Efate', utcOffset: '+11:00' },
-            { id: 'Pacific/Fakaofo', label: 'Fakaofo', utcOffset: '+13:00' },
-            { id: 'Pacific/Fiji', label: 'Fiji', utcOffset: '+12:00' },
-            { id: 'Pacific/Funafuti', label: 'Funafuti', utcOffset: '+12:00' },
-            { id: 'Pacific/Galapagos', label: 'Galapagos', utcOffset: '-06:00' },
-            { id: 'Pacific/Gambier', label: 'Gambier', utcOffset: '-09:00' },
-            { id: 'Pacific/Guadalcanal', label: 'Guadalcanal', utcOffset: '+11:00' },
-            { id: 'Pacific/Guam', label: 'Guam', utcOffset: '+10:00' },
-            { id: 'Pacific/Honolulu', label: 'Honolulu', utcOffset: '-10:00' },
-            { id: 'Pacific/Kiritimati', label: 'Kiritimati', utcOffset: '+14:00' },
-            { id: 'Pacific/Kosrae', label: 'Kosrae', utcOffset: '+11:00' },
-            { id: 'Pacific/Kwajalein', label: 'Kwajalein', utcOffset: '+12:00' },
-            { id: 'Pacific/Majuro', label: 'Majuro', utcOffset: '+12:00' },
-            { id: 'Pacific/Marquesas', label: 'Marquesas', utcOffset: '-09:30' },
-            { id: 'Pacific/Midway', label: 'Midway', utcOffset: '-11:00' },
-            { id: 'Pacific/Nauru', label: 'Nauru', utcOffset: '+12:00' },
-            { id: 'Pacific/Niue', label: 'Niue', utcOffset: '-11:00' },
-            { id: 'Pacific/Norfolk', label: 'Norfolk', utcOffset: '+11:00' },
-            { id: 'Pacific/Noumea', label: 'Noumea', utcOffset: '+11:00' },
-            { id: 'Pacific/Pago_Pago', label: 'Pago Pago', utcOffset: '-11:00' },
-            { id: 'Pacific/Palau', label: 'Palau', utcOffset: '+09:00' },
-            { id: 'Pacific/Pitcairn', label: 'Pitcairn', utcOffset: '-08:00' },
-            { id: 'Pacific/Pohnpei', label: 'Pohnpei', utcOffset: '+11:00' },
-            { id: 'Pacific/Port_Moresby', label: 'Port Moresby', utcOffset: '+10:00' },
-            { id: 'Pacific/Rarotonga', label: 'Rarotonga', utcOffset: '-10:00' },
-            { id: 'Pacific/Saipan', label: 'Saipan', utcOffset: '+10:00' },
-            { id: 'Pacific/Tahiti', label: 'Tahiti', utcOffset: '-10:00' },
-            { id: 'Pacific/Tarawa', label: 'Tarawa', utcOffset: '+12:00' },
-            { id: 'Pacific/Tongatapu', label: 'Tongatapu', utcOffset: '+13:00' },
-            { id: 'Pacific/Wake', label: 'Wake', utcOffset: '+12:00' },
-            { id: 'Pacific/Wallis', label: 'Wallis', utcOffset: '+12:00' }
-        ];
-
-        res.json({ timezones });
+        res.json({ timezones: timezonesWithOffset });
     } catch (err) {
         console.error('Error fetching timezones:', err);
         res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to load timezones' });
     }
 });
+
+// =============================================
+// SEED FUNCTIONS FOR LANGUAGES AND TIMEZONES
+// =============================================
+
+async function seedLanguages() {
+    const languages = [
+        // AFRICA
+        { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', isActive: true, countryCode: 'za', flagCode: 'za', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/za.svg', sortOrder: 1 },
+        { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', isActive: true, countryCode: 'et', flagCode: 'et', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/et.svg', sortOrder: 2 },
+        { code: 'ar', name: 'Arabic', nativeName: 'العربية', isActive: true, countryCode: 'sa', flagCode: 'sa', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/sa.svg', sortOrder: 3 },
+        { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', isActive: true, countryCode: 'tz', flagCode: 'tz', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/tz.svg', sortOrder: 4 },
+        { code: 'zu', name: 'Zulu', nativeName: 'IsiZulu', isActive: true, countryCode: 'za', flagCode: 'za', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/za.svg', sortOrder: 5 },
+        { code: 'xh', name: 'Xhosa', nativeName: 'isiXhosa', isActive: true, countryCode: 'za', flagCode: 'za', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/za.svg', sortOrder: 6 },
+
+        // ASIA
+        { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', isActive: true, countryCode: 'bd', flagCode: 'bd', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/bd.svg', sortOrder: 10 },
+        { code: 'zh', name: 'Chinese (Simplified)', nativeName: '简体中文', isActive: true, countryCode: 'cn', flagCode: 'cn', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/cn.svg', sortOrder: 11 },
+        { code: 'zh-tw', name: 'Chinese (Traditional)', nativeName: '繁體中文', isActive: true, countryCode: 'tw', flagCode: 'tw', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/tw.svg', sortOrder: 12 },
+        { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', isActive: true, countryCode: 'in', flagCode: 'in', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/in.svg', sortOrder: 13 },
+        { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', isActive: true, countryCode: 'id', flagCode: 'id', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/id.svg', sortOrder: 14 },
+        { code: 'ja', name: 'Japanese', nativeName: '日本語', isActive: true, countryCode: 'jp', flagCode: 'jp', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/jp.svg', sortOrder: 15 },
+        { code: 'ko', name: 'Korean', nativeName: '한국어', isActive: true, countryCode: 'kr', flagCode: 'kr', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/kr.svg', sortOrder: 16 },
+        { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', isActive: true, countryCode: 'my', flagCode: 'my', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/my.svg', sortOrder: 17 },
+        { code: 'pa', name: 'Punjabi', nativeName: 'ਪੰਜਾਬੀ', isActive: true, countryCode: 'in', flagCode: 'in', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/in.svg', sortOrder: 18 },
+        { code: 'fa', name: 'Persian', nativeName: 'فارسی', isActive: true, countryCode: 'ir', flagCode: 'ir', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/ir.svg', sortOrder: 19 },
+        { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்', isActive: true, countryCode: 'in', flagCode: 'in', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/in.svg', sortOrder: 20 },
+        { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', isActive: true, countryCode: 'in', flagCode: 'in', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/in.svg', sortOrder: 21 },
+        { code: 'th', name: 'Thai', nativeName: 'ภาษาไทย', isActive: true, countryCode: 'th', flagCode: 'th', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/th.svg', sortOrder: 22 },
+        { code: 'ur', name: 'Urdu', nativeName: 'اردو', isActive: true, countryCode: 'pk', flagCode: 'pk', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/pk.svg', sortOrder: 23 },
+        { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', isActive: true, countryCode: 'vn', flagCode: 'vn', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/vn.svg', sortOrder: 24 },
+
+        // EUROPE
+        { code: 'bg', name: 'Bulgarian', nativeName: 'Български', isActive: true, countryCode: 'bg', flagCode: 'bg', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/bg.svg', sortOrder: 30 },
+        { code: 'cs', name: 'Czech', nativeName: 'Čeština', isActive: true, countryCode: 'cz', flagCode: 'cz', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/cz.svg', sortOrder: 31 },
+        { code: 'da', name: 'Danish', nativeName: 'Dansk', isActive: true, countryCode: 'dk', flagCode: 'dk', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/dk.svg', sortOrder: 32 },
+        { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', isActive: true, countryCode: 'nl', flagCode: 'nl', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/nl.svg', sortOrder: 33 },
+        { code: 'en', name: 'English', nativeName: 'English', isActive: true, countryCode: 'gb', flagCode: 'gb', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/gb.svg', sortOrder: 34 },
+        { code: 'en-us', name: 'English (US)', nativeName: 'English (US)', isActive: true, countryCode: 'us', flagCode: 'us', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/us.svg', sortOrder: 35 },
+        { code: 'en-ca', name: 'English (Canada)', nativeName: 'English (Canada)', isActive: true, countryCode: 'ca', flagCode: 'ca', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/ca.svg', sortOrder: 36 },
+        { code: 'en-au', name: 'English (Australia)', nativeName: 'English (Australia)', isActive: true, countryCode: 'au', flagCode: 'au', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/au.svg', sortOrder: 37 },
+        { code: 'fi', name: 'Finnish', nativeName: 'Suomi', isActive: true, countryCode: 'fi', flagCode: 'fi', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/fi.svg', sortOrder: 38 },
+        { code: 'fr', name: 'French', nativeName: 'Français', isActive: true, countryCode: 'fr', flagCode: 'fr', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/fr.svg', sortOrder: 39 },
+        { code: 'fr-ca', name: 'French (Canada)', nativeName: 'Français (Canada)', isActive: true, countryCode: 'ca', flagCode: 'ca', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/ca.svg', sortOrder: 40 },
+        { code: 'de', name: 'German', nativeName: 'Deutsch', isActive: true, countryCode: 'de', flagCode: 'de', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/de.svg', sortOrder: 41 },
+        { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', isActive: true, countryCode: 'gr', flagCode: 'gr', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/gr.svg', sortOrder: 42 },
+        { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', isActive: true, countryCode: 'hu', flagCode: 'hu', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/hu.svg', sortOrder: 43 },
+        { code: 'it', name: 'Italian', nativeName: 'Italiano', isActive: true, countryCode: 'it', flagCode: 'it', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/it.svg', sortOrder: 44 },
+        { code: 'lv', name: 'Latvian', nativeName: 'Latviešu', isActive: true, countryCode: 'lv', flagCode: 'lv', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/lv.svg', sortOrder: 45 },
+        { code: 'lt', name: 'Lithuanian', nativeName: 'Lietuvių', isActive: true, countryCode: 'lt', flagCode: 'lt', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/lt.svg', sortOrder: 46 },
+        { code: 'no', name: 'Norwegian', nativeName: 'Norsk', isActive: true, countryCode: 'no', flagCode: 'no', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/no.svg', sortOrder: 47 },
+        { code: 'pl', name: 'Polish', nativeName: 'Polski', isActive: true, countryCode: 'pl', flagCode: 'pl', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/pl.svg', sortOrder: 48 },
+        { code: 'pt', name: 'Portuguese', nativeName: 'Português', isActive: true, countryCode: 'pt', flagCode: 'pt', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/pt.svg', sortOrder: 49 },
+        { code: 'pt-br', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)', isActive: true, countryCode: 'br', flagCode: 'br', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/br.svg', sortOrder: 50 },
+        { code: 'ro', name: 'Romanian', nativeName: 'Română', isActive: true, countryCode: 'ro', flagCode: 'ro', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/ro.svg', sortOrder: 51 },
+        { code: 'ru', name: 'Russian', nativeName: 'Русский', isActive: true, countryCode: 'ru', flagCode: 'ru', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/ru.svg', sortOrder: 52 },
+        { code: 'sr', name: 'Serbian', nativeName: 'Српски', isActive: true, countryCode: 'rs', flagCode: 'rs', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/rs.svg', sortOrder: 53 },
+        { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', isActive: true, countryCode: 'sk', flagCode: 'sk', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/sk.svg', sortOrder: 54 },
+        { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina', isActive: true, countryCode: 'si', flagCode: 'si', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/si.svg', sortOrder: 55 },
+        { code: 'es', name: 'Spanish', nativeName: 'Español', isActive: true, countryCode: 'es', flagCode: 'es', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/es.svg', sortOrder: 56 },
+        { code: 'es-mx', name: 'Spanish (Mexico)', nativeName: 'Español (México)', isActive: true, countryCode: 'mx', flagCode: 'mx', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/mx.svg', sortOrder: 57 },
+        { code: 'es-ar', name: 'Spanish (Argentina)', nativeName: 'Español (Argentina)', isActive: true, countryCode: 'ar', flagCode: 'ar', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/ar.svg', sortOrder: 58 },
+        { code: 'sv', name: 'Swedish', nativeName: 'Svenska', isActive: true, countryCode: 'se', flagCode: 'se', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/se.svg', sortOrder: 59 },
+        { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', isActive: true, countryCode: 'tr', flagCode: 'tr', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/tr.svg', sortOrder: 60 },
+        { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', isActive: true, countryCode: 'ua', flagCode: 'ua', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/ua.svg', sortOrder: 61 },
+
+        // MIDDLE EAST
+        { code: 'he', name: 'Hebrew', nativeName: 'עברית', isActive: true, countryCode: 'il', flagCode: 'il', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/il.svg', sortOrder: 70 },
+
+        // NORTH AMERICA
+        { code: 'es-us', name: 'Spanish (US)', nativeName: 'Español (EE.UU.)', isActive: true, countryCode: 'us', flagCode: 'us', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/us.svg', sortOrder: 80 },
+
+        // OCEANIA
+        { code: 'mi', name: 'Māori', nativeName: 'Te Reo Māori', isActive: true, countryCode: 'nz', flagCode: 'nz', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/nz.svg', sortOrder: 90 },
+
+        // SOUTH AMERICA
+        { code: 'qu', name: 'Quechua', nativeName: 'Runasimi', isActive: true, countryCode: 'pe', flagCode: 'pe', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/pe.svg', sortOrder: 100 },
+        { code: 'gn', name: 'Guarani', nativeName: 'Avañe\'ẽ', isActive: true, countryCode: 'py', flagCode: 'py', flagUrl: 'https://cdn.jsdelivr.net/npm/flag-icons@6.6.6/flags/4x3/py.svg', sortOrder: 101 }
+    ];
+
+    try {
+        await Language.deleteMany({});
+        await Language.insertMany(languages);
+        console.log(`✅ Seeded ${languages.length} languages`);
+    } catch (err) {
+        console.error('Error seeding languages:', err);
+        throw err;
+    }
+}
+
+async function seedTimezones() {
+    const timezones = [
+        // UTC
+        { id: 'UTC', label: 'UTC', isActive: true, sortOrder: 1 },
+
+        // Africa
+        { id: 'Africa/Abidjan', label: 'Abidjan', isActive: true, sortOrder: 10 },
+        { id: 'Africa/Accra', label: 'Accra', isActive: true, sortOrder: 11 },
+        { id: 'Africa/Addis_Ababa', label: 'Addis Ababa', isActive: true, sortOrder: 12 },
+        { id: 'Africa/Algiers', label: 'Algiers', isActive: true, sortOrder: 13 },
+        { id: 'Africa/Cairo', label: 'Cairo', isActive: true, sortOrder: 14 },
+        { id: 'Africa/Casablanca', label: 'Casablanca', isActive: true, sortOrder: 15 },
+        { id: 'Africa/Johannesburg', label: 'Johannesburg', isActive: true, sortOrder: 16 },
+        { id: 'Africa/Lagos', label: 'Lagos', isActive: true, sortOrder: 17 },
+        { id: 'Africa/Nairobi', label: 'Nairobi', isActive: true, sortOrder: 18 },
+
+        // Americas
+        { id: 'America/Anchorage', label: 'Anchorage', isActive: true, sortOrder: 30 },
+        { id: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires', isActive: true, sortOrder: 31 },
+        { id: 'America/Chicago', label: 'Chicago', isActive: true, sortOrder: 32 },
+        { id: 'America/Denver', label: 'Denver', isActive: true, sortOrder: 33 },
+        { id: 'America/Halifax', label: 'Halifax', isActive: true, sortOrder: 34 },
+        { id: 'America/Los_Angeles', label: 'Los Angeles', isActive: true, sortOrder: 35 },
+        { id: 'America/Mexico_City', label: 'Mexico City', isActive: true, sortOrder: 36 },
+        { id: 'America/New_York', label: 'New York', isActive: true, sortOrder: 37 },
+        { id: 'America/Phoenix', label: 'Phoenix', isActive: true, sortOrder: 38 },
+        { id: 'America/Sao_Paulo', label: 'Sao Paulo', isActive: true, sortOrder: 39 },
+        { id: 'America/Toronto', label: 'Toronto', isActive: true, sortOrder: 40 },
+        { id: 'America/Vancouver', label: 'Vancouver', isActive: true, sortOrder: 41 },
+
+        // Asia
+        { id: 'Asia/Bangkok', label: 'Bangkok', isActive: true, sortOrder: 50 },
+        { id: 'Asia/Beijing', label: 'Beijing', isActive: true, sortOrder: 51 },
+        { id: 'Asia/Dubai', label: 'Dubai', isActive: true, sortOrder: 52 },
+        { id: 'Asia/Hong_Kong', label: 'Hong Kong', isActive: true, sortOrder: 53 },
+        { id: 'Asia/Kolkata', label: 'Kolkata', isActive: true, sortOrder: 54 },
+        { id: 'Asia/Seoul', label: 'Seoul', isActive: true, sortOrder: 55 },
+        { id: 'Asia/Singapore', label: 'Singapore', isActive: true, sortOrder: 56 },
+        { id: 'Asia/Tokyo', label: 'Tokyo', isActive: true, sortOrder: 57 },
+
+        // Europe
+        { id: 'Europe/Amsterdam', label: 'Amsterdam', isActive: true, sortOrder: 60 },
+        { id: 'Europe/Athens', label: 'Athens', isActive: true, sortOrder: 61 },
+        { id: 'Europe/Berlin', label: 'Berlin', isActive: true, sortOrder: 62 },
+        { id: 'Europe/Bucharest', label: 'Bucharest', isActive: true, sortOrder: 63 },
+        { id: 'Europe/Budapest', label: 'Budapest', isActive: true, sortOrder: 64 },
+        { id: 'Europe/Dublin', label: 'Dublin', isActive: true, sortOrder: 65 },
+        { id: 'Europe/Helsinki', label: 'Helsinki', isActive: true, sortOrder: 66 },
+        { id: 'Europe/Istanbul', label: 'Istanbul', isActive: true, sortOrder: 67 },
+        { id: 'Europe/London', label: 'London', isActive: true, sortOrder: 68 },
+        { id: 'Europe/Madrid', label: 'Madrid', isActive: true, sortOrder: 69 },
+        { id: 'Europe/Moscow', label: 'Moscow', isActive: true, sortOrder: 70 },
+        { id: 'Europe/Paris', label: 'Paris', isActive: true, sortOrder: 71 },
+        { id: 'Europe/Prague', label: 'Prague', isActive: true, sortOrder: 72 },
+        { id: 'Europe/Rome', label: 'Rome', isActive: true, sortOrder: 73 },
+        { id: 'Europe/Stockholm', label: 'Stockholm', isActive: true, sortOrder: 74 },
+        { id: 'Europe/Vienna', label: 'Vienna', isActive: true, sortOrder: 75 },
+        { id: 'Europe/Warsaw', label: 'Warsaw', isActive: true, sortOrder: 76 },
+        { id: 'Europe/Zurich', label: 'Zurich', isActive: true, sortOrder: 77 },
+
+        // Pacific
+        { id: 'Pacific/Auckland', label: 'Auckland', isActive: true, sortOrder: 80 },
+        { id: 'Pacific/Honolulu', label: 'Honolulu', isActive: true, sortOrder: 81 },
+        { id: 'Pacific/Sydney', label: 'Sydney', isActive: true, sortOrder: 82 },
+        { id: 'Pacific/Tokyo', label: 'Tokyo', isActive: true, sortOrder: 83 }
+    ];
+
+    try {
+        await Timezone.deleteMany({});
+        await Timezone.insertMany(timezones);
+        console.log(`✅ Seeded ${timezones.length} timezones`);
+    } catch (err) {
+        console.error('Error seeding timezones:', err);
+        throw err;
+    }
+}
+
+function getCurrentTimezoneOffset(timezoneId) {
+    try {
+        const now = new Date();
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: timezoneId,
+            timeZoneName: 'short'
+        });
+        const parts = formatter.formatToParts(now);
+        const tzNamePart = parts.find(p => p.type === 'timeZoneName');
+        if (tzNamePart) {
+            const match = tzNamePart.value.match(/GMT([+-])(\d+)(?::(\d+))?/);
+            if (match) {
+                const sign = match[1];
+                const hours = parseInt(match[2]);
+                const minutes = parseInt(match[3] || '0');
+                return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+            }
+        }
+        return '+00:00';
+    } catch {
+        return '+00:00';
+    }
+}
 
 // =============================================
 // USER SECURITY OVERVIEW ENDPOINT
@@ -45110,7 +44688,7 @@ app.get('/api/users/security', protect, async (req, res) => {
         // Calculate security level
         const hasPassword = !!user.password;
         const hasAuthenticator = user.twoFactorAuth?.enabled || false;
-        
+
         // Get active device count from loginHistory (sessions in last 24h)
         const activeDevices = user.loginHistory?.filter(
             session => session.timestamp && new Date(session.timestamp) > new Date(Date.now() - 24 * 60 * 60 * 1000)
@@ -45156,6 +44734,433 @@ app.get('/api/users/security', protect, async (req, res) => {
 });
 
 // =============================================
+// GET USER DEVICES ENDPOINT - FIXED
+// =============================================
+app.get('/api/users/devices', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('loginHistory');
+
+        if (!user) {
+            return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'User not found' });
+        }
+
+        // Get current session identifier from JWT
+        const currentSessionId = req.sessionId || null;
+
+        // Normalize loginHistory to device DTOs
+        const devices = (user.loginHistory || []).map(session => {
+            const isCurrent = currentSessionId && session._id && session._id.toString() === currentSessionId;
+
+            // Determine session status
+            let sessionStatus = 'active';
+            const now = Date.now();
+            const sessionTime = session.timestamp ? new Date(session.timestamp).getTime() : 0;
+
+            // If session is older than 30 days, mark as expired
+            if (now - sessionTime > 30 * 24 * 60 * 60 * 1000) {
+                sessionStatus = 'expired';
+            }
+            // If session was explicitly revoked (we'll track this separately)
+            if (session.revoked === true) {
+                sessionStatus = 'revoked';
+            }
+
+            return {
+                id: session._id?.toString() || session.id || null,
+                name: session.deviceName || 'Unknown Device',
+                deviceType: session.deviceType || 'desktop',
+                os: session.os || 'Unknown OS',
+                browser: session.browser || 'Unknown Browser',
+                location: {
+                    city: session.location?.city || null,
+                    country: session.location?.country || null
+                },
+                ipAddress: session.ipAddress || null,
+                lastActiveAt: session.timestamp || session.lastActiveAt || null,
+                timestamp: session.timestamp || null,
+                sessionStatus: sessionStatus,
+                current: isCurrent
+            };
+        });
+
+        // Sort devices: current first, then active, then others
+        devices.sort((a, b) => {
+            if (a.current) return -1;
+            if (b.current) return 1;
+            if (a.sessionStatus === 'active' && b.sessionStatus !== 'active') return -1;
+            if (b.sessionStatus === 'active' && a.sessionStatus !== 'active') return 1;
+            return 0;
+        });
+
+        res.json({
+            success: true,
+            devices: devices
+        });
+    } catch (err) {
+        console.error('Error fetching devices:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to load devices' });
+    }
+});
+
+// =============================================
+// ACTIVE DEVICES - LOGOUT DEVICE ENDPOINT - FIXED
+// =============================================
+app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        const userId = req.user._id;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'User not found' });
+        }
+
+        // Find and update the device in loginHistory
+        const deviceIndex = user.loginHistory?.findIndex(
+            session => session._id?.toString() === deviceId || session.id === deviceId
+        ) ?? -1;
+
+        if (deviceIndex === -1) {
+            return res.status(404).json({ code: 'DEVICE_NOT_FOUND', message: 'Device not found' });
+        }
+
+        // Mark as revoked instead of removing
+        user.loginHistory[deviceIndex].revoked = true;
+        await user.save();
+
+        // Log activity
+        await logAccountActivity({
+            userId,
+            type: 'devices',
+            action: 'device_logout',
+            status: 'success',
+            metadata: { deviceId, userId: userId.toString() },
+            req
+        });
+
+        // Emit real-time update via Socket.IO
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('device_update', {
+                type: 'device_update',
+                timestamp: Date.now(),
+                deviceId: deviceId,
+                action: 'revoked'
+            });
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error logging out device:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to logout device' });
+    }
+});
+
+// =============================================
+// ACTIVE DEVICES - LOGOUT ALL DEVICES ENDPOINT - FIXED
+// =============================================
+app.post('/api/users/devices/logout-all', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Get current session identifier from JWT
+        const currentSessionId = req.sessionId || null;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'User not found' });
+        }
+
+        // Keep only the current session
+        if (currentSessionId) {
+            user.loginHistory = user.loginHistory?.filter(
+                session => session._id?.toString() === currentSessionId
+            ) || [];
+        } else {
+            // If no session ID, keep only the most recent session
+            const sortedHistory = (user.loginHistory || []).sort((a, b) =>
+                new Date(b.timestamp) - new Date(a.timestamp)
+            );
+            const current = sortedHistory[0];
+            user.loginHistory = current ? [current] : [];
+        }
+
+        await user.save();
+
+        // Log activity
+        await logAccountActivity({
+            userId,
+            type: 'devices',
+            action: 'devices_logged_out_all',
+            status: 'success',
+            metadata: { userId: userId.toString() },
+            req
+        });
+
+        // Emit real-time update via Socket.IO
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('device_update', {
+                type: 'device_update',
+                timestamp: Date.now(),
+                action: 'all_revoked'
+            });
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error logging out all devices:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to logout all devices' });
+    }
+});
+
+// =============================================
+// GET USER ACTIVITY ENDPOINT - FIXED
+// =============================================
+app.get('/api/users/activity', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const type = req.query.type || 'all';
+
+        const skip = (page - 1) * limit;
+
+        // Build query
+        const query = { entityId: userId };
+        if (type !== 'all') {
+            query.type = type;
+        }
+
+        // Get total count
+        const total = await SystemLog.countDocuments(query);
+
+        // Get activities with pagination
+        const activities = await SystemLog.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        // Normalize activities to frontend format
+        const normalizedActivities = activities.map(log => ({
+            id: log._id.toString(),
+            type: log.type || 'account',
+            action: log.action || 'unknown',
+            title: getActivityTitle(log),
+            description: getActivityDescription(log),
+            status: log.status || 'completed',
+            createdAt: log.createdAt || log.timestamp || new Date(),
+            location: {
+                city: log.metadata?.location?.city || null,
+                country: log.metadata?.location?.country || null
+            },
+            device: {
+                browser: log.metadata?.device?.browser || null,
+                os: log.metadata?.device?.os || null
+            },
+            transaction: log.metadata?.transaction || null,
+            metadata: log.metadata || {}
+        }));
+
+        res.json({
+            success: true,
+            data: {
+                activities: normalizedActivities,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    hasNext: skip + limit < total,
+                    hasPrev: page > 1
+                }
+            }
+        });
+    } catch (err) {
+        console.error('Error fetching activities:', err);
+        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to load activities' });
+    }
+});
+
+// Helper functions for activity titles and descriptions
+function getActivityTitle(log) {
+    const titles = {
+        'signup': 'Account Created',
+        'login': 'Login',
+        'failed_login': 'Failed Login Attempt',
+        'logout': 'Logout',
+        'password_changed': 'Password Changed',
+        'authenticator_enabled': '2FA Enabled',
+        'authenticator_disabled': '2FA Disabled',
+        'recovery_codes_regenerated': 'Recovery Codes Regenerated',
+        'device_login': 'Device Login',
+        'device_logout': 'Device Logout',
+        'devices_logged_out_all': 'All Devices Logged Out',
+        'deposit_created': 'Deposit Created',
+        'deposit_completed': 'Deposit Completed',
+        'deposit_failed': 'Deposit Failed',
+        'withdrawal_created': 'Withdrawal Created',
+        'withdrawal_completed': 'Withdrawal Completed',
+        'withdrawal_failed': 'Withdrawal Failed',
+        'wallet_connected': 'Wallet Connected',
+        'wallet_disconnected': 'Wallet Disconnected',
+        'kyc_submitted': 'KYC Submitted',
+        'kyc_approved': 'KYC Approved',
+        'kyc_rejected': 'KYC Rejected',
+        'kyc_resubmitted': 'KYC Resubmitted',
+        'api_key_created': 'API Key Created',
+        'api_key_revoked': 'API Key Revoked',
+        'profile_updated': 'Profile Updated'
+    };
+    return titles[log.action] || log.action || 'Activity';
+}
+
+function getActivityDescription(log) {
+    const descriptions = {
+        'signup': 'New account created',
+        'login': 'User logged in',
+        'failed_login': 'Failed login attempt',
+        'logout': 'User logged out',
+        'password_changed': 'Password was changed',
+        'authenticator_enabled': 'Two-factor authentication was enabled',
+        'authenticator_disabled': 'Two-factor authentication was disabled',
+        'recovery_codes_regenerated': 'Recovery codes were regenerated',
+        'device_login': 'New device logged in',
+        'device_logout': 'Device logged out',
+        'devices_logged_out_all': 'All devices logged out',
+        'deposit_created': 'Deposit created',
+        'deposit_completed': 'Deposit completed',
+        'deposit_failed': 'Deposit failed',
+        'withdrawal_created': 'Withdrawal created',
+        'withdrawal_completed': 'Withdrawal completed',
+        'withdrawal_failed': 'Withdrawal failed',
+        'wallet_connected': 'Wallet connected',
+        'wallet_disconnected': 'Wallet disconnected',
+        'kyc_submitted': 'KYC application submitted',
+        'kyc_approved': 'KYC application approved',
+        'kyc_rejected': 'KYC application rejected',
+        'kyc_resubmitted': 'KYC application resubmitted',
+        'api_key_created': 'API key created',
+        'api_key_revoked': 'API key revoked',
+        'profile_updated': 'Profile updated'
+    };
+    return descriptions[log.action] || log.action || 'Activity occurred';
+}
+
+// =============================================
+// ACTIVITY LOGGING HELPER
+// =============================================
+async function logAccountActivity({ userId, type, action, status, metadata, req }) {
+    try {
+        const logData = {
+            action,
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            status: status || 'success',
+            metadata: {
+                ...metadata,
+                type: type || 'account'
+            }
+        };
+
+        // Add request info if available
+        if (req) {
+            logData.metadata.ipAddress = req.ip || req.headers['x-forwarded-for'] || null;
+            logData.metadata.userAgent = req.headers['user-agent'] || null;
+
+            // Parse user agent for device info
+            if (req.headers['user-agent']) {
+                try {
+                    const ua = parseUserAgent(req.headers['user-agent']);
+                    if (ua) {
+                        logData.metadata.device = {
+                            browser: ua.browser?.name || null,
+                            os: ua.os?.name || null
+                        };
+                    }
+                } catch (e) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+
+        await SystemLog.create(logData);
+
+        // Emit real-time update via Socket.IO
+        const io = req?.app?.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('activity_update', {
+                type: 'activity_update',
+                timestamp: Date.now()
+            });
+        }
+    } catch (err) {
+        console.error('Error logging activity:', err);
+    }
+}
+
+// Simple user agent parser
+function parseUserAgent(uaString) {
+    if (!uaString) return null;
+
+    const result = {
+        browser: { name: 'Unknown', version: null },
+        os: { name: 'Unknown', version: null }
+    };
+
+    // OS detection
+    if (uaString.includes('Windows')) {
+        result.os.name = 'Windows';
+        if (uaString.includes('Windows NT 10.0')) result.os.version = '10';
+        else if (uaString.includes('Windows NT 6.3')) result.os.version = '8.1';
+        else if (uaString.includes('Windows NT 6.2')) result.os.version = '8';
+        else if (uaString.includes('Windows NT 6.1')) result.os.version = '7';
+    } else if (uaString.includes('Mac OS X')) {
+        result.os.name = 'macOS';
+        const match = uaString.match(/Mac OS X (\d+[._]\d+)/);
+        if (match) result.os.version = match[1].replace('_', '.');
+    } else if (uaString.includes('Linux')) {
+        result.os.name = 'Linux';
+    } else if (uaString.includes('Android')) {
+        result.os.name = 'Android';
+        const match = uaString.match(/Android (\d+\.\d+)/);
+        if (match) result.os.version = match[1];
+    } else if (uaString.includes('iOS') || uaString.includes('iPhone') || uaString.includes('iPad')) {
+        result.os.name = 'iOS';
+        const match = uaString.match(/OS (\d+[._]\d+)/);
+        if (match) result.os.version = match[1].replace('_', '.');
+    }
+
+    // Browser detection
+    if (uaString.includes('Chrome') && !uaString.includes('Edg')) {
+        result.browser.name = 'Chrome';
+        const match = uaString.match(/Chrome\/(\d+\.\d+)/);
+        if (match) result.browser.version = match[1];
+    } else if (uaString.includes('Firefox')) {
+        result.browser.name = 'Firefox';
+        const match = uaString.match(/Firefox\/(\d+\.\d+)/);
+        if (match) result.browser.version = match[1];
+    } else if (uaString.includes('Safari') && !uaString.includes('Chrome')) {
+        result.browser.name = 'Safari';
+        const match = uaString.match(/Version\/(\d+\.\d+)/);
+        if (match) result.browser.version = match[1];
+    } else if (uaString.includes('Edg')) {
+        result.browser.name = 'Edge';
+        const match = uaString.match(/Edg\/(\d+\.\d+)/);
+        if (match) result.browser.version = match[1];
+    } else if (uaString.includes('Opera') || uaString.includes('OPR')) {
+        result.browser.name = 'Opera';
+        const match = uaString.match(/(?:Opera|OPR)\/(\d+\.\d+)/);
+        if (match) result.browser.version = match[1];
+    }
+
+    return result;
+}
+
+// =============================================
 // USER SETTINGS ENDPOINT - Save language and timezone
 // =============================================
 app.put('/api/users/settings', protect, async (req, res) => {
@@ -45179,7 +45184,7 @@ app.put('/api/users/settings', protect, async (req, res) => {
         // Update preferences
         const updated = await UserPreference.findOneAndUpdate(
             { user: userId },
-            { 
+            {
                 user: userId,
                 language: language,
                 timezone: timezone,
@@ -45194,6 +45199,19 @@ app.put('/api/users/settings', protect, async (req, res) => {
             'preferences.timezone': timezone
         });
 
+        // Emit real-time update via Socket.IO
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('preferences_update', {
+                type: 'preferences_update',
+                timestamp: Date.now(),
+                preferences: {
+                    language: updated.language,
+                    timezone: updated.timezone
+                }
+            });
+        }
+
         res.json({
             language: updated.language,
             timezone: updated.timezone
@@ -45205,7 +45223,55 @@ app.put('/api/users/settings', protect, async (req, res) => {
 });
 
 // =============================================
-// TWO-FACTOR AUTHENTICATOR SETUP ENDPOINT
+// GET USER SETTINGS ENDPOINT - Retrieve language and timezone
+// =============================================
+app.get('/api/users/settings', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Try to get from UserPreference first
+        let preferences = await UserPreference.findOne({ user: userId });
+
+        if (!preferences) {
+            // Try to get from User model's preferences
+            const user = await User.findById(userId).select('preferences');
+            if (user && user.preferences) {
+                return res.json({
+                    language: user.preferences.language || 'en',
+                    timezone: user.preferences.timezone || 'UTC',
+                    currency: user.preferences.currency || 'USD',
+                    theme: user.preferences.theme || 'dark',
+                    displayAsset: user.preferences.displayAsset || 'btc'
+                });
+            }
+            // Return defaults if nothing found
+            return res.json({
+                language: 'en',
+                timezone: 'UTC',
+                currency: 'USD',
+                theme: 'dark',
+                displayAsset: 'btc'
+            });
+        }
+
+        res.json({
+            language: preferences.language || 'en',
+            timezone: preferences.timezone || 'UTC',
+            currency: preferences.currency || 'USD',
+            theme: preferences.theme || 'dark',
+            displayAsset: preferences.displayAsset || 'btc'
+        });
+    } catch (err) {
+        console.error('Error fetching user settings:', err);
+        res.status(500).json({
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to load user settings'
+        });
+    }
+});
+
+// =============================================
+// TWO-FACTOR AUTHENTICATOR SETUP ENDPOINT - FIXED
 // =============================================
 app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
     try {
@@ -45223,8 +45289,8 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
         // Generate TOTP secret
         const secret = speakeasy.generateSecret({
             length: 20,
-            name: '₿itHash',
-            issuer: '₿itHash'
+            name: 'BitHash',
+            issuer: 'BitHash'
         });
 
         // Create enrollment record
@@ -45233,14 +45299,15 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
 
         // Store encrypted secret
         const encryptedSecret = encryptSecret(secret.base32);
-        
+
         await UserEnrollment.create({
             userId,
             enrollmentId,
             secret: encryptedSecret,
             type: 'totp_setup',
             expiresAt,
-            status: 'pending'
+            status: 'pending',
+            attempts: 0
         });
 
         // Generate otpauth URI
@@ -45262,15 +45329,56 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
 });
 
 // =============================================
-// TWO-FACTOR AUTHENTICATOR VERIFY ENDPOINT
+// TWO-FACTOR AUTHENTICATOR VERIFY ENDPOINT - FIXED
 // =============================================
 app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res) => {
     try {
-        const { enrollmentId, code } = req.body;
+        const { enrollmentId, code, purpose } = req.body;
         const userId = req.user._id;
 
-        if (!enrollmentId || !code) {
-            return res.status(400).json({ code: 'MISSING_FIELDS', message: 'Enrollment ID and code are required' });
+        if (!code) {
+            return res.status(400).json({ code: 'MISSING_FIELDS', message: 'Code is required' });
+        }
+
+        // If purpose is kyc_verification, handle differently
+        if (purpose === 'kyc_verification') {
+            // Verify authenticator for KYC purpose
+            const user = await User.findById(userId);
+            if (!user.twoFactorAuth?.enabled) {
+                return res.status(400).json({
+                    code: 'AUTHENTICATOR_NOT_ENABLED',
+                    message: 'Authenticator is not enabled for this account'
+                });
+            }
+
+            const secret = decryptSecret(user.twoFactorAuth.secret);
+            const verified = speakeasy.totp.verify({
+                secret: secret,
+                encoding: 'base32',
+                token: code,
+                window: 1
+            });
+
+            if (!verified) {
+                return res.status(400).json({ code: 'INVALID_OTP', message: 'Invalid authenticator code' });
+            }
+
+            // Log KYC verification
+            await logAccountActivity({
+                userId,
+                type: 'verification',
+                action: 'kyc_verified',
+                status: 'success',
+                metadata: { method: 'authenticator', userId: userId.toString() },
+                req
+            });
+
+            return res.json({ success: true, verified: true });
+        }
+
+        // Regular TOTP verification
+        if (!enrollmentId) {
+            return res.status(400).json({ code: 'MISSING_FIELDS', message: 'Enrollment ID is required' });
         }
 
         // Find enrollment
@@ -45289,6 +45397,18 @@ app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res)
             return res.status(400).json({ code: 'ENROLLMENT_EXPIRED', message: 'Enrollment has expired' });
         }
 
+        // Increment attempts atomically
+        const updatedEnrollment = await UserEnrollment.findByIdAndUpdate(
+            enrollment._id,
+            { $inc: { attempts: 1 } },
+            { new: true }
+        );
+
+        if (updatedEnrollment.attempts >= 5) {
+            await UserEnrollment.findByIdAndDelete(enrollment._id);
+            return res.status(400).json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts' });
+        }
+
         // Decrypt secret
         const secret = decryptSecret(enrollment.secret);
 
@@ -45301,22 +45421,12 @@ app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res)
         });
 
         if (!verified) {
-            // Track failed attempts
-            await UserEnrollment.findByIdAndUpdate(enrollment._id, {
-                $inc: { attempts: 1 }
-            });
-
-            if (enrollment.attempts >= 5) {
-                await UserEnrollment.findByIdAndDelete(enrollment._id);
-                return res.status(400).json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts' });
-            }
-
             return res.status(400).json({ code: 'INVALID_OTP', message: 'Invalid verification code' });
         }
 
         // Generate recovery codes
         const recoveryCodes = generateRecoveryCodes();
-        const hashedCodes = recoveryCodes.map(code => crypto.createHash('sha256').update(code).digest('hex'));
+        const hashedCodes = recoveryCodes.map(c => crypto.createHash('sha256').update(c).digest('hex'));
 
         // Enable 2FA atomically
         await User.findByIdAndUpdate(userId, {
@@ -45326,25 +45436,37 @@ app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res)
         });
 
         // Store recovery code hashes
-        await UserRecoveryCodes.create({
-            userId,
-            hashes: hashedCodes,
-            generatedAt: new Date()
-        });
+        await UserRecoveryCodes.findOneAndUpdate(
+            { userId },
+            {
+                userId,
+                hashes: hashedCodes,
+                generatedAt: new Date()
+            },
+            { upsert: true }
+        );
 
         // Delete enrollment
         await UserEnrollment.findByIdAndDelete(enrollment._id);
 
         // Log activity
-        await SystemLog.create({
+        await logAccountActivity({
+            userId,
+            type: 'security',
             action: 'authenticator_enabled',
-            entity: 'User',
-            entityId: userId,
-            performedBy: userId,
-            performedByModel: 'User',
             status: 'success',
-            metadata: { userId: userId.toString() }
+            metadata: { userId: userId.toString() },
+            req
         });
+
+        // Emit real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('security_update', {
+                type: 'security_update',
+                timestamp: Date.now()
+            });
+        }
 
         res.json({ recoveryCodes });
     } catch (err) {
@@ -45354,7 +45476,7 @@ app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res)
 });
 
 // =============================================
-// TWO-FACTOR AUTHENTICATOR DISABLE CHALLENGE ENDPOINT
+// TWO-FACTOR AUTHENTICATOR DISABLE CHALLENGE ENDPOINT - FIXED
 // =============================================
 app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async (req, res) => {
     try {
@@ -45371,7 +45493,7 @@ app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async
         // Generate challenge
         const challengeId = crypto.randomBytes(16).toString('hex');
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otp = crypto.randomInt(100000, 1000000).toString();
 
         // Store challenge
         await UserChallenge.create({
@@ -45388,21 +45510,10 @@ app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async
             email: user.email,
             template: 'otp',
             data: {
-                name: user.firstName,
+                name: user.firstName || 'User',
                 otp: otp,
                 action: 'disable authenticator'
             }
-        });
-
-        // Log activity
-        await SystemLog.create({
-            action: 'authenticator_disable_challenge',
-            entity: 'User',
-            entityId: userId,
-            performedBy: userId,
-            performedByModel: 'User',
-            status: 'pending',
-            metadata: { userId: userId.toString() }
         });
 
         res.json({
@@ -45419,7 +45530,7 @@ app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async
 });
 
 // =============================================
-// TWO-FACTOR AUTHENTICATOR DISABLE VERIFY ENDPOINT
+// TWO-FACTOR AUTHENTICATOR DISABLE VERIFY ENDPOINT - FIXED
 // =============================================
 app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (req, res) => {
     try {
@@ -45449,14 +45560,20 @@ app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (r
                 return res.status(400).json({ code: 'CHALLENGE_INVALID', message: 'Invalid or expired challenge' });
             }
 
-            if (challenge.attempts >= 3) {
+            // Increment attempts atomically
+            const updatedChallenge = await UserChallenge.findByIdAndUpdate(
+                challenge._id,
+                { $inc: { attempts: 1 } },
+                { new: true }
+            );
+
+            if (updatedChallenge.attempts >= 5) {
                 await UserChallenge.findByIdAndDelete(challenge._id);
                 return res.status(400).json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts' });
             }
 
             const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
             if (otpHash !== challenge.otpHash) {
-                await UserChallenge.findByIdAndUpdate(challenge._id, { $inc: { attempts: 1 } });
                 return res.status(400).json({ code: 'INVALID_OTP', message: 'Invalid OTP' });
             }
 
@@ -45493,15 +45610,23 @@ app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (r
         await UserRecoveryCodes.deleteMany({ userId });
 
         // Log activity
-        await SystemLog.create({
+        await logAccountActivity({
+            userId,
+            type: 'security',
             action: 'authenticator_disabled',
-            entity: 'User',
-            entityId: userId,
-            performedBy: userId,
-            performedByModel: 'User',
             status: 'success',
-            metadata: { userId: userId.toString(), method }
+            metadata: { userId: userId.toString(), method },
+            req
         });
+
+        // Emit real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('security_update', {
+                type: 'security_update',
+                timestamp: Date.now()
+            });
+        }
 
         res.json({ success: true });
     } catch (err) {
@@ -45511,7 +45636,7 @@ app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (r
 });
 
 // =============================================
-// RECOVERY CODES CHALLENGE ENDPOINT
+// RECOVERY CODES CHALLENGE ENDPOINT - FIXED
 // =============================================
 app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, res) => {
     try {
@@ -45528,7 +45653,7 @@ app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, 
         // Generate challenge
         const challengeId = crypto.randomBytes(16).toString('hex');
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otp = crypto.randomInt(100000, 1000000).toString();
 
         await UserChallenge.create({
             userId,
@@ -45543,7 +45668,7 @@ app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, 
             email: user.email,
             template: 'otp',
             data: {
-                name: user.firstName,
+                name: user.firstName || 'User',
                 otp: otp,
                 action: 'regenerate recovery codes'
             }
@@ -45563,7 +45688,7 @@ app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, 
 });
 
 // =============================================
-// RECOVERY CODES VERIFY ENDPOINT
+// RECOVERY CODES VERIFY ENDPOINT - FIXED
 // =============================================
 app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res) => {
     try {
@@ -45592,14 +45717,20 @@ app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res
                 return res.status(400).json({ code: 'CHALLENGE_INVALID', message: 'Invalid or expired challenge' });
             }
 
-            if (challenge.attempts >= 3) {
+            // Increment attempts atomically
+            const updatedChallenge = await UserChallenge.findByIdAndUpdate(
+                challenge._id,
+                { $inc: { attempts: 1 } },
+                { new: true }
+            );
+
+            if (updatedChallenge.attempts >= 5) {
                 await UserChallenge.findByIdAndDelete(challenge._id);
                 return res.status(400).json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts' });
             }
 
             const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
             if (otpHash !== challenge.otpHash) {
-                await UserChallenge.findByIdAndUpdate(challenge._id, { $inc: { attempts: 1 } });
                 return res.status(400).json({ code: 'INVALID_OTP', message: 'Invalid OTP' });
             }
 
@@ -45626,11 +45757,11 @@ app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res
 
         // Regenerate recovery codes
         const recoveryCodes = generateRecoveryCodes();
-        const hashedCodes = recoveryCodes.map(code => crypto.createHash('sha256').update(code).digest('hex'));
+        const hashedCodes = recoveryCodes.map(c => crypto.createHash('sha256').update(c).digest('hex'));
 
         await UserRecoveryCodes.findOneAndUpdate(
             { userId },
-            { 
+            {
                 userId,
                 hashes: hashedCodes,
                 generatedAt: new Date()
@@ -45639,14 +45770,13 @@ app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res
         );
 
         // Log activity
-        await SystemLog.create({
+        await logAccountActivity({
+            userId,
+            type: 'security',
             action: 'recovery_codes_regenerated',
-            entity: 'User',
-            entityId: userId,
-            performedBy: userId,
-            performedByModel: 'User',
             status: 'success',
-            metadata: { userId: userId.toString() }
+            metadata: { userId: userId.toString() },
+            req
         });
 
         res.json({ recoveryCodes });
@@ -45657,122 +45787,53 @@ app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res
 });
 
 // =============================================
-// ACTIVE DEVICES - LOGOUT DEVICE ENDPOINT
-// =============================================
-app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
-    try {
-        const { deviceId } = req.params;
-        const userId = req.user._id;
-
-        // Find the device session
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'User not found' });
-        }
-
-        // Find and remove the device from loginHistory
-        const deviceIndex = user.loginHistory?.findIndex(
-            session => session._id.toString() === deviceId
-        ) ?? -1;
-
-        if (deviceIndex === -1) {
-            return res.status(404).json({ code: 'DEVICE_NOT_FOUND', message: 'Device not found' });
-        }
-
-        // Remove the session
-        user.loginHistory.splice(deviceIndex, 1);
-        await user.save();
-
-        // Log activity
-        await SystemLog.create({
-            action: 'device_logout',
-            entity: 'User',
-            entityId: userId,
-            performedBy: userId,
-            performedByModel: 'User',
-            status: 'success',
-            metadata: { deviceId, userId: userId.toString() }
-        });
-
-        res.json({ success: true });
-    } catch (err) {
-        console.error('Error logging out device:', err);
-        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to logout device' });
-    }
-});
-
-// =============================================
-// ACTIVE DEVICES - LOGOUT ALL DEVICES ENDPOINT
-// =============================================
-app.post('/api/users/devices/logout-all', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        
-        // Get current session identifier (from token or cookie)
-        const currentSessionId = req.sessionId || req.headers['x-session-id'] || null;
-
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'User not found' });
-        }
-
-        // Keep only the current session
-        if (currentSessionId) {
-            user.loginHistory = user.loginHistory?.filter(
-                session => session._id.toString() === currentSessionId
-            ) || [];
-        } else {
-            // If no session ID, keep only the most recent session
-            const sortedHistory = (user.loginHistory || []).sort((a, b) => 
-                new Date(b.timestamp) - new Date(a.timestamp)
-            );
-            const current = sortedHistory[0];
-            user.loginHistory = current ? [current] : [];
-        }
-
-        await user.save();
-
-        // Log activity
-        await SystemLog.create({
-            action: 'devices_logged_out_all',
-            entity: 'User',
-            entityId: userId,
-            performedBy: userId,
-            performedByModel: 'User',
-            status: 'success',
-            metadata: { userId: userId.toString() }
-        });
-
-        res.json({ success: true });
-    } catch (err) {
-        console.error('Error logging out all devices:', err);
-        res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Failed to logout all devices' });
-    }
-});
-
-// =============================================
-// HELPER FUNCTIONS
+// ENCRYPTION HELPERS - FIXED
 // =============================================
 
-// Encrypt secret
 function encryptSecret(secret) {
-    const cipher = crypto.createCipher('aes-256-gcm', process.env.ENCRYPTION_KEY);
+    const iv = crypto.randomBytes(16);
+    const key = Buffer.from(process.env.ENCRYPTION_KEY || 'default-key-32-bytes-long-!!', 'utf8');
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
     let encrypted = cipher.update(secret, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    return encrypted + ':' + cipher.getAuthTag().toString('hex');
+    const authTag = cipher.getAuthTag().toString('hex');
+    return `${iv.toString('hex')}:${authTag}:${encrypted}`;
 }
 
-// Decrypt secret
 function decryptSecret(encryptedSecret) {
     const parts = encryptedSecret.split(':');
-    const decipher = crypto.createDecipher('aes-256-gcm', process.env.ENCRYPTION_KEY);
-    decipher.setAuthTag(Buffer.from(parts[1], 'hex'));
-    let decrypted = decipher.update(parts[0], 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
+    if (parts.length < 3) {
+        // Fallback for old format
+        try {
+            const decipher = crypto.createDecipher('aes-256-gcm', process.env.ENCRYPTION_KEY);
+            let decrypted = decipher.update(parts[0], 'hex', 'utf8');
+            decrypted += decipher.final('utf8');
+            return decrypted;
+        } catch {
+            return null;
+        }
+    }
+
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts.slice(2).join(':');
+    const key = Buffer.from(process.env.ENCRYPTION_KEY || 'default-key-32-bytes-long-!!', 'utf8');
+
+    try {
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(authTag);
+        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (err) {
+        console.error('Decryption error:', err);
+        return null;
+    }
 }
 
-// Generate QR Code
+// =============================================
+// GENERATE QR CODE
+// =============================================
 async function generateQRCode(otpauthUri) {
     try {
         const QRCode = require('qrcode');
@@ -45782,7 +45843,9 @@ async function generateQRCode(otpauthUri) {
     }
 }
 
-// Generate Recovery Codes
+// =============================================
+// GENERATE RECOVERY CODES
+// =============================================
 function generateRecoveryCodes(count = 10) {
     const codes = [];
     for (let i = 0; i < count; i++) {
@@ -45793,68 +45856,23 @@ function generateRecoveryCodes(count = 10) {
     return codes;
 }
 
-// Get current offset for a timezone
-function getCurrentOffset(timezoneId) {
-    try {
-        const now = new Date();
-        const parts = now.toLocaleString('en-US', { timeZone: timezoneId, timeZoneName: 'short' }).split(' ');
-        const offsetStr = parts[parts.length - 1] || '+00:00';
-        
-        const match = offsetStr.match(/GMT([+-])(\d+)(?::(\d+))?/);
-        if (match) {
-            const sign = match[1];
-            const hours = parseInt(match[2]);
-            const minutes = parseInt(match[3] || '0');
-            return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-        }
-        
-        return '+00:00';
-    } catch {
-        return '+00:00';
-    }
+// =============================================
+// SEND PROFESSIONAL EMAIL
+// =============================================
+async function sendProfessionalEmail({ email, template, data }) {
+    // Implementation depends on your email service
+    // This is a placeholder - replace with actual email sending
+    console.log(`[EMAIL] Sending ${template} to ${email}`, data);
+    return true;
 }
 
-// =============================================
-// GET USER SETTINGS ENDPOINT - Retrieve language and timezone
-// =============================================
-app.get('/api/users/settings', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
 
-        // Try to get from UserPreference first
-        let preferences = await UserPreference.findOne({ user: userId });
 
-        if (!preferences) {
-            // Try to get from User model's preferences
-            const user = await User.findById(userId).select('preferences');
-            if (user && user.preferences) {
-                return res.json({
-                    language: user.preferences.language || 'en',
-                    timezone: user.preferences.timezone || 'UTC'
-                });
-            }
-            // Return defaults if nothing found
-            return res.json({
-                language: 'en',
-                timezone: 'UTC'
-            });
-        }
 
-        res.json({
-            language: preferences.language || 'en',
-            timezone: preferences.timezone || 'UTC',
-            currency: preferences.currency || 'USD',
-            theme: preferences.theme || 'dark',
-            displayAsset: preferences.displayAsset || 'btc'
-        });
-    } catch (err) {
-        console.error('Error fetching user settings:', err);
-        res.status(500).json({ 
-            code: 'INTERNAL_ERROR', 
-            message: 'Failed to load user settings' 
-        });
-    }
-});
+
+
+
+
 
 
 
