@@ -44356,6 +44356,8 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
+
+
 // =============================================
 // 1. GET /api/users/security - Security Overview
 // =============================================
@@ -44378,10 +44380,10 @@ app.get('/api/users/security', protect, async (req, res) => {
 
         // Count active devices from loginHistory
         const activeDevices = user.loginHistory || [];
-        const activeCount = activeDevices.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired').length || 1;
+        const activeCount = activeDevices.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired').length;
 
         // Security checks
-        const hasPassword = true; // User always has a password
+        const hasPassword = true;
         const hasAuthenticator = user.twoFactorAuth?.enabled || false;
         
         // Determine security level
@@ -44397,16 +44399,19 @@ app.get('/api/users/security', protect, async (req, res) => {
         }
 
         res.status(200).json({
-            securityLevel: securityLevel,
-            statusMessage: statusMessage,
-            password: {
-                enabled: hasPassword
-            },
-            authenticator: {
-                enabled: hasAuthenticator
-            },
-            devices: {
-                activeCount: activeCount
+            success: true,
+            data: {
+                securityLevel: securityLevel,
+                statusMessage: statusMessage,
+                password: {
+                    enabled: hasPassword
+                },
+                authenticator: {
+                    enabled: hasAuthenticator
+                },
+                devices: {
+                    activeCount: activeCount
+                }
             }
         });
 
@@ -44423,7 +44428,54 @@ app.get('/api/users/security', protect, async (req, res) => {
 });
 
 // =============================================
-// 2. POST /api/users/two-factor/authenticator/setup
+// 2. GET /api/users/two-factor - 2FA Status
+// =============================================
+app.get('/api/users/two-factor', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId)
+            .select('twoFactorAuth')
+            .lean();
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        const enabled = user.twoFactorAuth?.enabled || false;
+        const enabledAt = user.twoFactorAuth?.enabledAt || null;
+        const recoveryCodesRemaining = user.twoFactorAuth?.recoveryCodes?.filter(c => !c.used)?.length || 0;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                authenticator: {
+                    enabled: enabled,
+                    enabledAt: enabledAt,
+                    recoveryCodesRemaining: recoveryCodesRemaining
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching 2FA status:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to fetch two-factor status'
+            }
+        });
+    }
+});
+
+// =============================================
+// 3. POST /api/users/two-factor/authenticator/setup
 // =============================================
 app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
     try {
@@ -44451,6 +44503,28 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
             });
         }
 
+        // Check for existing pending enrollment - don't create duplicates
+        const existingEnrollmentKey = `2fa_enrollment:${userId}`;
+        const existingEnrollment = await redis.get(existingEnrollmentKey);
+        
+        if (existingEnrollment) {
+            try {
+                const parsed = JSON.parse(existingEnrollment);
+                // Return existing enrollment
+                return res.status(200).json({
+                    success: true,
+                    data: {
+                        enrollmentId: parsed.enrollmentId,
+                        manualKey: parsed.secret,
+                        otpauthUri: parsed.otpauthUri || `otpauth://totp/₿itHash:${user.email}?secret=${parsed.secret}&issuer=₿itHash`,
+                        qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(parsed.otpauthUri || `otpauth://totp/₿itHash:${user.email}?secret=${parsed.secret}&issuer=₿itHash`)}`
+                    }
+                });
+            } catch (e) {
+                await redis.del(existingEnrollmentKey);
+            }
+        }
+
         // Generate TOTP secret using speakeasy
         const secret = speakeasy.generateSecret({
             length: 20,
@@ -44458,31 +44532,31 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
             issuer: 'BitHash LLC'
         });
 
-        // Create enrollment record
         const enrollmentId = `enr_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         
-        // Store enrollment in Redis with 10 minute expiration
         const enrollmentKey = `2fa_enrollment:${userId}`;
         const enrollmentData = {
             enrollmentId: enrollmentId,
             secret: secret.base32,
+            otpauthUri: secret.otpauth_url || `otpauth://totp/₿itHash:${user.email}?secret=${secret.base32}&issuer=₿itHash`,
             expiresAt: Date.now() + 10 * 60 * 1000
         };
         
         await redis.setex(enrollmentKey, 600, JSON.stringify(enrollmentData));
 
-        // Generate OTP Auth URI
         const otpauthUri = secret.otpauth_url || 
             `otpauth://totp/₿itHash:${user.email}?secret=${secret.base32}&issuer=₿itHash`;
 
-        // Generate QR code (using external API since we don't have qr-image)
         const qrCode = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUri)}`;
 
         res.status(200).json({
-            enrollmentId: enrollmentId,
-            manualKey: secret.base32,
-            otpauthUri: otpauthUri,
-            qrCode: qrCode
+            success: true,
+            data: {
+                enrollmentId: enrollmentId,
+                manualKey: secret.base32,
+                otpauthUri: otpauthUri,
+                qrCode: qrCode
+            }
         });
 
     } catch (err) {
@@ -44498,7 +44572,7 @@ app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) 
 });
 
 // =============================================
-// 3. POST /api/users/two-factor/authenticator/verify
+// 4. POST /api/users/two-factor/authenticator/verify
 // =============================================
 app.post('/api/users/two-factor/authenticator/verify', protect, [
     body('enrollmentId').notEmpty().withMessage('Enrollment ID is required'),
@@ -44530,7 +44604,6 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
-        // Get enrollment from Redis
         const enrollmentKey = `2fa_enrollment:${userId}`;
         const enrollmentData = await redis.get(enrollmentKey);
         
@@ -44546,7 +44619,6 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
 
         const enrollment = JSON.parse(enrollmentData);
 
-        // Verify enrollment matches
         if (enrollment.enrollmentId !== enrollmentId) {
             return res.status(400).json({
                 success: false,
@@ -44557,7 +44629,6 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
-        // Check if enrollment expired
         if (enrollment.expiresAt < Date.now()) {
             await redis.del(enrollmentKey);
             return res.status(400).json({
@@ -44569,10 +44640,9 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
-        // Rate limiting for verification attempts
         const attemptsKey = `2fa_attempts:${userId}`;
         const attempts = await redis.incr(attemptsKey);
-        await redis.expire(attemptsKey, 300); // 5 minutes window
+        await redis.expire(attemptsKey, 300);
         
         if (attempts > 5) {
             await redis.del(enrollmentKey);
@@ -44586,7 +44656,6 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
-        // Verify TOTP code
         const isValid = speakeasy.totp.verify({
             secret: enrollment.secret,
             encoding: 'base32',
@@ -44604,7 +44673,6 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
-        // Generate recovery codes (8 codes, 4-character segments)
         const recoveryCodes = [];
         const hashedRecoveryCodes = [];
         
@@ -44619,28 +44687,29 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
             });
         }
 
-        // Enable 2FA
         if (!user.twoFactorAuth) {
             user.twoFactorAuth = { enabled: false };
         }
         
         user.twoFactorAuth.enabled = true;
+        user.twoFactorAuth.enabledAt = new Date();
         user.twoFactorAuth.secret = enrollment.secret;
         user.twoFactorAuth.recoveryCodes = hashedRecoveryCodes;
 
         await user.save();
 
-        // Clean up Redis
         await redis.del(enrollmentKey);
         await redis.del(attemptsKey);
 
-        // Log activity
+        // Use existing logActivity function
         await logActivity('authenticator_enabled', 'User', userId, userId, 'User', req);
 
         res.status(200).json({
             success: true,
-            message: 'Authenticator enabled successfully.',
-            recoveryCodes: recoveryCodes
+            data: {
+                message: 'Authenticator enabled successfully.',
+                recoveryCodes: recoveryCodes
+            }
         });
 
     } catch (err) {
@@ -44656,7 +44725,7 @@ app.post('/api/users/two-factor/authenticator/verify', protect, [
 });
 
 // =============================================
-// 4. POST /api/users/two-factor/authenticator/disable
+// 5. POST /api/users/two-factor/authenticator/disable
 // =============================================
 app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res) => {
     try {
@@ -44683,7 +44752,6 @@ app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res
             });
         }
 
-        // Require password re-authentication
         const { password } = req.body;
         if (!password) {
             return res.status(400).json({
@@ -44695,7 +44763,6 @@ app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res
             });
         }
 
-        // Verify password
         const userWithPassword = await User.findById(userId).select('+password');
         const isPasswordValid = await bcrypt.compare(password, userWithPassword.password);
         
@@ -44709,19 +44776,20 @@ app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res
             });
         }
 
-        // Disable 2FA
         user.twoFactorAuth.enabled = false;
+        user.twoFactorAuth.enabledAt = null;
         user.twoFactorAuth.secret = undefined;
         user.twoFactorAuth.recoveryCodes = [];
         
         await user.save();
 
-        // Log activity
         await logActivity('authenticator_disabled', 'User', userId, userId, 'User', req);
 
         res.status(200).json({
             success: true,
-            message: 'Authenticator disabled successfully.'
+            data: {
+                message: 'Authenticator disabled successfully.'
+            }
         });
 
     } catch (err) {
@@ -44737,7 +44805,7 @@ app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res
 });
 
 // =============================================
-// 5. POST /api/users/two-factor/authenticator/recovery-codes
+// 6. POST /api/users/two-factor/authenticator/recovery-codes
 // =============================================
 app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (req, res) => {
     try {
@@ -44764,7 +44832,6 @@ app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (r
             });
         }
 
-        // Require password re-authentication
         const { password } = req.body;
         if (!password) {
             return res.status(400).json({
@@ -44789,7 +44856,6 @@ app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (r
             });
         }
 
-        // Generate new recovery codes
         const recoveryCodes = [];
         const hashedRecoveryCodes = [];
         
@@ -44807,12 +44873,13 @@ app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (r
         user.twoFactorAuth.recoveryCodes = hashedRecoveryCodes;
         await user.save();
 
-        // Log activity
         await logActivity('recovery_codes_regenerated', 'User', userId, userId, 'User', req);
 
         res.status(200).json({
             success: true,
-            recoveryCodes: recoveryCodes
+            data: {
+                recoveryCodes: recoveryCodes
+            }
         });
 
     } catch (err) {
@@ -44828,7 +44895,7 @@ app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (r
 });
 
 // =============================================
-// 6. GET /api/users/devices - Active Devices
+// 7. GET /api/users/devices - Active Devices
 // =============================================
 app.get('/api/users/devices', protect, async (req, res) => {
     try {
@@ -44847,15 +44914,12 @@ app.get('/api/users/devices', protect, async (req, res) => {
             });
         }
 
-        // Get current session identifier
         const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
 
-        // Format devices from loginHistory
         const devices = (user.loginHistory || []).map((device, index) => {
-            const isCurrent = device.sessionId === currentSessionId || index === 0;
+            const isCurrent = device.sessionId === currentSessionId;
             const isActive = device.sessionStatus !== 'revoked' && device.sessionStatus !== 'expired';
             
-            // Extract device info from user agent
             const userAgent = device.device || device.userAgent || '';
             const browser = detectBrowser(userAgent);
             const os = detectOS(userAgent);
@@ -44863,11 +44927,11 @@ app.get('/api/users/devices', protect, async (req, res) => {
 
             return {
                 id: device._id?.toString() || `device_${index}`,
-                name: `${browser} on ${os}`,
-                deviceType: deviceType,
+                name: device.name || `${browser} on ${os}`,
+                deviceType: deviceType || 'desktop',
                 sessionStatus: isActive ? 'active' : 'revoked',
-                current: isCurrent,
-                lastActiveAt: device.timestamp || device.lastActiveAt || device.createdAt || new Date().toISOString(),
+                current: isCurrent || false,
+                lastActiveAt: device.lastActiveAt || device.timestamp || device.createdAt || new Date().toISOString(),
                 createdAt: device.createdAt || device.timestamp || new Date().toISOString(),
                 location: {
                     city: device.locationDetails?.city || device.location?.city || 'Unknown',
@@ -44879,32 +44943,8 @@ app.get('/api/users/devices', protect, async (req, res) => {
             };
         });
 
-        // If no devices in history, create a default current device
-        if (devices.length === 0) {
-            const userAgent = req.headers['user-agent'] || 'Unknown Browser';
-            const browser = detectBrowser(userAgent);
-            const os = detectOS(userAgent);
-            const deviceType = detectDeviceType(userAgent);
-            
-            devices.push({
-                id: 'current_device',
-                name: `${browser} on ${os}`,
-                deviceType: deviceType,
-                sessionStatus: 'active',
-                current: true,
-                lastActiveAt: new Date().toISOString(),
-                createdAt: new Date().toISOString(),
-                location: {
-                    city: 'Unknown',
-                    country: 'Unknown'
-                },
-                browser: browser,
-                os: os,
-                ip: req.ip || 'Unknown'
-            });
-        }
-
         res.status(200).json({
+            success: true,
             data: {
                 devices: devices
             }
@@ -44923,7 +44963,89 @@ app.get('/api/users/devices', protect, async (req, res) => {
 });
 
 // =============================================
-// 7. POST /api/users/devices/logout-all
+// 8. POST /api/users/devices/:sessionId/revoke - Revoke Device
+// =============================================
+app.post('/api/users/devices/:sessionId/revoke', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const sessionId = req.params.sessionId;
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
+
+        if (sessionId === currentSessionId) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'CANNOT_REVOKE_CURRENT',
+                    message: 'Cannot revoke the current session'
+                }
+            });
+        }
+
+        let found = false;
+        if (user.loginHistory) {
+            user.loginHistory = user.loginHistory.map(device => {
+                const deviceId = device.sessionId || device._id?.toString();
+                if (deviceId === sessionId && device.sessionStatus !== 'revoked') {
+                    found = true;
+                    return { 
+                        ...device, 
+                        sessionStatus: 'revoked', 
+                        revokedAt: new Date() 
+                    };
+                }
+                return device;
+            });
+        }
+
+        if (!found) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'DEVICE_NOT_FOUND',
+                    message: 'Device not found or already revoked'
+                }
+            });
+        }
+
+        await user.save();
+
+        await logActivity('device_logout', 'User', userId, userId, 'User', req, {
+            sessionId: sessionId
+        });
+
+        res.status(200).json({
+            success: true,
+            data: {
+                message: 'Device session revoked successfully'
+            }
+        });
+
+    } catch (err) {
+        console.error('Error revoking device:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to revoke device session'
+            }
+        });
+    }
+});
+
+// =============================================
+// 9. POST /api/users/devices/logout-all
 // =============================================
 app.post('/api/users/devices/logout-all', protect, async (req, res) => {
     try {
@@ -44940,14 +45062,11 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
             });
         }
 
-        // Get current session identifier
         const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
 
-        // Count active devices before revocation
         const activeDevices = user.loginHistory?.filter(d => d.sessionStatus !== 'revoked' && d.sessionStatus !== 'expired') || [];
         const totalActive = activeDevices.length;
 
-        // Revoke all sessions except current
         let revokedCount = 0;
         if (user.loginHistory && user.loginHistory.length > 0) {
             user.loginHistory = user.loginHistory.map(device => {
@@ -44968,7 +45087,6 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
 
         await user.save();
 
-        // Blacklist current token (except current session)
         if (revokedCount > 0) {
             const currentToken = req.headers.authorization?.split(' ')[1];
             if (currentToken) {
@@ -44982,7 +45100,6 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
             }
         }
 
-        // Log activity
         await logActivity('logout_all_devices', 'User', userId, userId, 'User', req, {
             revokedCount: revokedCount,
             totalActiveBefore: totalActive
@@ -44990,8 +45107,10 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: 'All other devices have been logged out.',
-            revokedCount: revokedCount
+            data: {
+                message: `All other devices have been logged out.`,
+                revokedCount: revokedCount
+            }
         });
 
     } catch (err) {
@@ -45007,56 +45126,246 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
 });
 
 // =============================================
-// 8. GET /api/settings/languages
+// 10. GET /api/users/activity - Recent Activity
+// =============================================
+app.get('/api/users/activity', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const type = req.query.type || 'all';
+        const skip = (page - 1) * limit;
+
+        const filter = { userId: userId };
+        if (type !== 'all') {
+            filter.type = type;
+        }
+
+        const activities = await Activity.find(filter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit + 1)
+            .lean();
+
+        const hasNext = activities.length > limit;
+        const items = hasNext ? activities.slice(0, limit) : activities;
+
+        const formattedActivities = items.map(activity => ({
+            id: activity._id.toString(),
+            type: activity.type || 'unknown',
+            title: activity.title || activity.type || 'Activity',
+            description: activity.description || '',
+            status: activity.status || 'completed',
+            createdAt: activity.createdAt || activity.timestamp || new Date().toISOString(),
+            location: {
+                city: activity.location?.city || 'Unknown',
+                country: activity.location?.country || 'Unknown'
+            },
+            device: {
+                browser: activity.device?.browser || 'Unknown',
+                os: activity.device?.os || 'Unknown'
+            },
+            ip: activity.ip || 'Unknown',
+            transaction: activity.transaction || null,
+            metadata: activity.metadata || {}
+        }));
+
+        res.status(200).json({
+            success: true,
+            data: {
+                activities: formattedActivities,
+                pagination: {
+                    page: page,
+                    limit: limit,
+                    hasNext: hasNext,
+                    hasMore: hasNext,
+                    total: await Activity.countDocuments(filter).catch(() => 0)
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching activity:', err);
+        res.status(200).json({
+            success: true,
+            data: {
+                activities: [],
+                pagination: {
+                    page: 1,
+                    limit: 20,
+                    hasNext: false,
+                    hasMore: false,
+                    total: 0
+                }
+            }
+        });
+    }
+});
+
+// =============================================
+// 11. GET /api/users/preferences - User Preferences
+// =============================================
+app.get('/api/users/preferences', protect, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id)
+            .select('preferences')
+            .lean();
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        const prefs = user.preferences || {};
+
+        res.status(200).json({
+            success: true,
+            data: {
+                language: prefs.language || 'en',
+                timezone: prefs.timezone || 'UTC',
+                currency: prefs.currency || 'USD',
+                theme: prefs.theme || 'system',
+                displayAsset: prefs.displayAsset || 'btc',
+                notifications: prefs.notifications || {}
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching preferences:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to fetch preferences'
+            }
+        });
+    }
+});
+
+// =============================================
+// 12. PATCH /api/users/preferences - Update Preferences
+// =============================================
+app.patch('/api/users/preferences', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const updates = req.body;
+
+        const allowedFields = ['language', 'timezone', 'currency', 'theme', 'displayAsset', 'notifications'];
+        const filteredUpdates = {};
+        
+        for (const key of allowedFields) {
+            if (updates[key] !== undefined) {
+                filteredUpdates[`preferences.${key}`] = updates[key];
+            }
+        }
+
+        if (Object.keys(filteredUpdates).length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'NO_UPDATES',
+                    message: 'No valid preference fields provided'
+                }
+            });
+        }
+
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { $set: filteredUpdates },
+            { new: true }
+        );
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        await logActivity('preferences_updated', 'User', userId, userId, 'User', req, {
+            updatedFields: Object.keys(filteredUpdates)
+        });
+
+        res.status(200).json({
+            success: true,
+            data: {
+                message: 'Preferences updated successfully'
+            }
+        });
+
+    } catch (err) {
+        console.error('Error updating preferences:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to update preferences'
+            }
+        });
+    }
+});
+
+// =============================================
+// 13. GET /api/settings/languages - Languages
 // =============================================
 app.get('/api/settings/languages', async (req, res) => {
     try {
-        // Comprehensive language catalog based on ISO 639 and BCP 47
         const languages = [
-            { code: 'en', name: 'English', nativeName: 'English', locale: 'en-US', territory: 'US', flag: '🇺🇸', direction: 'ltr' },
-            { code: 'es', name: 'Spanish', nativeName: 'Español', locale: 'es-ES', territory: 'ES', flag: '🇪🇸', direction: 'ltr' },
-            { code: 'fr', name: 'French', nativeName: 'Français', locale: 'fr-FR', territory: 'FR', flag: '🇫🇷', direction: 'ltr' },
-            { code: 'de', name: 'German', nativeName: 'Deutsch', locale: 'de-DE', territory: 'DE', flag: '🇩🇪', direction: 'ltr' },
-            { code: 'it', name: 'Italian', nativeName: 'Italiano', locale: 'it-IT', territory: 'IT', flag: '🇮🇹', direction: 'ltr' },
-            { code: 'pt', name: 'Portuguese', nativeName: 'Português', locale: 'pt-PT', territory: 'PT', flag: '🇵🇹', direction: 'ltr' },
-            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', locale: 'nl-NL', territory: 'NL', flag: '🇳🇱', direction: 'ltr' },
-            { code: 'ru', name: 'Russian', nativeName: 'Русский', locale: 'ru-RU', territory: 'RU', flag: '🇷🇺', direction: 'ltr' },
-            { code: 'ja', name: 'Japanese', nativeName: '日本語', locale: 'ja-JP', territory: 'JP', flag: '🇯🇵', direction: 'ltr' },
-            { code: 'ko', name: 'Korean', nativeName: '한국어', locale: 'ko-KR', territory: 'KR', flag: '🇰🇷', direction: 'ltr' },
-            { code: 'zh', name: 'Chinese', nativeName: '中文', locale: 'zh-CN', territory: 'CN', flag: '🇨🇳', direction: 'ltr' },
-            { code: 'ar', name: 'Arabic', nativeName: 'العربية', locale: 'ar-SA', territory: 'SA', flag: '🇸🇦', direction: 'rtl' },
-            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', locale: 'hi-IN', territory: 'IN', flag: '🇮🇳', direction: 'ltr' },
-            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', locale: 'bn-BD', territory: 'BD', flag: '🇧🇩', direction: 'ltr' },
-            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', locale: 'id-ID', territory: 'ID', flag: '🇮🇩', direction: 'ltr' },
-            { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', locale: 'ms-MY', territory: 'MY', flag: '🇲🇾', direction: 'ltr' },
-            { code: 'th', name: 'Thai', nativeName: 'ไทย', locale: 'th-TH', territory: 'TH', flag: '🇹🇭', direction: 'ltr' },
-            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', locale: 'vi-VN', territory: 'VN', flag: '🇻🇳', direction: 'ltr' },
-            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', locale: 'tr-TR', territory: 'TR', flag: '🇹🇷', direction: 'ltr' },
-            { code: 'pl', name: 'Polish', nativeName: 'Polski', locale: 'pl-PL', territory: 'PL', flag: '🇵🇱', direction: 'ltr' },
-            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', locale: 'uk-UA', territory: 'UA', flag: '🇺🇦', direction: 'ltr' },
-            { code: 'ro', name: 'Romanian', nativeName: 'Română', locale: 'ro-RO', territory: 'RO', flag: '🇷🇴', direction: 'ltr' },
-            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', locale: 'hu-HU', territory: 'HU', flag: '🇭🇺', direction: 'ltr' },
-            { code: 'cs', name: 'Czech', nativeName: 'Čeština', locale: 'cs-CZ', territory: 'CZ', flag: '🇨🇿', direction: 'ltr' },
-            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', locale: 'sk-SK', territory: 'SK', flag: '🇸🇰', direction: 'ltr' },
-            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', locale: 'bg-BG', territory: 'BG', flag: '🇧🇬', direction: 'ltr' },
-            { code: 'sr', name: 'Serbian', nativeName: 'Српски', locale: 'sr-RS', territory: 'RS', flag: '🇷🇸', direction: 'ltr' },
-            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', locale: 'hr-HR', territory: 'HR', flag: '🇭🇷', direction: 'ltr' },
-            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', locale: 'sv-SE', territory: 'SE', flag: '🇸🇪', direction: 'ltr' },
-            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', locale: 'nb-NO', territory: 'NO', flag: '🇳🇴', direction: 'ltr' },
-            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', locale: 'fi-FI', territory: 'FI', flag: '🇫🇮', direction: 'ltr' },
-            { code: 'da', name: 'Danish', nativeName: 'Dansk', locale: 'da-DK', territory: 'DK', flag: '🇩🇰', direction: 'ltr' },
-            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', locale: 'el-GR', territory: 'GR', flag: '🇬🇷', direction: 'ltr' },
-            { code: 'he', name: 'Hebrew', nativeName: 'עברית', locale: 'he-IL', territory: 'IL', flag: '🇮🇱', direction: 'rtl' },
-            { code: 'fa', name: 'Persian', nativeName: 'فارسی', locale: 'fa-IR', territory: 'IR', flag: '🇮🇷', direction: 'rtl' },
-            { code: 'ur', name: 'Urdu', nativeName: 'اردو', locale: 'ur-PK', territory: 'PK', flag: '🇵🇰', direction: 'rtl' },
-            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', locale: 'sw-KE', territory: 'KE', flag: '🇰🇪', direction: 'ltr' },
-            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', locale: 'af-ZA', territory: 'ZA', flag: '🇿🇦', direction: 'ltr' },
-            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', locale: 'am-ET', territory: 'ET', flag: '🇪🇹', direction: 'ltr' },
-            { code: 'tl', name: 'Tagalog', nativeName: 'Tagalog', locale: 'tl-PH', territory: 'PH', flag: '🇵🇭', direction: 'ltr' }
+            { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸' },
+            { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸' },
+            { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷' },
+            { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪' },
+            { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹' },
+            { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹' },
+            { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: '🇳🇱' },
+            { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: '🇷🇺' },
+            { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵' },
+            { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷' },
+            { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳' },
+            { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦' },
+            { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flag: '🇮🇳' },
+            { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', flag: '🇧🇩' },
+            { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', flag: '🇮🇩' },
+            { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', flag: '🇲🇾' },
+            { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭' },
+            { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', flag: '🇻🇳' },
+            { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', flag: '🇹🇷' },
+            { code: 'pl', name: 'Polish', nativeName: 'Polski', flag: '🇵🇱' },
+            { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', flag: '🇺🇦' },
+            { code: 'ro', name: 'Romanian', nativeName: 'Română', flag: '🇷🇴' },
+            { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', flag: '🇭🇺' },
+            { code: 'cs', name: 'Czech', nativeName: 'Čeština', flag: '🇨🇿' },
+            { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', flag: '🇸🇰' },
+            { code: 'bg', name: 'Bulgarian', nativeName: 'Български', flag: '🇧🇬' },
+            { code: 'sr', name: 'Serbian', nativeName: 'Српски', flag: '🇷🇸' },
+            { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', flag: '🇭🇷' },
+            { code: 'sv', name: 'Swedish', nativeName: 'Svenska', flag: '🇸🇪' },
+            { code: 'no', name: 'Norwegian', nativeName: 'Norsk', flag: '🇳🇴' },
+            { code: 'fi', name: 'Finnish', nativeName: 'Suomi', flag: '🇫🇮' },
+            { code: 'da', name: 'Danish', nativeName: 'Dansk', flag: '🇩🇰' },
+            { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', flag: '🇬🇷' },
+            { code: 'he', name: 'Hebrew', nativeName: 'עברית', flag: '🇮🇱' },
+            { code: 'fa', name: 'Persian', nativeName: 'فارسی', flag: '🇮🇷' },
+            { code: 'ur', name: 'Urdu', nativeName: 'اردو', flag: '🇵🇰' },
+            { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', flag: '🇰🇪' },
+            { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', flag: '🇿🇦' },
+            { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', flag: '🇪🇹' },
+            { code: 'tl', name: 'Tagalog', nativeName: 'Tagalog', flag: '🇵🇭' }
         ];
 
         res.status(200).json({
-            languages: languages
+            success: true,
+            data: {
+                languages: languages
+            }
         });
 
     } catch (err) {
@@ -45072,139 +45381,98 @@ app.get('/api/settings/languages', async (req, res) => {
 });
 
 // =============================================
-// 9. GET /api/settings/timezones
+// 14. GET /api/settings/timezones - Timezones
 // =============================================
 app.get('/api/settings/timezones', async (req, res) => {
     try {
-        // Comprehensive IANA timezone list
         const timezones = [
-            // UTC
-            { id: 'UTC', name: 'UTC', region: 'UTC', offset: '+00:00' },
-            
-            // Africa
-            { id: 'Africa/Nairobi', name: 'Nairobi', region: 'Africa', offset: '+03:00' },
-            { id: 'Africa/Cairo', name: 'Cairo', region: 'Africa', offset: '+03:00' },
-            { id: 'Africa/Johannesburg', name: 'Johannesburg', region: 'Africa', offset: '+02:00' },
-            { id: 'Africa/Lagos', name: 'Lagos', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Casablanca', name: 'Casablanca', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Tunis', name: 'Tunis', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Algiers', name: 'Algiers', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Khartoum', name: 'Khartoum', region: 'Africa', offset: '+02:00' },
-            { id: 'Africa/Accra', name: 'Accra', region: 'Africa', offset: '+00:00' },
-            { id: 'Africa/Douala', name: 'Douala', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Luanda', name: 'Luanda', region: 'Africa', offset: '+01:00' },
-            { id: 'Africa/Maputo', name: 'Maputo', region: 'Africa', offset: '+02:00' },
-            { id: 'Africa/Windhoek', name: 'Windhoek', region: 'Africa', offset: '+02:00' },
-            
-            // Europe
-            { id: 'Europe/London', name: 'London', region: 'Europe', offset: '+01:00' },
-            { id: 'Europe/Paris', name: 'Paris', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Berlin', name: 'Berlin', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Rome', name: 'Rome', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Madrid', name: 'Madrid', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Bucharest', name: 'Bucharest', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Athens', name: 'Athens', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Istanbul', name: 'Istanbul', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Moscow', name: 'Moscow', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Dublin', name: 'Dublin', region: 'Europe', offset: '+01:00' },
-            { id: 'Europe/Zurich', name: 'Zurich', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Vienna', name: 'Vienna', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Brussels', name: 'Brussels', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Amsterdam', name: 'Amsterdam', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Stockholm', name: 'Stockholm', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Oslo', name: 'Oslo', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Copenhagen', name: 'Copenhagen', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Helsinki', name: 'Helsinki', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Warsaw', name: 'Warsaw', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Prague', name: 'Prague', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Budapest', name: 'Budapest', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Sofia', name: 'Sofia', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Kiev', name: 'Kiev', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Minsk', name: 'Minsk', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Riga', name: 'Riga', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Vilnius', name: 'Vilnius', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Tallinn', name: 'Tallinn', region: 'Europe', offset: '+03:00' },
-            { id: 'Europe/Lisbon', name: 'Lisbon', region: 'Europe', offset: '+01:00' },
-            { id: 'Europe/Belgrade', name: 'Belgrade', region: 'Europe', offset: '+02:00' },
-            { id: 'Europe/Sarajevo', name: 'Sarajevo', region: 'Europe', offset: '+02:00' },
-            
-            // Asia
-            { id: 'Asia/Tokyo', name: 'Tokyo', region: 'Asia', offset: '+09:00' },
-            { id: 'Asia/Seoul', name: 'Seoul', region: 'Asia', offset: '+09:00' },
-            { id: 'Asia/Shanghai', name: 'Shanghai', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Singapore', name: 'Singapore', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Kolkata', name: 'Kolkata', region: 'Asia', offset: '+05:30' },
-            { id: 'Asia/Dubai', name: 'Dubai', region: 'Asia', offset: '+04:00' },
-            { id: 'Asia/Riyadh', name: 'Riyadh', region: 'Asia', offset: '+03:00' },
-            { id: 'Asia/Bangkok', name: 'Bangkok', region: 'Asia', offset: '+07:00' },
-            { id: 'Asia/Jakarta', name: 'Jakarta', region: 'Asia', offset: '+07:00' },
-            { id: 'Asia/Kuala_Lumpur', name: 'Kuala Lumpur', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Manila', name: 'Manila', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Hong_Kong', name: 'Hong Kong', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Taipei', name: 'Taipei', region: 'Asia', offset: '+08:00' },
-            { id: 'Asia/Dhaka', name: 'Dhaka', region: 'Asia', offset: '+06:00' },
-            { id: 'Asia/Karachi', name: 'Karachi', region: 'Asia', offset: '+05:00' },
-            { id: 'Asia/Tehran', name: 'Tehran', region: 'Asia', offset: '+04:30' },
-            { id: 'Asia/Baghdad', name: 'Baghdad', region: 'Asia', offset: '+03:00' },
-            { id: 'Asia/Beirut', name: 'Beirut', region: 'Asia', offset: '+03:00' },
-            { id: 'Asia/Jerusalem', name: 'Jerusalem', region: 'Asia', offset: '+03:00' },
-            { id: 'Asia/Kabul', name: 'Kabul', region: 'Asia', offset: '+04:30' },
-            { id: 'Asia/Kathmandu', name: 'Kathmandu', region: 'Asia', offset: '+05:45' },
-            { id: 'Asia/Colombo', name: 'Colombo', region: 'Asia', offset: '+05:30' },
-            { id: 'Asia/Rangoon', name: 'Rangoon', region: 'Asia', offset: '+06:30' },
-            { id: 'Asia/Bangkok', name: 'Bangkok', region: 'Asia', offset: '+07:00' },
-            { id: 'Asia/Ho_Chi_Minh', name: 'Ho Chi Minh', region: 'Asia', offset: '+07:00' },
-            { id: 'Asia/Ulaanbaatar', name: 'Ulaanbaatar', region: 'Asia', offset: '+08:00' },
-            
-            // Americas
-            { id: 'America/New_York', name: 'New York', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Los_Angeles', name: 'Los Angeles', region: 'Americas', offset: '-07:00' },
-            { id: 'America/Chicago', name: 'Chicago', region: 'Americas', offset: '-05:00' },
-            { id: 'America/Denver', name: 'Denver', region: 'Americas', offset: '-06:00' },
-            { id: 'America/Phoenix', name: 'Phoenix', region: 'Americas', offset: '-07:00' },
-            { id: 'America/Toronto', name: 'Toronto', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Vancouver', name: 'Vancouver', region: 'Americas', offset: '-07:00' },
-            { id: 'America/Sao_Paulo', name: 'Sao Paulo', region: 'Americas', offset: '-03:00' },
-            { id: 'America/Mexico_City', name: 'Mexico City', region: 'Americas', offset: '-06:00' },
-            { id: 'America/Bogota', name: 'Bogota', region: 'Americas', offset: '-05:00' },
-            { id: 'America/Buenos_Aires', name: 'Buenos Aires', region: 'Americas', offset: '-03:00' },
-            { id: 'America/Santiago', name: 'Santiago', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Lima', name: 'Lima', region: 'Americas', offset: '-05:00' },
-            { id: 'America/Caracas', name: 'Caracas', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Panama', name: 'Panama', region: 'Americas', offset: '-05:00' },
-            { id: 'America/Montevideo', name: 'Montevideo', region: 'Americas', offset: '-03:00' },
-            { id: 'America/Asuncion', name: 'Asuncion', region: 'Americas', offset: '-04:00' },
-            { id: 'America/La_Paz', name: 'La Paz', region: 'Americas', offset: '-04:00' },
-            { id: 'America/Guatemala', name: 'Guatemala', region: 'Americas', offset: '-06:00' },
-            { id: 'America/Managua', name: 'Managua', region: 'Americas', offset: '-06:00' },
-            { id: 'America/San_Salvador', name: 'San Salvador', region: 'Americas', offset: '-06:00' },
-            { id: 'America/Tegucigalpa', name: 'Tegucigalpa', region: 'Americas', offset: '-06:00' },
-            
-            // Pacific
-            { id: 'Australia/Sydney', name: 'Sydney', region: 'Pacific', offset: '+10:00' },
-            { id: 'Australia/Melbourne', name: 'Melbourne', region: 'Pacific', offset: '+10:00' },
-            { id: 'Australia/Brisbane', name: 'Brisbane', region: 'Pacific', offset: '+10:00' },
-            { id: 'Australia/Perth', name: 'Perth', region: 'Pacific', offset: '+08:00' },
-            { id: 'Australia/Adelaide', name: 'Adelaide', region: 'Pacific', offset: '+09:30' },
-            { id: 'Australia/Hobart', name: 'Hobart', region: 'Pacific', offset: '+10:00' },
-            { id: 'Pacific/Auckland', name: 'Auckland', region: 'Pacific', offset: '+12:00' },
-            { id: 'Pacific/Fiji', name: 'Fiji', region: 'Pacific', offset: '+12:00' },
-            { id: 'Pacific/Guam', name: 'Guam', region: 'Pacific', offset: '+10:00' },
-            { id: 'Pacific/Honolulu', name: 'Honolulu', region: 'Pacific', offset: '-10:00' },
-            { id: 'Pacific/Pago_Pago', name: 'Pago Pago', region: 'Pacific', offset: '-11:00' },
-            { id: 'Pacific/Tahiti', name: 'Tahiti', region: 'Pacific', offset: '-10:00' },
-            { id: 'Pacific/Noumea', name: 'Noumea', region: 'Pacific', offset: '+11:00' },
-            { id: 'Pacific/Port_Moresby', name: 'Port Moresby', region: 'Pacific', offset: '+10:00' }
+            { id: 'UTC', label: 'UTC', utcOffset: '+00:00' },
+            { id: 'Europe/London', label: 'London', utcOffset: '+00:00' },
+            { id: 'Europe/Paris', label: 'Paris', utcOffset: '+01:00' },
+            { id: 'Europe/Berlin', label: 'Berlin', utcOffset: '+01:00' },
+            { id: 'Europe/Rome', label: 'Rome', utcOffset: '+01:00' },
+            { id: 'Europe/Madrid', label: 'Madrid', utcOffset: '+01:00' },
+            { id: 'Europe/Bucharest', label: 'Bucharest', utcOffset: '+02:00' },
+            { id: 'Europe/Athens', label: 'Athens', utcOffset: '+02:00' },
+            { id: 'Europe/Istanbul', label: 'Istanbul', utcOffset: '+02:00' },
+            { id: 'Europe/Moscow', label: 'Moscow', utcOffset: '+03:00' },
+            { id: 'Europe/Dublin', label: 'Dublin', utcOffset: '+00:00' },
+            { id: 'Europe/Zurich', label: 'Zurich', utcOffset: '+01:00' },
+            { id: 'Europe/Vienna', label: 'Vienna', utcOffset: '+01:00' },
+            { id: 'Europe/Brussels', label: 'Brussels', utcOffset: '+01:00' },
+            { id: 'Europe/Amsterdam', label: 'Amsterdam', utcOffset: '+01:00' },
+            { id: 'Europe/Stockholm', label: 'Stockholm', utcOffset: '+01:00' },
+            { id: 'Europe/Oslo', label: 'Oslo', utcOffset: '+01:00' },
+            { id: 'Europe/Copenhagen', label: 'Copenhagen', utcOffset: '+01:00' },
+            { id: 'Europe/Helsinki', label: 'Helsinki', utcOffset: '+02:00' },
+            { id: 'Europe/Warsaw', label: 'Warsaw', utcOffset: '+01:00' },
+            { id: 'Europe/Prague', label: 'Prague', utcOffset: '+01:00' },
+            { id: 'Europe/Budapest', label: 'Budapest', utcOffset: '+01:00' },
+            { id: 'Europe/Sofia', label: 'Sofia', utcOffset: '+02:00' },
+            { id: 'Europe/Kiev', label: 'Kiev', utcOffset: '+02:00' },
+            { id: 'Europe/Minsk', label: 'Minsk', utcOffset: '+03:00' },
+            { id: 'Europe/Riga', label: 'Riga', utcOffset: '+02:00' },
+            { id: 'Europe/Vilnius', label: 'Vilnius', utcOffset: '+02:00' },
+            { id: 'Europe/Tallinn', label: 'Tallinn', utcOffset: '+02:00' },
+            { id: 'Europe/Lisbon', label: 'Lisbon', utcOffset: '+00:00' },
+            { id: 'Europe/Belgrade', label: 'Belgrade', utcOffset: '+01:00' },
+            { id: 'Europe/Sarajevo', label: 'Sarajevo', utcOffset: '+01:00' },
+            { id: 'America/New_York', label: 'New York', utcOffset: '-04:00' },
+            { id: 'America/Los_Angeles', label: 'Los Angeles', utcOffset: '-07:00' },
+            { id: 'America/Chicago', label: 'Chicago', utcOffset: '-05:00' },
+            { id: 'America/Denver', label: 'Denver', utcOffset: '-06:00' },
+            { id: 'America/Phoenix', label: 'Phoenix', utcOffset: '-07:00' },
+            { id: 'America/Toronto', label: 'Toronto', utcOffset: '-04:00' },
+            { id: 'America/Vancouver', label: 'Vancouver', utcOffset: '-07:00' },
+            { id: 'America/Sao_Paulo', label: 'Sao Paulo', utcOffset: '-03:00' },
+            { id: 'America/Mexico_City', label: 'Mexico City', utcOffset: '-06:00' },
+            { id: 'America/Bogota', label: 'Bogota', utcOffset: '-05:00' },
+            { id: 'America/Buenos_Aires', label: 'Buenos Aires', utcOffset: '-03:00' },
+            { id: 'America/Santiago', label: 'Santiago', utcOffset: '-04:00' },
+            { id: 'America/Lima', label: 'Lima', utcOffset: '-05:00' },
+            { id: 'America/Caracas', label: 'Caracas', utcOffset: '-04:00' },
+            { id: 'America/Panama', label: 'Panama', utcOffset: '-05:00' },
+            { id: 'America/Montevideo', label: 'Montevideo', utcOffset: '-03:00' },
+            { id: 'Asia/Tokyo', label: 'Tokyo', utcOffset: '+09:00' },
+            { id: 'Asia/Seoul', label: 'Seoul', utcOffset: '+09:00' },
+            { id: 'Asia/Shanghai', label: 'Shanghai', utcOffset: '+08:00' },
+            { id: 'Asia/Singapore', label: 'Singapore', utcOffset: '+08:00' },
+            { id: 'Asia/Kolkata', label: 'Kolkata', utcOffset: '+05:30' },
+            { id: 'Asia/Dubai', label: 'Dubai', utcOffset: '+04:00' },
+            { id: 'Asia/Riyadh', label: 'Riyadh', utcOffset: '+03:00' },
+            { id: 'Asia/Bangkok', label: 'Bangkok', utcOffset: '+07:00' },
+            { id: 'Asia/Jakarta', label: 'Jakarta', utcOffset: '+07:00' },
+            { id: 'Asia/Kuala_Lumpur', label: 'Kuala Lumpur', utcOffset: '+08:00' },
+            { id: 'Asia/Manila', label: 'Manila', utcOffset: '+08:00' },
+            { id: 'Asia/Hong_Kong', label: 'Hong Kong', utcOffset: '+08:00' },
+            { id: 'Asia/Taipei', label: 'Taipei', utcOffset: '+08:00' },
+            { id: 'Asia/Dhaka', label: 'Dhaka', utcOffset: '+06:00' },
+            { id: 'Asia/Karachi', label: 'Karachi', utcOffset: '+05:00' },
+            { id: 'Asia/Tehran', label: 'Tehran', utcOffset: '+04:30' },
+            { id: 'Asia/Baghdad', label: 'Baghdad', utcOffset: '+03:00' },
+            { id: 'Asia/Beirut', label: 'Beirut', utcOffset: '+02:00' },
+            { id: 'Asia/Jerusalem', label: 'Jerusalem', utcOffset: '+02:00' },
+            { id: 'Africa/Nairobi', label: 'Nairobi', utcOffset: '+03:00' },
+            { id: 'Africa/Cairo', label: 'Cairo', utcOffset: '+02:00' },
+            { id: 'Africa/Johannesburg', label: 'Johannesburg', utcOffset: '+02:00' },
+            { id: 'Africa/Lagos', label: 'Lagos', utcOffset: '+01:00' },
+            { id: 'Australia/Sydney', label: 'Sydney', utcOffset: '+10:00' },
+            { id: 'Australia/Melbourne', label: 'Melbourne', utcOffset: '+10:00' },
+            { id: 'Australia/Brisbane', label: 'Brisbane', utcOffset: '+10:00' },
+            { id: 'Australia/Perth', label: 'Perth', utcOffset: '+08:00' },
+            { id: 'Australia/Adelaide', label: 'Adelaide', utcOffset: '+09:30' },
+            { id: 'Pacific/Auckland', label: 'Auckland', utcOffset: '+12:00' },
+            { id: 'Pacific/Fiji', label: 'Fiji', utcOffset: '+12:00' },
+            { id: 'Pacific/Honolulu', label: 'Honolulu', utcOffset: '-10:00' }
         ];
 
-        // Calculate actual offsets for today (handles DST)
         const now = new Date();
         const timezonesWithOffsets = timezones.map(tz => {
             try {
                 const offset = getTimezoneOffset(tz.id);
                 return {
                     ...tz,
-                    offset: offset
+                    utcOffset: offset
                 };
             } catch (err) {
                 return tz;
@@ -45212,7 +45480,10 @@ app.get('/api/settings/timezones', async (req, res) => {
         });
 
         res.status(200).json({
-            timezones: timezonesWithOffsets
+            success: true,
+            data: {
+                timezones: timezonesWithOffsets
+            }
         });
 
     } catch (err) {
@@ -45228,7 +45499,7 @@ app.get('/api/settings/timezones', async (req, res) => {
 });
 
 // =============================================
-// 10. GET /api/users/profile - User Profile
+// 15. GET /api/users/profile - User Profile
 // =============================================
 app.get('/api/users/profile', protect, async (req, res) => {
     try {
@@ -45247,17 +45518,20 @@ app.get('/api/users/profile', protect, async (req, res) => {
         }
 
         res.status(200).json({
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
-            email: user.email || '',
-            phone: user.phone || '',
-            country: user.country || '',
-            address: {
-                street: user.address?.street || '',
-                city: user.address?.city || '',
-                state: user.address?.state || '',
-                postalCode: user.address?.postalCode || '',
-                country: user.address?.country || ''
+            success: true,
+            data: {
+                firstName: user.firstName || '',
+                lastName: user.lastName || '',
+                email: user.email || '',
+                phone: user.phone || '',
+                country: user.country || '',
+                address: {
+                    street: user.address?.street || '',
+                    city: user.address?.city || '',
+                    state: user.address?.state || '',
+                    postalCode: user.address?.postalCode || '',
+                    country: user.address?.country || ''
+                }
             }
         });
 
@@ -45274,79 +45548,217 @@ app.get('/api/users/profile', protect, async (req, res) => {
 });
 
 // =============================================
-// HELPER FUNCTIONS
+// 16. PUT /api/users/profile - Update Profile
 // =============================================
-
-/**
- * Generate a 4-character recovery code segment
- */
-function generateRecoverySegment() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i = 0; i < 4; i++) {
-        code += chars[Math.floor(Math.random() * chars.length)];
-    }
-    return code;
-}
-
-/**
- * Detect browser from user agent
- */
-function detectBrowser(userAgent) {
-    if (!userAgent) return 'Unknown';
-    userAgent = userAgent.toLowerCase();
-    if (userAgent.includes('edge')) return 'Edge';
-    if (userAgent.includes('chrome') && !userAgent.includes('edg')) return 'Chrome';
-    if (userAgent.includes('safari') && !userAgent.includes('chrome')) return 'Safari';
-    if (userAgent.includes('firefox')) return 'Firefox';
-    if (userAgent.includes('opera') || userAgent.includes('opr')) return 'Opera';
-    if (userAgent.includes('brave')) return 'Brave';
-    return 'Unknown';
-}
-
-/**
- * Detect OS from user agent
- */
-function detectOS(userAgent) {
-    if (!userAgent) return 'Unknown';
-    userAgent = userAgent.toLowerCase();
-    if (userAgent.includes('windows nt 10.0')) return 'Windows 10/11';
-    if (userAgent.includes('windows nt 6.1')) return 'Windows 7';
-    if (userAgent.includes('mac os x')) return 'macOS';
-    if (userAgent.includes('linux')) return 'Linux';
-    if (userAgent.includes('android')) return 'Android';
-    if (userAgent.includes('iphone') || userAgent.includes('ipad')) return 'iOS';
-    return 'Unknown';
-}
-
-/**
- * Detect device type from user agent
- */
-function detectDeviceType(userAgent) {
-    if (!userAgent) return 'desktop';
-    userAgent = userAgent.toLowerCase();
-    if (userAgent.includes('mobile') || userAgent.includes('android') && !userAgent.includes('tablet')) return 'mobile';
-    if (userAgent.includes('tablet') || userAgent.includes('ipad')) return 'tablet';
-    return 'desktop';
-}
-
-/**
- * Get timezone offset for a given IANA timezone
- */
-function getTimezoneOffset(timezoneId) {
+app.put('/api/users/profile', protect, async (req, res) => {
     try {
-        const now = new Date();
-        const dateString = now.toLocaleString('en-US', { timeZone: timezoneId });
-        const date = new Date(dateString);
-        const offsetMinutes = -date.getTimezoneOffset();
-        const hours = Math.floor(Math.abs(offsetMinutes) / 60);
-        const minutes = Math.abs(offsetMinutes) % 60;
-        const sign = offsetMinutes >= 0 ? '+' : '-';
-        return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        const userId = req.user._id;
+        const { firstName, lastName, phone, country } = req.body;
+
+        const user = await User.findByIdAndUpdate(
+            userId,
+            {
+                $set: {
+                    firstName: firstName || '',
+                    lastName: lastName || '',
+                    phone: phone || '',
+                    country: country || ''
+                }
+            },
+            { new: true }
+        );
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        await logActivity('profile_updated', 'User', userId, userId, 'User', req);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                message: 'Profile updated successfully'
+            }
+        });
+
     } catch (err) {
-        return '+00:00';
+        console.error('Error updating profile:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to update profile'
+            }
+        });
     }
-}
+});
+
+// =============================================
+// 17. PUT /api/users/address - Update Address
+// =============================================
+app.put('/api/users/address', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { street, city, state, postalCode, country } = req.body;
+
+        const user = await User.findByIdAndUpdate(
+            userId,
+            {
+                $set: {
+                    address: {
+                        street: street || '',
+                        city: city || '',
+                        state: state || '',
+                        postalCode: postalCode || '',
+                        country: country || ''
+                    }
+                }
+            },
+            { new: true }
+        );
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        await logActivity('address_updated', 'User', userId, userId, 'User', req);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                message: 'Address updated successfully'
+            }
+        });
+
+    } catch (err) {
+        console.error('Error updating address:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to update address'
+            }
+        });
+    }
+});
+
+// =============================================
+// 18. PUT /api/users/password - Change Password
+// =============================================
+app.put('/api/users/password', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'MISSING_FIELDS',
+                    message: 'Current password and new password are required'
+                }
+            });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'PASSWORD_TOO_SHORT',
+                    message: 'New password must be at least 8 characters'
+                }
+            });
+        }
+
+        const user = await User.findById(userId).select('+password');
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'User not found'
+                }
+            });
+        }
+
+        const isValid = await bcrypt.compare(currentPassword, user.password);
+        if (!isValid) {
+            return res.status(401).json({
+                success: false,
+                error: {
+                    code: 'INVALID_PASSWORD',
+                    message: 'Current password is incorrect'
+                }
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
+        user.password = hashedPassword;
+        user.passwordChangedAt = new Date();
+        await user.save();
+
+        await logActivity('password_changed', 'User', userId, userId, 'User', req);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                message: 'Password changed successfully'
+            }
+        });
+
+    } catch (err) {
+        console.error('Error changing password:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: 'Failed to change password'
+            }
+        });
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
