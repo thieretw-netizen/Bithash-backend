@@ -44653,118 +44653,246 @@ try {
 });
 
 // =============================================
-// 4. POST /api/users/two-factor/authenticator/disable
+// 4. POST /api/users/two-factor/authenticator/send-otp - NEW ENDPOINT FOR OTP BACKUP
 // =============================================
-app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res) => {
-try {
-const userId = req.user._id;
-const user = await User.findById(userId);
-
-    if (!user) {
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 'USER_NOT_FOUND',
-                message: 'User not found'
-            }
-        });
-    }
-
-    if (!user.twoFactorAuth?.enabled) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'NOT_ENABLED',
-                message: 'Authenticator is not enabled'
-            }
-        });
-    }
-
-    // Require password AND 2FA code for disable
-    const { password, code } = req.body;
-    
-    if (!password) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'PASSWORD_REQUIRED',
-                message: 'Password required to disable authenticator'
-            }
-        });
-    }
-
-    if (!code || code.length !== 6) {
-        return res.status(400).json({
-            success: false,
-            error: {
-                code: 'CODE_REQUIRED',
-                message: 'Valid 6-digit authenticator code required'
-            }
-        });
-    }
-
-    // Verify password
-    const userWithPassword = await User.findById(userId).select('+password');
-    const isPasswordValid = await bcrypt.compare(password, userWithPassword.password);
-    
-    if (!isPasswordValid) {
-        return res.status(401).json({
-            success: false,
-            error: {
-                code: 'INVALID_PASSWORD',
-                message: 'Invalid password'
-            }
-        });
-    }
-
-    // Verify TOTP code against stored secret
-    const isCodeValid = speakeasy.totp.verify({
-        secret: user.twoFactorAuth.secret,
-        encoding: 'base32',
-        token: code,
-        window: 2
-    });
-
-    if (!isCodeValid) {
-        return res.status(401).json({
-            success: false,
-            error: {
-                code: 'INVALID_2FA_CODE',
-                message: 'Invalid authenticator code'
-            }
-        });
-    }
-
-    // Disable 2FA atomically
-    user.twoFactorAuth.enabled = false;
-    user.twoFactorAuth.secret = undefined;
-    user.twoFactorAuth.recoveryCodes = [];
-    user.twoFactorAuth.enabledAt = null;
-    
-    await user.save();
-
-    // Log activity
-    await logActivity('authenticator_disabled', 'User', userId, userId, 'User', req);
-
-    res.status(200).json({
-        success: true,
-        message: 'Authenticator disabled successfully.'
-    });
-
-} catch (err) {
-    console.error('Error disabling authenticator:', err);
-    res.status(500).json({
-        success: false,
-        error: {
-            code: 'SERVER_ERROR',
-            message: 'Failed to disable authenticator'
+app.post('/api/users/two-factor/authenticator/send-otp', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId);
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: { code: 'USER_NOT_FOUND', message: 'User not found' }
+            });
         }
-    });
-}
+
+        if (!user.twoFactorAuth?.enabled) {
+            return res.status(400).json({
+                success: false,
+                error: { code: 'NOT_ENABLED', message: 'Authenticator is not enabled' }
+            });
+        }
+
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        const otpId = `auth_disable_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+        // Store OTP in Redis
+        const otpKey = `auth_disable_otp:${userId}`;
+        await redis.setex(otpKey, 300, JSON.stringify({
+            otp: otp,
+            otpId: otpId,
+            expiresAt: expiresAt.toISOString(),
+            attempts: 0,
+            maxAttempts: 5
+        }));
+
+        // Get user's email
+        const email = user.email;
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                error: { code: 'NO_EMAIL', message: 'No email address found for this account' }
+            });
+        }
+
+        // Send OTP email
+        await sendProfessionalEmail({
+            email: email,
+            template: 'otp',
+            data: {
+                name: user.firstName || 'User',
+                otp: otp,
+                action: 'disable two-factor authentication'
+            }
+        });
+
+        // Log the activity
+        await logActivity('authenticator_disable_otp_sent', 'User', userId, userId, 'User', req);
+
+        console.log(`📧 Authenticator disable OTP sent to ${email}`);
+
+        res.status(200).json({
+            success: true,
+            message: 'Verification code sent to your email',
+            data: {
+                otpId: otpId,
+                expiresAt: expiresAt.toISOString(),
+                email: email
+            }
+        });
+
+    } catch (err) {
+        console.error('Error sending authenticator disable OTP:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: err.message || 'Failed to send verification code'
+            }
+        });
+    }
 });
 
 // =============================================
-// 5. POST /api/users/two-factor/authenticator/recovery-codes
+// 5. POST /api/users/two-factor/authenticator/disable - FIXED: SUPPORTS OTP + 2FA CODE
+// =============================================
+app.post('/api/users/two-factor/authenticator/disable', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId);
+        const { code, otp, otpId, method } = req.body; // method: 'authenticator' or 'otp'
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: { code: 'USER_NOT_FOUND', message: 'User not found' }
+            });
+        }
+
+        if (!user.twoFactorAuth?.enabled) {
+            return res.status(400).json({
+                success: false,
+                error: { code: 'NOT_ENABLED', message: 'Authenticator is not enabled' }
+            });
+        }
+
+        // Validate required fields based on method
+        if (method === 'otp') {
+            if (!otp || !otpId) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'MISSING_FIELDS', message: 'OTP and OTP ID are required' }
+                });
+            }
+
+            // Verify OTP from Redis
+            const otpKey = `auth_disable_otp:${userId}`;
+            const storedData = await redis.get(otpKey);
+            
+            if (!storedData) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'OTP_EXPIRED', message: 'Verification code expired. Please request a new one.' }
+                });
+            }
+
+            const data = JSON.parse(storedData);
+            
+            // Check OTP ID matches
+            if (data.otpId !== otpId) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'INVALID_OTP', message: 'Invalid verification code.' }
+                });
+            }
+
+            // Check attempts
+            if (data.attempts >= data.maxAttempts) {
+                await redis.del(otpKey);
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts. Please request a new code.' }
+                });
+            }
+
+            // Verify OTP
+            if (data.otp !== otp) {
+                data.attempts += 1;
+                await redis.setex(otpKey, 300, JSON.stringify(data));
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'INVALID_OTP', message: `Invalid verification code. ${data.maxAttempts - data.attempts} attempts remaining.` }
+                });
+            }
+
+            // OTP verified - clean up
+            await redis.del(otpKey);
+
+        } else if (method === 'authenticator') {
+            // Use authenticator code (for password users who prefer this method)
+            if (!code || code.length !== 6) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'CODE_REQUIRED', message: 'Valid 6-digit authenticator code required' }
+                });
+            }
+
+            // Verify TOTP code against stored secret
+            const isCodeValid = speakeasy.totp.verify({
+                secret: user.twoFactorAuth.secret,
+                encoding: 'base32',
+                token: code,
+                window: 2
+            });
+
+            if (!isCodeValid) {
+                return res.status(401).json({
+                    success: false,
+                    error: { code: 'INVALID_2FA_CODE', message: 'Invalid authenticator code' }
+                });
+            }
+
+        } else {
+            return res.status(400).json({
+                success: false,
+                error: { code: 'INVALID_METHOD', message: 'Method must be "authenticator" or "otp"' }
+            });
+        }
+
+        // Disable 2FA
+        user.twoFactorAuth.enabled = false;
+        user.twoFactorAuth.secret = undefined;
+        user.twoFactorAuth.recoveryCodes = [];
+        user.twoFactorAuth.enabledAt = null;
+        
+        await user.save();
+
+        // Log activity
+        await logActivity('authenticator_disabled', 'User', userId, userId, 'User', req, {
+            method: method,
+            disabledAt: new Date().toISOString()
+        });
+
+        // Send notification email
+        try {
+            await sendProfessionalEmail({
+                email: user.email,
+                template: 'default',
+                data: {
+                    name: user.firstName || 'User',
+                    subject: 'Two-Factor Authentication Disabled',
+                    message: 'Two-factor authentication has been disabled on your account.',
+                    actionRequired: 'If you did not disable 2FA, please contact support immediately.',
+                    actionLink: 'https://www.bithashcapital.live/security',
+                    buttonText: 'Review Security'
+                }
+            });
+        } catch (emailError) {
+            console.error('Failed to send disable notification email:', emailError);
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Authenticator disabled successfully.'
+        });
+
+    } catch (err) {
+        console.error('Error disabling authenticator:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: err.message || 'Failed to disable authenticator'
+            }
+        });
+    }
+});
+
+// =============================================
+// 6. POST /api/users/two-factor/authenticator/recovery-codes
 // =============================================
 app.post('/api/users/two-factor/authenticator/recovery-codes', protect, async (req, res) => {
 try {
@@ -44885,7 +45013,7 @@ const user = await User.findById(userId);
 });
 
 // =============================================
-// 6. GET /api/users/devices - Active Devices
+// 7. GET /api/users/devices - Active Devices - FIXED
 // =============================================
 app.get('/api/users/devices', protect, async (req, res) => {
 try {
@@ -44908,33 +45036,54 @@ const user = await User.findById(userId)
     const currentSessionId = req.headers['x-session-id'] || req.cookies?.sessionId || null;
 
     // Format devices from loginHistory
-    const devices = (user.loginHistory || []).map((device, index) => {
-        const isCurrent = device.sessionId === currentSessionId || index === 0;
-        const isActive = device.sessionStatus !== 'revoked' && device.sessionStatus !== 'expired';
-        
-        // Extract device info from user agent
-        const userAgent = device.device || device.userAgent || '';
-        const browser = detectBrowser(userAgent);
-        const os = detectOS(userAgent);
-        const deviceType = detectDeviceType(userAgent);
+    const devices = [];
 
-        return {
-            id: device._id?.toString() || `device_${index}`,
-            name: `${browser} on ${os}`,
-            deviceType: deviceType,
-            sessionStatus: isActive ? 'active' : 'revoked',
-            current: isCurrent,
-            lastActiveAt: device.timestamp || device.lastActiveAt || device.createdAt || new Date().toISOString(),
-            createdAt: device.createdAt || device.timestamp || new Date().toISOString(),
-            location: {
-                city: device.locationDetails?.city || device.location?.city || 'Unknown',
-                country: device.locationDetails?.country || device.location?.country || 'Unknown'
-            },
-            browser: browser,
-            os: os,
-            ip: device.ip || device.ipAddress || 'Unknown'
-        };
-    });
+    // Process loginHistory entries
+    if (user.loginHistory && user.loginHistory.length > 0) {
+        for (const device of user.loginHistory) {
+            const isCurrent = device.sessionId === currentSessionId || 
+                             (device._id && device._id.toString() === currentSessionId);
+            const isActive = device.sessionStatus !== 'revoked' && 
+                             device.sessionStatus !== 'expired' &&
+                             device.sessionStatus !== 'inactive';
+
+            // Extract device info
+            const userAgent = device.userAgent || device.device || '';
+            const browser = detectBrowser(userAgent);
+            const os = detectOS(userAgent);
+            const deviceType = detectDeviceType(userAgent);
+
+            // Get last active time
+            const lastActive = device.lastActiveAt || device.timestamp || device.createdAt || new Date();
+
+            // Build location string
+            const locationParts = [];
+            if (device.location?.city) locationParts.push(device.location.city);
+            if (device.location?.region) locationParts.push(device.location.region);
+            if (device.location?.country) locationParts.push(device.location.country);
+            const locationStr = locationParts.length > 0 ? locationParts.join(', ') : 'Unknown location';
+
+            devices.push({
+                id: device._id?.toString() || `device_${devices.length}`,
+                name: device.name || `${browser} on ${os}`,
+                deviceType: deviceType,
+                sessionStatus: isActive ? 'active' : 'revoked',
+                current: isCurrent,
+                lastActiveAt: lastActive,
+                createdAt: device.createdAt || device.timestamp || lastActive,
+                location: {
+                    city: device.location?.city || 'Unknown',
+                    country: device.location?.country || 'Unknown',
+                    region: device.location?.region || 'Unknown',
+                    formatted: locationStr
+                },
+                browser: browser,
+                os: os,
+                ip: device.ip || device.ipAddress || 'Unknown',
+                userAgent: userAgent
+            });
+        }
+    }
 
     // If no devices in history, create a default current device
     if (devices.length === 0) {
@@ -44942,6 +45091,15 @@ const user = await User.findById(userId)
         const browser = detectBrowser(userAgent);
         const os = detectOS(userAgent);
         const deviceType = detectDeviceType(userAgent);
+        
+        // Try to get location from request
+        let location = 'Unknown location';
+        let city = 'Unknown', country = 'Unknown';
+        if (req.clientLocation) {
+            location = req.clientLocation.location || 'Unknown location';
+            city = req.clientLocation.city || 'Unknown';
+            country = req.clientLocation.country || 'Unknown';
+        }
         
         devices.push({
             id: 'current_device',
@@ -44952,16 +45110,26 @@ const user = await User.findById(userId)
             lastActiveAt: new Date().toISOString(),
             createdAt: new Date().toISOString(),
             location: {
-                city: 'Unknown',
-                country: 'Unknown'
+                city: city,
+                country: country,
+                formatted: location
             },
             browser: browser,
             os: os,
-            ip: req.ip || 'Unknown'
+            ip: req.ip || 'Unknown',
+            userAgent: userAgent
         });
     }
 
+    // Sort: current device first, then by last active
+    devices.sort((a, b) => {
+        if (a.current && !b.current) return -1;
+        if (!a.current && b.current) return 1;
+        return new Date(b.lastActiveAt) - new Date(a.lastActiveAt);
+    });
+
     res.status(200).json({
+        success: true,
         devices: devices
     });
 
@@ -44978,7 +45146,77 @@ const user = await User.findById(userId)
 });
 
 // =============================================
-// 7. POST /api/users/devices/logout-all
+// 8. POST /api/users/devices/:deviceId/logout - NEW ENDPOINT
+// =============================================
+app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        const userId = req.user._id;
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: { code: 'USER_NOT_FOUND', message: 'User not found' }
+            });
+        }
+
+        if (!user.loginHistory || user.loginHistory.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found' }
+            });
+        }
+
+        // Find and revoke the device
+        let deviceFound = false;
+        user.loginHistory = user.loginHistory.map(device => {
+            const deviceIdStr = device._id?.toString() || device.sessionId;
+            if (deviceIdStr === deviceId) {
+                deviceFound = true;
+                return {
+                    ...device,
+                    sessionStatus: 'revoked',
+                    revokedAt: new Date()
+                };
+            }
+            return device;
+        });
+
+        if (!deviceFound) {
+            return res.status(404).json({
+                success: false,
+                error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found' }
+            });
+        }
+
+        await user.save();
+
+        // Log activity
+        await logActivity('device_logout', 'User', userId, userId, 'User', req, {
+            deviceId: deviceId,
+            deviceName: user.loginHistory.find(d => d._id?.toString() === deviceId || d.sessionId === deviceId)?.name || 'Unknown'
+        });
+
+        res.status(200).json({
+            success: true,
+            message: 'Device logged out successfully'
+        });
+
+    } catch (err) {
+        console.error('Error logging out device:', err);
+        res.status(500).json({
+            success: false,
+            error: {
+                code: 'SERVER_ERROR',
+                message: err.message || 'Failed to logout device'
+            }
+        });
+    }
+});
+
+// =============================================
+// 9. POST /api/users/devices/logout-all
 // =============================================
 app.post('/api/users/devices/logout-all', protect, async (req, res) => {
 try {
@@ -45062,7 +45300,7 @@ const user = await User.findById(userId);
 });
 
 // =============================================
-// 8. GET /api/settings/languages
+// 10. GET /api/settings/languages
 // =============================================
 app.get('/api/settings/languages', async (req, res) => {
 try {
@@ -45127,7 +45365,7 @@ const languages = [
 });
 
 // =============================================
-// 9. GET /api/settings/timezones
+// 11. GET /api/settings/timezones
 // =============================================
 app.get('/api/settings/timezones', async (req, res) => {
 try {
@@ -45283,7 +45521,7 @@ const timezones = [
 });
 
 // =============================================
-// 10. GET /api/users/profile - User Profile
+// 12. GET /api/users/profile - User Profile
 // =============================================
 app.get('/api/users/profile', protect, async (req, res) => {
 try {
@@ -45329,7 +45567,7 @@ const user = await User.findById(req.user._id)
 });
 
 // =============================================
-// 11. GET /api/users/settings - User Settings
+// 13. GET /api/users/settings - User Settings
 // =============================================
 app.get('/api/users/settings', protect, async (req, res) => {
 try {
@@ -45369,7 +45607,7 @@ const user = await User.findById(req.user._id)
 });
 
 // =============================================
-// 12. PUT /api/users/settings - Update User Settings
+// 14. PUT /api/users/settings - Update User Settings
 // =============================================
 app.put('/api/users/settings', protect, async (req, res) => {
 try {
@@ -45507,8 +45745,6 @@ return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '
 return '+00:00';
 }
 }
-
-
 
 
 
