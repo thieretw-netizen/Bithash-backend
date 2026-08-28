@@ -46009,6 +46009,1146 @@ app.put('/api/users/settings', protect, async (req, res) => {
 
 
 
+// =============================================
+// TWO-FACTOR AUTHENTICATOR SETUP ENDPOINT
+// =============================================
+
+// POST /api/users/two-factor/authenticator/setup - Start authenticator setup
+app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const userEmail = req.user.email;
+        const userName = req.user.firstName || 'User';
+        
+        // Check if user already has 2FA enabled
+        const user = await User.findById(userId).select('twoFactorAuth');
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'User not found'
+            });
+        }
+        
+        if (user.twoFactorAuth?.enabled) {
+            return res.status(409).json({
+                success: false,
+                code: 'ALREADY_ENABLED',
+                message: 'Two-factor authentication is already enabled for this account'
+            });
+        }
+        
+        // Generate TOTP secret using speakeasy
+        const secret = speakeasy.generateSecret({
+            length: 20,
+            name: '₿itHash Capital',
+            issuer: '₿itHash Capital'
+        });
+        
+        // Generate enrollment ID
+        const enrollmentId = `auth_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+        
+        // Encrypt secret before storing
+        const encryptedSecret = encryptSecret(secret.base32);
+        
+        // Delete any existing pending enrollments
+        await UserEnrollment.deleteMany({
+            userId: userId,
+            type: 'totp_setup',
+            status: 'pending'
+        });
+        
+        // Store enrollment
+        await UserEnrollment.create({
+            userId: userId,
+            enrollmentId: enrollmentId,
+            secret: encryptedSecret,
+            type: 'totp_setup',
+            expiresAt: expiresAt,
+            status: 'pending',
+            attempts: 0,
+            createdAt: new Date()
+        });
+        
+        // Generate OTP Auth URI for QR code
+        const otpauthUri = `otpauth://totp/₿itHash%20Capital:${encodeURIComponent(userEmail)}?secret=${secret.base32}&issuer=₿itHash%20Capital&algorithm=SHA1&digits=6&period=30`;
+        
+        // Generate QR code as base64 image using qrcode library
+        let qrCodeBase64 = null;
+        try {
+            const QRCode = require('qrcode');
+            qrCodeBase64 = await QRCode.toDataURL(otpauthUri, {
+                width: 200,
+                margin: 2,
+                color: {
+                    dark: '#000000',
+                    light: '#ffffff'
+                }
+            });
+        } catch (qrError) {
+            console.warn('QR code generation failed, continuing without QR image:', qrError.message);
+        }
+        
+        res.status(200).json({
+            success: true,
+            enrollmentId: enrollmentId,
+            manualKey: secret.base32,
+            otpauthUri: otpauthUri,
+            qrCode: qrCodeBase64,
+            expiresAt: expiresAt,
+            data: {
+                enrollmentId: enrollmentId,
+                manualKey: secret.base32,
+                otpauthUri: otpauthUri,
+                expiresAt: expiresAt
+            }
+        });
+        
+        // Log activity
+        await SystemLog.create({
+            action: '2fa_setup_initiated',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            performedByEmail: userEmail,
+            performedByName: userName,
+            status: 'success',
+            metadata: {
+                userId: userId.toString(),
+                enrollmentId: enrollmentId,
+                expiresAt: expiresAt
+            }
+        });
+        
+    } catch (err) {
+        console.error('Error setting up authenticator:', err);
+        res.status(500).json({
+            success: false,
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to set up authenticator. Please try again.'
+        });
+    }
+});
+
+// =============================================
+// TWO-FACTOR AUTHENTICATOR VERIFY ENDPOINT
+// =============================================
+
+// POST /api/users/two-factor/authenticator/verify - Verify and enable authenticator
+app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res) => {
+    try {
+        const { enrollmentId, code, purpose } = req.body;
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('email firstName lastName twoFactorAuth');
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'User not found'
+            });
+        }
+        
+        // If purpose is 'kyc_verification', handle it via KYC flow
+        if (purpose === 'kyc_verification') {
+            return handleKycAuthenticatorVerification(req, res);
+        }
+        
+        // Standard authenticator verification
+        if (!enrollmentId || !code) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_FIELDS',
+                message: 'Enrollment ID and verification code are required'
+            });
+        }
+        
+        if (user.twoFactorAuth?.enabled) {
+            return res.status(409).json({
+                success: false,
+                code: 'ALREADY_ENABLED',
+                message: 'Two-factor authentication is already enabled for this account'
+            });
+        }
+        
+        // Find enrollment
+        const enrollment = await UserEnrollment.findOne({
+            enrollmentId: enrollmentId,
+            userId: userId,
+            type: 'totp_setup',
+            status: 'pending'
+        });
+        
+        if (!enrollment) {
+            return res.status(404).json({
+                success: false,
+                code: 'ENROLLMENT_NOT_FOUND',
+                message: 'Enrollment not found or already used'
+            });
+        }
+        
+        if (enrollment.expiresAt < new Date()) {
+            await UserEnrollment.findByIdAndDelete(enrollment._id);
+            return res.status(400).json({
+                success: false,
+                code: 'ENROLLMENT_EXPIRED',
+                message: 'Enrollment has expired. Please start the setup process again.'
+            });
+        }
+        
+        if (enrollment.attempts >= 5) {
+            await UserEnrollment.findByIdAndDelete(enrollment._id);
+            return res.status(400).json({
+                success: false,
+                code: 'TOO_MANY_ATTEMPTS',
+                message: 'Too many failed attempts. Please start the setup process again.'
+            });
+        }
+        
+        // Decrypt secret
+        let secret;
+        try {
+            secret = decryptSecret(enrollment.secret);
+        } catch (decryptError) {
+            console.error('Secret decryption error:', decryptError);
+            return res.status(500).json({
+                success: false,
+                code: 'DECRYPTION_ERROR',
+                message: 'Failed to verify authenticator. Please try again.'
+            });
+        }
+        
+        // Verify TOTP code with timing-safe comparison
+        const verified = speakeasy.totp.verify({
+            secret: secret,
+            encoding: 'base32',
+            token: code,
+            window: 1 // Allow 1 step before/after for time drift
+        });
+        
+        if (!verified) {
+            // Track failed attempts atomically
+            await UserEnrollment.findByIdAndUpdate(
+                enrollment._id,
+                { $inc: { attempts: 1 } }
+            );
+            
+            const updated = await UserEnrollment.findById(enrollment._id);
+            if (updated && updated.attempts >= 5) {
+                await UserEnrollment.findByIdAndDelete(enrollment._id);
+                return res.status(400).json({
+                    success: false,
+                    code: 'TOO_MANY_ATTEMPTS',
+                    message: 'Too many failed attempts. Please start the setup process again.'
+                });
+            }
+            
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_OTP',
+                message: 'Invalid verification code. Please try again.'
+            });
+        }
+        
+        // Generate recovery codes (10 codes)
+        const recoveryCodes = generateRecoveryCodes();
+        const hashedCodes = recoveryCodes.map(code => 
+            crypto.createHash('sha256').update(code).digest('hex')
+        );
+        
+        // Enable 2FA atomically
+        await User.findByIdAndUpdate(userId, {
+            'twoFactorAuth.enabled': true,
+            'twoFactorAuth.secret': enrollment.secret,
+            'twoFactorAuth.enabledAt': new Date()
+        });
+        
+        // Store recovery code hashes
+        await UserRecoveryCodes.findOneAndUpdate(
+            { userId: userId },
+            { 
+                userId: userId,
+                hashes: hashedCodes,
+                generatedAt: new Date()
+            },
+            { upsert: true, new: true }
+        );
+        
+        // Delete enrollment
+        await UserEnrollment.findByIdAndDelete(enrollment._id);
+        
+        // Log activity
+        await SystemLog.create({
+            action: '2fa_enable',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'success',
+            metadata: {
+                userId: userId.toString(),
+                enabledAt: new Date()
+            }
+        });
+        
+        // Emit real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('security_update', {
+                type: 'security_update',
+                timestamp: Date.now()
+            });
+        }
+        
+        // Send confirmation email
+        await sendProfessionalEmail({
+            email: user.email,
+            template: 'default',
+            data: {
+                name: user.firstName,
+                subject: 'Two-Factor Authentication Enabled',
+                message: 'Two-factor authentication has been successfully enabled on your account.',
+                details: `
+                    <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                        <p style="margin: 0 0 5px 0;"><strong>Status:</strong> Enabled</p>
+                        <p style="margin: 0 0 5px 0;"><strong>Method:</strong> Authenticator App</p>
+                        <p style="margin: 0 0 0 0;"><strong>Recovery Codes:</strong> ${recoveryCodes.length} codes generated</p>
+                    </div>
+                `,
+                actionRequired: 'Save your recovery codes in a secure location. They will not be shown again.',
+                buttonText: 'View Security Settings',
+                actionLink: 'https://www.bithashcapital.live/settings/security',
+                referenceId: `2FA-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+            }
+        });
+        
+        res.status(200).json({
+            success: true,
+            recoveryCodes: recoveryCodes,
+            message: 'Two-factor authentication enabled successfully'
+        });
+        
+    } catch (err) {
+        console.error('Error verifying authenticator:', err);
+        res.status(500).json({
+            success: false,
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to verify authenticator. Please try again.'
+        });
+    }
+});
+
+// =============================================
+// TWO-FACTOR AUTHENTICATOR DISABLE CHALLENGE
+// =============================================
+
+// POST /api/users/two-factor/authenticator/disable/challenge - Request disable challenge
+app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('email firstName lastName twoFactorAuth');
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'User not found'
+            });
+        }
+        
+        if (!user.twoFactorAuth?.enabled) {
+            return res.status(400).json({
+                success: false,
+                code: 'NOT_ENABLED',
+                message: 'Two-factor authentication is not enabled for this account'
+            });
+        }
+        
+        // Generate a challenge ID
+        const challengeId = `disable_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+        
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+        
+        // Delete any existing pending challenges
+        await UserChallenge.deleteMany({
+            userId: userId,
+            type: 'disable_authenticator',
+            status: 'pending'
+        });
+        
+        // Store challenge
+        await UserChallenge.create({
+            userId: userId,
+            challengeId: challengeId,
+            type: 'disable_authenticator',
+            otpHash: otpHash,
+            expiresAt: expiresAt,
+            attempts: 0,
+            status: 'pending',
+            createdAt: new Date()
+        });
+        
+        // Send OTP to user's email
+        await sendProfessionalEmail({
+            email: user.email,
+            template: 'otp',
+            data: {
+                name: user.firstName,
+                otp: otp,
+                action: 'disable two-factor authentication'
+            }
+        });
+        
+        // Log activity
+        await SystemLog.create({
+            action: '2fa_disable_challenge',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'pending',
+            metadata: {
+                userId: userId.toString(),
+                challengeId: challengeId,
+                expiresAt: expiresAt,
+                method: 'email_otp'
+            }
+        });
+        
+        res.status(200).json({
+            success: true,
+            challengeId: challengeId,
+            expiresAt: expiresAt,
+            data: {
+                challengeId: challengeId,
+                email: user.email,
+                expiresAt: expiresAt
+            }
+        });
+        
+    } catch (err) {
+        console.error('Error creating disable challenge:', err);
+        res.status(500).json({
+            success: false,
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to create disable challenge. Please try again.'
+        });
+    }
+});
+
+// =============================================
+// TWO-FACTOR AUTHENTICATOR DISABLE VERIFY
+// =============================================
+
+// POST /api/users/two-factor/authenticator/disable/verify - Verify and disable authenticator
+app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (req, res) => {
+    try {
+        const { method, otp, code, challengeId } = req.body;
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('email firstName lastName twoFactorAuth');
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'User not found'
+            });
+        }
+        
+        if (!user.twoFactorAuth?.enabled) {
+            return res.status(400).json({
+                success: false,
+                code: 'NOT_ENABLED',
+                message: 'Two-factor authentication is not enabled for this account'
+            });
+        }
+        
+        let verified = false;
+        
+        if (method === 'otp') {
+            // Verify email OTP
+            if (!otp || !challengeId) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'MISSING_FIELDS',
+                    message: 'OTP and challenge ID are required'
+                });
+            }
+            
+            const challenge = await UserChallenge.findOne({
+                userId: userId,
+                challengeId: challengeId,
+                type: 'disable_authenticator',
+                expiresAt: { $gt: new Date() },
+                status: 'pending'
+            });
+            
+            if (!challenge) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'CHALLENGE_INVALID',
+                    message: 'Invalid or expired verification challenge'
+                });
+            }
+            
+            if (challenge.attempts >= 5) {
+                await UserChallenge.findByIdAndDelete(challenge._id);
+                return res.status(400).json({
+                    success: false,
+                    code: 'TOO_MANY_ATTEMPTS',
+                    message: 'Too many verification attempts. Please request a new code.'
+                });
+            }
+            
+            // Verify OTP using timing-safe comparison
+            const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+            const isValid = crypto.timingSafeEqual(
+                Buffer.from(otpHash),
+                Buffer.from(challenge.otpHash)
+            );
+            
+            if (!isValid) {
+                await UserChallenge.findByIdAndUpdate(challenge._id, {
+                    $inc: { attempts: 1 }
+                });
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_OTP',
+                    message: 'Invalid verification code. Please try again.'
+                });
+            }
+            
+            verified = true;
+            await UserChallenge.findByIdAndDelete(challenge._id);
+            
+        } else if (method === 'authenticator') {
+            // Verify authenticator code
+            if (!code) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'MISSING_FIELDS',
+                    message: 'Authenticator code is required'
+                });
+            }
+            
+            // Decrypt secret
+            let secret;
+            try {
+                secret = decryptSecret(user.twoFactorAuth.secret);
+            } catch (decryptError) {
+                console.error('Secret decryption error:', decryptError);
+                return res.status(500).json({
+                    success: false,
+                    code: 'DECRYPTION_ERROR',
+                    message: 'Failed to verify authenticator. Please try again.'
+                });
+            }
+            
+            verified = speakeasy.totp.verify({
+                secret: secret,
+                encoding: 'base32',
+                token: code,
+                window: 1
+            });
+            
+            if (!verified) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_AUTHENTICATOR_CODE',
+                    message: 'Invalid authenticator code. Please try again.'
+                });
+            }
+        } else {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_METHOD',
+                message: 'Invalid verification method. Must be "otp" or "authenticator".'
+            });
+        }
+        
+        if (!verified) {
+            return res.status(400).json({
+                success: false,
+                code: 'VERIFICATION_FAILED',
+                message: 'Verification failed. Please try again.'
+            });
+        }
+        
+        // Disable 2FA
+        await User.findByIdAndUpdate(userId, {
+            'twoFactorAuth.enabled': false,
+            'twoFactorAuth.secret': null,
+            'twoFactorAuth.enabledAt': null
+        });
+        
+        // Delete recovery codes
+        await UserRecoveryCodes.findOneAndDelete({ userId: userId });
+        
+        // Log activity
+        await SystemLog.create({
+            action: '2fa_disable',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'success',
+            metadata: {
+                userId: userId.toString(),
+                method: method,
+                disabledAt: new Date()
+            }
+        });
+        
+        // Emit real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('security_update', {
+                type: 'security_update',
+                timestamp: Date.now()
+            });
+        }
+        
+        // Send confirmation email
+        await sendProfessionalEmail({
+            email: user.email,
+            template: 'default',
+            data: {
+                name: user.firstName,
+                subject: 'Two-Factor Authentication Disabled',
+                message: 'Two-factor authentication has been disabled on your account.',
+                details: `
+                    <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                        <p style="margin: 0 0 5px 0;"><strong>Status:</strong> Disabled</p>
+                        <p style="margin: 0 0 0 0;"><strong>Method:</strong> ${method === 'otp' ? 'Email OTP' : 'Authenticator App'}</p>
+                    </div>
+                `,
+                actionRequired: 'If you did not disable this, please contact support immediately.',
+                buttonText: 'View Security Settings',
+                actionLink: 'https://www.bithashcapital.live/settings/security',
+                referenceId: `2FA-DISABLE-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+            }
+        });
+        
+        res.status(200).json({
+            success: true,
+            message: 'Two-factor authentication disabled successfully'
+        });
+        
+    } catch (err) {
+        console.error('Error disabling authenticator:', err);
+        res.status(500).json({
+            success: false,
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to disable authenticator. Please try again.'
+        });
+    }
+});
+
+// =============================================
+// TWO-FACTOR RECOVERY CODES CHALLENGE
+// =============================================
+
+// POST /api/users/two-factor/recovery-codes/challenge - Request recovery codes challenge
+app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('email firstName lastName twoFactorAuth');
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'User not found'
+            });
+        }
+        
+        if (!user.twoFactorAuth?.enabled) {
+            return res.status(400).json({
+                success: false,
+                code: 'NOT_ENABLED',
+                message: 'Two-factor authentication is not enabled for this account'
+            });
+        }
+        
+        // Generate a challenge ID
+        const challengeId = `recovery_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+        
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+        
+        // Delete any existing pending challenges
+        await UserChallenge.deleteMany({
+            userId: userId,
+            type: 'recovery_codes',
+            status: 'pending'
+        });
+        
+        // Store challenge
+        await UserChallenge.create({
+            userId: userId,
+            challengeId: challengeId,
+            type: 'recovery_codes',
+            otpHash: otpHash,
+            expiresAt: expiresAt,
+            attempts: 0,
+            status: 'pending',
+            createdAt: new Date()
+        });
+        
+        // Send OTP to user's email
+        await sendProfessionalEmail({
+            email: user.email,
+            template: 'otp',
+            data: {
+                name: user.firstName,
+                otp: otp,
+                action: 'regenerate recovery codes'
+            }
+        });
+        
+        // Log activity
+        await SystemLog.create({
+            action: 'recovery_codes_challenge',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'pending',
+            metadata: {
+                userId: userId.toString(),
+                challengeId: challengeId,
+                expiresAt: expiresAt,
+                method: 'email_otp'
+            }
+        });
+        
+        res.status(200).json({
+            success: true,
+            challengeId: challengeId,
+            expiresAt: expiresAt,
+            data: {
+                challengeId: challengeId,
+                email: user.email,
+                expiresAt: expiresAt
+            }
+        });
+        
+    } catch (err) {
+        console.error('Error creating recovery codes challenge:', err);
+        res.status(500).json({
+            success: false,
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to create challenge. Please try again.'
+        });
+    }
+});
+
+// =============================================
+// TWO-FACTOR RECOVERY CODES VERIFY
+// =============================================
+
+// POST /api/users/two-factor/recovery-codes/verify - Verify and regenerate recovery codes
+app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res) => {
+    try {
+        const { method, otp, code, challengeId } = req.body;
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('email firstName lastName twoFactorAuth');
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'User not found'
+            });
+        }
+        
+        if (!user.twoFactorAuth?.enabled) {
+            return res.status(400).json({
+                success: false,
+                code: 'NOT_ENABLED',
+                message: 'Two-factor authentication is not enabled for this account'
+            });
+        }
+        
+        let verified = false;
+        
+        if (method === 'otp') {
+            // Verify email OTP
+            if (!otp || !challengeId) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'MISSING_FIELDS',
+                    message: 'OTP and challenge ID are required'
+                });
+            }
+            
+            const challenge = await UserChallenge.findOne({
+                userId: userId,
+                challengeId: challengeId,
+                type: 'recovery_codes',
+                expiresAt: { $gt: new Date() },
+                status: 'pending'
+            });
+            
+            if (!challenge) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'CHALLENGE_INVALID',
+                    message: 'Invalid or expired verification challenge'
+                });
+            }
+            
+            if (challenge.attempts >= 5) {
+                await UserChallenge.findByIdAndDelete(challenge._id);
+                return res.status(400).json({
+                    success: false,
+                    code: 'TOO_MANY_ATTEMPTS',
+                    message: 'Too many verification attempts. Please request a new code.'
+                });
+            }
+            
+            // Verify OTP using timing-safe comparison
+            const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+            const isValid = crypto.timingSafeEqual(
+                Buffer.from(otpHash),
+                Buffer.from(challenge.otpHash)
+            );
+            
+            if (!isValid) {
+                await UserChallenge.findByIdAndUpdate(challenge._id, {
+                    $inc: { attempts: 1 }
+                });
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_OTP',
+                    message: 'Invalid verification code. Please try again.'
+                });
+            }
+            
+            verified = true;
+            await UserChallenge.findByIdAndDelete(challenge._id);
+            
+        } else if (method === 'authenticator') {
+            // Verify authenticator code
+            if (!code) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'MISSING_FIELDS',
+                    message: 'Authenticator code is required'
+                });
+            }
+            
+            // Decrypt secret
+            let secret;
+            try {
+                secret = decryptSecret(user.twoFactorAuth.secret);
+            } catch (decryptError) {
+                console.error('Secret decryption error:', decryptError);
+                return res.status(500).json({
+                    success: false,
+                    code: 'DECRYPTION_ERROR',
+                    message: 'Failed to verify authenticator. Please try again.'
+                });
+            }
+            
+            verified = speakeasy.totp.verify({
+                secret: secret,
+                encoding: 'base32',
+                token: code,
+                window: 1
+            });
+            
+            if (!verified) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_AUTHENTICATOR_CODE',
+                    message: 'Invalid authenticator code. Please try again.'
+                });
+            }
+        } else {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_METHOD',
+                message: 'Invalid verification method. Must be "otp" or "authenticator".'
+            });
+        }
+        
+        if (!verified) {
+            return res.status(400).json({
+                success: false,
+                code: 'VERIFICATION_FAILED',
+                message: 'Verification failed. Please try again.'
+            });
+        }
+        
+        // Generate new recovery codes (10 codes)
+        const recoveryCodes = generateRecoveryCodes();
+        const hashedCodes = recoveryCodes.map(c => 
+            crypto.createHash('sha256').update(c).digest('hex')
+        );
+        
+        // Update recovery codes
+        await UserRecoveryCodes.findOneAndUpdate(
+            { userId: userId },
+            { 
+                userId: userId,
+                hashes: hashedCodes,
+                generatedAt: new Date()
+            },
+            { upsert: true, new: true }
+        );
+        
+        // Log activity
+        await SystemLog.create({
+            action: 'recovery_codes_regenerated',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'success',
+            metadata: {
+                userId: userId.toString(),
+                codesCount: recoveryCodes.length,
+                regeneratedAt: new Date()
+            }
+        });
+        
+        // Emit real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('security_update', {
+                type: 'security_update',
+                timestamp: Date.now()
+            });
+        }
+        
+        // Send confirmation email
+        await sendProfessionalEmail({
+            email: user.email,
+            template: 'default',
+            data: {
+                name: user.firstName,
+                subject: 'Recovery Codes Regenerated',
+                message: 'Your two-factor authentication recovery codes have been regenerated.',
+                details: `
+                    <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                        <p style="margin: 0 0 5px 0;"><strong>Status:</strong> Regenerated</p>
+                        <p style="margin: 0 0 0 0;"><strong>Codes:</strong> ${recoveryCodes.length} new codes generated</p>
+                    </div>
+                `,
+                actionRequired: 'Save your new recovery codes in a secure location. Previous codes are now invalid.',
+                buttonText: 'View Security Settings',
+                actionLink: 'https://www.bithashcapital.live/settings/security',
+                referenceId: `RC-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+            }
+        });
+        
+        res.status(200).json({
+            success: true,
+            recoveryCodes: recoveryCodes,
+            message: 'Recovery codes regenerated successfully'
+        });
+        
+    } catch (err) {
+        console.error('Error verifying recovery codes:', err);
+        res.status(500).json({
+            success: false,
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to regenerate recovery codes. Please try again.'
+        });
+    }
+});
+
+// =============================================
+// KYC AUTHENTICATOR VERIFICATION HELPER
+// =============================================
+
+async function handleKycAuthenticatorVerification(req, res) {
+    try {
+        const { code } = req.body;
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('email firstName lastName twoFactorAuth kycStatus');
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'User not found'
+            });
+        }
+        
+        if (!user.twoFactorAuth?.enabled) {
+            return res.status(400).json({
+                success: false,
+                code: 'AUTHENTICATOR_NOT_ENABLED',
+                message: 'Authenticator is not enabled for this account'
+            });
+        }
+        
+        if (!code || code.length !== 6) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_CODE',
+                message: 'Please enter a valid 6-digit authenticator code'
+            });
+        }
+        
+        // Decrypt secret
+        let secret;
+        try {
+            secret = decryptSecret(user.twoFactorAuth.secret);
+        } catch (decryptError) {
+            console.error('Secret decryption error:', decryptError);
+            return res.status(500).json({
+                success: false,
+                code: 'DECRYPTION_ERROR',
+                message: 'Failed to verify authenticator. Please try again.'
+            });
+        }
+        
+        const verified = speakeasy.totp.verify({
+            secret: secret,
+            encoding: 'base32',
+            token: code,
+            window: 1
+        });
+        
+        if (!verified) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_AUTHENTICATOR_CODE',
+                message: 'Invalid authenticator code. Please try again.'
+            });
+        }
+        
+        // Update KYC status to pending review
+        await User.findByIdAndUpdate(userId, {
+            'kycStatus.status': 'pending',
+            'kycStatus.submittedAt': new Date(),
+            'kycStatus.verificationMethod': 'authenticator'
+        });
+        
+        // Log activity
+        await SystemLog.create({
+            action: 'kyc_submitted',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'success',
+            metadata: {
+                userId: userId.toString(),
+                method: 'authenticator',
+                submittedAt: new Date()
+            }
+        });
+        
+        // Emit real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${userId}`).emit('kyc_update', {
+                type: 'kyc_update',
+                status: 'pending',
+                timestamp: Date.now()
+            });
+        }
+        
+        res.status(200).json({
+            success: true,
+            status: 'pending',
+            message: 'KYC verification successful. Your application is now under review.'
+        });
+        
+    } catch (err) {
+        console.error('Error in KYC authenticator verification:', err);
+        res.status(500).json({
+            success: false,
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to verify KYC submission. Please try again.'
+        });
+    }
+}
+
+// =============================================
+// HELPER FUNCTIONS
+// =============================================
+
+// Generate recovery codes
+function generateRecoveryCodes() {
+    const codes = [];
+    for (let i = 0; i < 10; i++) {
+        // Generate random 8-character alphanumeric code
+        const code = crypto.randomBytes(6).toString('hex').toUpperCase();
+        // Format as groups of 4 with a dash
+        const formatted = `${code.substring(0, 4)}-${code.substring(4, 8)}`;
+        codes.push(formatted);
+    }
+    return codes;
+}
+
+// Encrypt secret
+function encryptSecret(secret) {
+    try {
+        const algorithm = 'aes-256-gcm';
+        const key = Buffer.from(process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex'), 'hex');
+        const iv = crypto.randomBytes(16);
+        const cipher = crypto.createCipheriv(algorithm, key, iv);
+        let encrypted = cipher.update(secret, 'utf8', 'hex');
+        encrypted += cipher.final('hex');
+        const authTag = cipher.getAuthTag();
+        return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+    } catch (error) {
+        console.error('Encryption error:', error);
+        return secret; // Fallback to plaintext if encryption fails
+    }
+}
+
+// Decrypt secret
+function decryptSecret(encryptedSecret) {
+    try {
+        const algorithm = 'aes-256-gcm';
+        const key = Buffer.from(process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex'), 'hex');
+        const parts = encryptedSecret.split(':');
+        if (parts.length === 3) {
+            const iv = Buffer.from(parts[0], 'hex');
+            const authTag = Buffer.from(parts[1], 'hex');
+            const encrypted = parts[2];
+            const decipher = crypto.createDecipheriv(algorithm, key, iv);
+            decipher.setAuthTag(authTag);
+            let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+            decrypted += decipher.final('utf8');
+            return decrypted;
+        }
+        return encryptedSecret; // Return as-is if not encrypted
+    } catch (error) {
+        console.error('Decryption error:', error);
+        return encryptedSecret; // Return as-is if decryption fails
+    }
+}
+
+
+
+
+
 
 
 
