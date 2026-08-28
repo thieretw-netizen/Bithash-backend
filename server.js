@@ -3132,6 +3132,9 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
+// =============================================
+// UNCOMMENT AND ENSURE THIS MODEL EXISTS (Around line 1260)
+// =============================================
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -3154,11 +3157,50 @@ const UserPreferenceSchema = new mongoose.Schema({
     sms: { type: Boolean, default: false }
   },
   language: { type: String, default: 'en' },
-  currency: { type: String, default: 'USD' }
+  currency: { type: String, default: 'USD' },
+  // --- ADD THESE FIELDS FOR THE SETTINGS PAGE ---
+  timezone: { type: String, default: 'UTC' }
 }, { timestamps: true });
 
-UserPreferenceSchema.index({ user: 1 });
-UserPreferenceSchema.index({ displayAsset: 1 });
+// Ensure the model is compiled
+const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
+
+
+
+
+
+
+// =============================================
+// ADD THESE MODELS (Add around line 900)
+// =============================================
+
+// Language Schema for storing supported languages
+const LanguageSchema = new mongoose.Schema({
+    code: { type: String, required: true, unique: true, index: true }, // e.g., 'en', 'es'
+    name: { type: String, required: true }, // e.g., 'English', 'Spanish'
+    nativeName: { type: String, required: true }, // e.g., 'English', 'Español'
+    isActive: { type: Boolean, default: true },
+    sortOrder: { type: Number, default: 0 },
+    flagEmoji: { type: String, default: '' },
+    flagImageUrl: { type: String, default: '' }
+}, { timestamps: true });
+
+const Language = mongoose.model('Language', LanguageSchema);
+
+// Timezone Schema for storing supported timezones
+const TimezoneSchema = new mongoose.Schema({
+    id: { type: String, required: true, unique: true, index: true }, // 'America/New_York'
+    label: { type: String, required: true }, // 'Eastern Time (ET)'
+    utcOffset: { type: String, required: true }, // '-04:00'
+    isActive: { type: Boolean, default: true },
+    sortOrder: { type: Number, default: 0 }
+}, { timestamps: true });
+
+const Timezone = mongoose.model('Timezone', TimezoneSchema);
+
+
+
+
 
 const DepositAssetSchema = new mongoose.Schema({
   user: {
