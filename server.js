@@ -44662,6 +44662,16 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // LANGUAGE AND TIMEZONE ENDPOINTS - DATABASE DRIVEN WITH CACHING
 // =============================================
@@ -44671,6 +44681,7 @@ let languagesCache = null;
 let timezonesCache = null;
 let languagesCacheTime = 0;
 let timezonesCacheTime = 0;
+
 // GET /api/settings/languages - Return comprehensive language catalogue with flag mappings
 app.get('/api/settings/languages', async (req, res) => {
     try {
@@ -44776,7 +44787,245 @@ app.get('/api/settings/timezones', async (req, res) => {
 });
 
 // =============================================
-// USER DEVICES ENDPOINT - GET ACTIVE DEVICES
+// USER SECURITY STATUS ENDPOINT
+// =============================================
+app.get('/api/users/security', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('passwordChangedAt twoFactorAuth');
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Get active devices count from login history
+        const activeDevices = user.loginHistory?.filter(
+            session => session.revoked !== true && 
+            (!session.expiresAt || new Date(session.expiresAt) > new Date())
+        ) || [];
+
+        const activeDevicesCount = activeDevices.length;
+
+        // Determine security level
+        let securityLevel = 'medium';
+        const has2FA = user.twoFactorAuth?.enabled || false;
+        const hasRecentPassword = user.passwordChangedAt && 
+            (Date.now() - new Date(user.passwordChangedAt).getTime() < 90 * 24 * 60 * 60 * 1000);
+        
+        if (has2FA && hasRecentPassword && activeDevicesCount <= 3) {
+            securityLevel = 'strong';
+        } else if (!has2FA && !hasRecentPassword && activeDevicesCount > 5) {
+            securityLevel = 'weak';
+        }
+        
+        res.status(200).json({
+            status: 'success',
+            data: {
+                securityLevel: securityLevel,
+                statusMessage: securityLevel === 'strong' ? 'Your account is well protected.' :
+                              securityLevel === 'medium' ? 'Consider enabling additional security features.' :
+                              'Your account security needs attention.',
+                authenticator: {
+                    enabled: has2FA,
+                    enabledAt: user.twoFactorAuth?.enabledAt || null
+                },
+                password: {
+                    lastChanged: user.passwordChangedAt || null,
+                    strong: hasRecentPassword
+                },
+                devices: {
+                    activeCount: activeDevicesCount
+                }
+            }
+        });
+    } catch (err) {
+        console.error('Get security status error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch security status'
+        });
+    }
+});
+
+// =============================================
+// USER API KEYS ENDPOINTS
+// =============================================
+app.get('/api/users/api-keys', protect, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).select('apiKeys');
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        const keys = (user.apiKeys || []).map(key => ({
+            id: key._id,
+            name: key.name,
+            permissions: key.permissions || [],
+            createdAt: key.createdAt,
+            expiresAt: key.expiresAt,
+            expired: key.expiresAt && new Date(key.expiresAt) < new Date(),
+            isActive: key.isActive !== false
+        }));
+        
+        res.status(200).json({
+            status: 'success',
+            data: { keys }
+        });
+    } catch (err) {
+        console.error('Get API keys error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch API keys'
+        });
+    }
+});
+
+app.post('/api/users/api-keys', protect, async (req, res) => {
+    try {
+        const { name, permissions, expiresIn } = req.body;
+        
+        if (!name || name.trim() === '') {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'API key name is required'
+            });
+        }
+        
+        // Check for duplicate name
+        const user = await User.findById(req.user._id).select('apiKeys');
+        if (user && user.apiKeys) {
+            const existing = user.apiKeys.find(k => k.name.toLowerCase() === name.trim().toLowerCase() && k.isActive !== false);
+            if (existing) {
+                return res.status(409).json({
+                    status: 'fail',
+                    message: 'An API key with this name already exists'
+                });
+            }
+        }
+        
+        // Generate API key
+        const apiKey = crypto.randomBytes(32).toString('hex');
+        
+        // Calculate expiration
+        let expiresAt = null;
+        if (expiresIn && expiresIn > 0) {
+            expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + parseInt(expiresIn));
+        }
+        
+        // Create API key object
+        const newKey = {
+            name: name.trim(),
+            key: apiKey,
+            permissions: permissions || ['read'],
+            expiresAt: expiresAt,
+            isActive: true,
+            createdAt: new Date()
+        };
+        
+        const updatedUser = await User.findByIdAndUpdate(
+            req.user._id,
+            { $push: { apiKeys: newKey } },
+            { new: true }
+        ).select('apiKeys');
+        
+        const createdKey = updatedUser.apiKeys[updatedUser.apiKeys.length - 1];
+        
+        // Log activity
+        await SystemLog.create({
+            action: 'api_key_create',
+            entity: 'User',
+            entityId: req.user._id,
+            performedBy: req.user._id,
+            performedByModel: 'User',
+            performedByEmail: req.user.email,
+            performedByName: `${req.user.firstName} ${req.user.lastName}`,
+            status: 'success',
+            metadata: {
+                keyName: createdKey.name,
+                permissions: createdKey.permissions,
+                expiresAt: createdKey.expiresAt
+            }
+        });
+        
+        res.status(201).json({
+            status: 'success',
+            data: {
+                id: createdKey._id,
+                key: apiKey,
+                name: createdKey.name,
+                permissions: createdKey.permissions,
+                expiresAt: createdKey.expiresAt
+            }
+        });
+    } catch (err) {
+        console.error('Create API key error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to create API key'
+        });
+    }
+});
+
+app.delete('/api/users/api-keys/:id', protect, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Find the key to log its name
+        const user = await User.findById(req.user._id).select('apiKeys');
+        const keyToDelete = user?.apiKeys?.find(k => k._id.toString() === id);
+        
+        const updatedUser = await User.findByIdAndUpdate(
+            req.user._id,
+            { $pull: { apiKeys: { _id: id } } },
+            { new: true }
+        );
+        
+        if (!updatedUser) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+        
+        // Log activity
+        await SystemLog.create({
+            action: 'api_key_revoke',
+            entity: 'User',
+            entityId: req.user._id,
+            performedBy: req.user._id,
+            performedByModel: 'User',
+            performedByEmail: req.user.email,
+            performedByName: `${req.user.firstName} ${req.user.lastName}`,
+            status: 'success',
+            metadata: {
+                keyName: keyToDelete?.name || 'Unknown',
+                keyId: id
+            }
+        });
+        
+        res.status(200).json({
+            status: 'success',
+            message: 'API key revoked successfully'
+        });
+    } catch (err) {
+        console.error('Delete API key error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to revoke API key'
+        });
+    }
+});
+
+// =============================================
+// USER DEVICES ENDPOINTS - Enhanced with proper logout functionality
 // =============================================
 app.get('/api/users/devices', protect, async (req, res) => {
     try {
@@ -44794,7 +45043,7 @@ app.get('/api/users/devices', protect, async (req, res) => {
 
         const loginHistory = user.loginHistory || [];
         const devices = loginHistory.map(session => {
-            const isCurrent = currentSessionId && session._id.toString() === currentSessionId;
+            const isCurrent = currentSessionId && session._id && session._id.toString() === currentSessionId;
             
             // Determine session status
             let sessionStatus = 'active';
@@ -44845,6 +45094,129 @@ app.get('/api/users/devices', protect, async (req, res) => {
     }
 });
 
+app.post('/api/users/devices/:id/logout', protect, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user._id;
+        
+        // Find and update the specific login history entry
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'User not found'
+            });
+        }
+        
+        // Find the device in loginHistory
+        const deviceIndex = user.loginHistory?.findIndex(
+            session => session._id && session._id.toString() === id
+        );
+        
+        if (deviceIndex === -1 || deviceIndex === undefined) {
+            return res.status(404).json({
+                success: false,
+                code: 'DEVICE_NOT_FOUND',
+                message: 'Device not found'
+            });
+        }
+        
+        // Mark as revoked
+        user.loginHistory[deviceIndex].revoked = true;
+        user.loginHistory[deviceIndex].revokedAt = new Date();
+        await user.save();
+        
+        // Log activity
+        await SystemLog.create({
+            action: 'device_logout',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            performedByEmail: req.user.email,
+            performedByName: `${req.user.firstName} ${req.user.lastName}`,
+            status: 'success',
+            metadata: {
+                deviceId: id,
+                deviceName: user.loginHistory[deviceIndex]?.deviceName || 'Unknown'
+            }
+        });
+        
+        res.status(200).json({
+            success: true,
+            message: 'Device logged out successfully'
+        });
+    } catch (err) {
+        console.error('Logout device error:', err);
+        res.status(500).json({
+            success: false,
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to logout device'
+        });
+    }
+});
+
+app.post('/api/users/devices/logout-all', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const currentSessionId = req.sessionId || req.headers['x-session-id'];
+        
+        // Find the user
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'User not found'
+            });
+        }
+        
+        // Revoke all sessions except current
+        let revokedCount = 0;
+        if (user.loginHistory) {
+            user.loginHistory.forEach(session => {
+                const sessionId = session._id ? session._id.toString() : null;
+                if (sessionId && sessionId !== currentSessionId && !session.revoked) {
+                    session.revoked = true;
+                    session.revokedAt = new Date();
+                    session.revokedBy = 'logout_all';
+                    revokedCount++;
+                }
+            });
+            await user.save();
+        }
+        
+        // Log activity
+        await SystemLog.create({
+            action: 'devices_logged_out_all',
+            entity: 'User',
+            entityId: userId,
+            performedBy: userId,
+            performedByModel: 'User',
+            performedByEmail: req.user.email,
+            performedByName: `${req.user.firstName} ${req.user.lastName}`,
+            status: 'success',
+            metadata: {
+                revokedCount: revokedCount
+            }
+        });
+        
+        res.status(200).json({
+            success: true,
+            message: 'All other devices logged out successfully',
+            data: { revokedCount }
+        });
+    } catch (err) {
+        console.error('Logout all devices error:', err);
+        res.status(500).json({
+            success: false,
+            code: 'INTERNAL_ERROR',
+            message: 'Failed to logout all devices'
+        });
+    }
+});
+
 // =============================================
 // USER ACTIVITY ENDPOINT - GET RECENT ACTIVITY
 // =============================================
@@ -44856,10 +45228,30 @@ app.get('/api/users/activity', protect, async (req, res) => {
         const type = req.query.type || 'all';
         const skip = (page - 1) * limit;
 
-        // Build filter
-        const filter = { userId: userId };
+        // Build filter for SystemLog
+        const filter = { 
+            performedBy: userId, 
+            performedByModel: 'User' 
+        };
+        
+        // Apply type filter using action mapping
         if (type !== 'all') {
-            filter.type = type;
+            const typeMap = {
+                'authentication': ['signup', 'login', 'failed_login', 'logout', 'login_attempt', 'session_created'],
+                'security': ['password_change', 'password_changed', '2fa_enable', '2fa_disable', 'security_settings_update'],
+                'devices': ['device_login', 'device_logout', 'trusted_device_added', 'session_created', 'session_timeout'],
+                'deposits': ['deposit_created', 'deposit_completed', 'deposit_failed', 'deposit_pending', 'deposit_cancelled'],
+                'withdrawals': ['withdrawal_created', 'withdrawal_completed', 'withdrawal_failed', 'withdrawal_pending', 'withdrawal_cancelled'],
+                'wallets': ['wallet_connected', 'wallet_disconnected', 'wallet_linked', 'wallet_unlinked'],
+                'verification': ['kyc_submission', 'kyc_pending', 'kyc_approved', 'kyc_rejected', 'identity_verification', 'address_verification'],
+                'api': ['api_key_create', 'api_key_delete', 'api_key_regenerate', 'api_key_revoke'],
+                'account': ['profile_update', 'account_settings_update', 'email_verification', 'profile_view']
+            };
+            
+            const actions = typeMap[type] || [];
+            if (actions.length > 0) {
+                filter.action = { $in: actions };
+            }
         }
 
         // Get total count for pagination
@@ -44874,23 +45266,27 @@ app.get('/api/users/activity', protect, async (req, res) => {
 
         const formattedActivities = activities.map(log => ({
             id: log._id,
-            type: log.type || 'account',
+            type: log.actionCategory || 'account',
             action: log.action || log.type,
             title: getActivityTitle(log),
             description: getActivityDescription(log),
             status: log.status || 'completed',
             createdAt: log.createdAt || log.timestamp,
-            ipAddress: log.ipAddress || '',
+            ipAddress: log.ip || '',
             location: {
                 city: log.city || '',
-                country: log.country || ''
+                country: log.countryCode || ''
             },
             device: {
                 browser: log.browser || '',
                 os: log.os || ''
             },
             metadata: log.metadata || {},
-            transaction: log.transaction || null
+            transaction: log.financial ? {
+                hash: log.financial.transactionId,
+                amount: log.financial.amount,
+                asset: log.financial.cryptoAsset
+            } : null
         }));
 
         const hasMore = skip + activities.length < totalCount;
@@ -44925,24 +45321,40 @@ function getActivityTitle(log) {
         'login': 'Login',
         'failed_login': 'Failed Login Attempt',
         'logout': 'Logout',
-        'deposit': 'Deposit',
-        'withdrawal': 'Withdrawal',
+        'deposit_created': 'Deposit Initiated',
+        'deposit_completed': 'Deposit Completed',
+        'deposit_failed': 'Deposit Failed',
+        'deposit_pending': 'Deposit Pending',
+        'deposit_cancelled': 'Deposit Cancelled',
+        'withdrawal_created': 'Withdrawal Requested',
+        'withdrawal_completed': 'Withdrawal Completed',
+        'withdrawal_failed': 'Withdrawal Failed',
+        'withdrawal_pending': 'Withdrawal Pending',
+        'withdrawal_cancelled': 'Withdrawal Cancelled',
         'password_changed': 'Password Changed',
-        'authenticator_enabled': 'Two-Factor Authentication Enabled',
-        'authenticator_disabled': 'Two-Factor Authentication Disabled',
+        '2fa_enable': 'Two-Factor Authentication Enabled',
+        '2fa_disable': 'Two-Factor Authentication Disabled',
         'wallet_connected': 'Wallet Connected',
         'wallet_disconnected': 'Wallet Disconnected',
+        'wallet_linked': 'Wallet Linked',
+        'wallet_unlinked': 'Wallet Unlinked',
         'device_login': 'New Device Login',
         'device_logout': 'Device Logout',
+        'session_created': 'New Session Created',
+        'session_timeout': 'Session Expired',
         'devices_logged_out_all': 'All Devices Logged Out',
-        'kyc_submitted': 'KYC Submitted',
+        'kyc_submission': 'KYC Submitted',
         'kyc_approved': 'KYC Approved',
         'kyc_rejected': 'KYC Rejected',
-        'kyc_resubmitted': 'KYC Resubmitted',
-        'api_key_created': 'API Key Created',
-        'api_key_revoked': 'API Key Revoked',
-        'profile_updated': 'Profile Updated',
-        'recovery_codes_regenerated': 'Recovery Codes Regenerated'
+        'kyc_pending': 'KYC Under Review',
+        'identity_verification': 'Identity Verified',
+        'address_verification': 'Address Verified',
+        'api_key_create': 'API Key Created',
+        'api_key_revoke': 'API Key Revoked',
+        'api_key_regenerate': 'API Key Regenerated',
+        'profile_update': 'Profile Updated',
+        'account_settings_update': 'Settings Updated',
+        'email_verification': 'Email Verified'
     };
     return titles[log.action] || log.action || 'Activity';
 }
@@ -44954,24 +45366,40 @@ function getActivityDescription(log) {
         'login': 'You signed in to your account',
         'failed_login': 'An unsuccessful login attempt was made',
         'logout': 'You signed out of your account',
-        'deposit': 'Funds deposited to your account',
-        'withdrawal': 'Funds withdrawn from your account',
+        'deposit_created': 'Funds deposited to your account',
+        'deposit_completed': 'Deposit completed successfully',
+        'deposit_failed': 'Deposit failed',
+        'deposit_pending': 'Deposit is pending confirmation',
+        'deposit_cancelled': 'Deposit was cancelled',
+        'withdrawal_created': 'Funds withdrawn from your account',
+        'withdrawal_completed': 'Withdrawal completed successfully',
+        'withdrawal_failed': 'Withdrawal failed',
+        'withdrawal_pending': 'Withdrawal is pending approval',
+        'withdrawal_cancelled': 'Withdrawal was cancelled',
         'password_changed': 'Your account password was changed',
-        'authenticator_enabled': 'Two-factor authentication was enabled',
-        'authenticator_disabled': 'Two-factor authentication was disabled',
+        '2fa_enable': 'Two-factor authentication was enabled',
+        '2fa_disable': 'Two-factor authentication was disabled',
         'wallet_connected': 'A new wallet was connected to your account',
         'wallet_disconnected': 'A wallet was disconnected from your account',
+        'wallet_linked': 'A new wallet was linked to your account',
+        'wallet_unlinked': 'A wallet was unlinked from your account',
         'device_login': 'A new device signed in to your account',
         'device_logout': 'A device was logged out of your account',
+        'session_created': 'A new session was created',
+        'session_timeout': 'A session expired',
         'devices_logged_out_all': 'All devices were logged out of your account',
-        'kyc_submitted': 'Your KYC application was submitted for review',
+        'kyc_submission': 'Your KYC application was submitted for review',
         'kyc_approved': 'Your KYC application was approved',
         'kyc_rejected': 'Your KYC application was rejected',
-        'kyc_resubmitted': 'Your KYC application was resubmitted',
-        'api_key_created': 'A new API key was created',
-        'api_key_revoked': 'An API key was revoked',
-        'profile_updated': 'Your profile information was updated',
-        'recovery_codes_regenerated': 'Your recovery codes were regenerated'
+        'kyc_pending': 'Your KYC application is under review',
+        'identity_verification': 'Your identity was verified',
+        'address_verification': 'Your address was verified',
+        'api_key_create': 'A new API key was created',
+        'api_key_revoke': 'An API key was revoked',
+        'api_key_regenerate': 'An API key was regenerated',
+        'profile_update': 'Your profile information was updated',
+        'account_settings_update': 'Your account settings were updated',
+        'email_verification': 'Your email address was verified'
     };
     return descriptions[log.action] || log.action || 'Activity recorded';
 }
@@ -45055,7 +45483,18 @@ app.post('/api/users/kyc/verification/verify', protect, async (req, res) => {
                 });
             }
 
-            const secret = decryptSecret(user.twoFactorAuth.secret);
+            // Decrypt secret
+            let secret;
+            try {
+                secret = decryptSecret(user.twoFactorAuth.secret);
+            } catch (decryptError) {
+                return res.status(500).json({
+                    success: false,
+                    code: 'DECRYPTION_ERROR',
+                    message: 'Failed to verify authenticator code'
+                });
+            }
+            
             verified = speakeasy.totp.verify({
                 secret: secret,
                 encoding: 'base32',
@@ -45095,7 +45534,6 @@ app.post('/api/users/kyc/verification/verify', protect, async (req, res) => {
             performedBy: userId,
             performedByModel: 'User',
             status: 'success',
-            type: 'verification',
             metadata: {
                 userId: userId.toString(),
                 method: method
@@ -45134,7 +45572,7 @@ app.post('/api/users/kyc/verification/verify', protect, async (req, res) => {
 app.get('/api/users/kyc/status', protect, async (req, res) => {
     try {
         const userId = req.user._id;
-        const user = await User.findById(userId).select('kyc');
+        const user = await User.findById(userId).select('kycStatus');
 
         if (!user) {
             return res.status(404).json({
@@ -45144,17 +45582,37 @@ app.get('/api/users/kyc/status', protect, async (req, res) => {
             });
         }
 
-        const kyc = user.kyc || {};
+        const kyc = user.kycStatus || {};
+        
+        // Determine overall status
+        let overallStatus = 'unverified';
+        if (kyc.identity === 'verified' && kyc.address === 'verified' && kyc.facial === 'verified') {
+            overallStatus = 'verified';
+        } else if (kyc.identity === 'pending' || kyc.address === 'pending' || kyc.facial === 'pending') {
+            overallStatus = 'pending';
+        } else if (kyc.identity === 'rejected' || kyc.address === 'rejected' || kyc.facial === 'rejected') {
+            overallStatus = 'rejected';
+        }
+        
+        // Check if KYC was submitted but not yet processed
+        if (kyc.submittedAt && overallStatus === 'unverified') {
+            overallStatus = 'pending';
+        }
         
         res.json({
             success: true,
-            status: kyc.status || 'unverified',
-            identityVerified: kyc.identityVerified || false,
-            addressVerified: kyc.addressVerified || false,
-            facialVerified: kyc.facialVerified || false,
+            status: overallStatus,
+            identityVerified: kyc.identity === 'verified',
+            addressVerified: kyc.address === 'verified',
+            facialVerified: kyc.facial === 'verified',
             submittedAt: kyc.submittedAt || null,
             rejectionReason: kyc.rejectionReason || null,
-            verificationMethod: kyc.verificationMethod || null
+            verificationMethod: kyc.verificationMethod || null,
+            details: {
+                identity: kyc.identity || 'not-submitted',
+                address: kyc.address || 'not-submitted',
+                facial: kyc.facial || 'not-submitted'
+            }
         });
     } catch (err) {
         console.error('Error fetching KYC status:', err);
@@ -45178,8 +45636,6 @@ app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res)
 
         // If purpose is 'kyc_verification', handle it differently
         if (purpose === 'kyc_verification') {
-            // Redirect to KYC verification endpoint
-            // This allows the same frontend code to work with both flows
             return handleKycAuthenticatorVerification(req, res);
         }
 
@@ -45276,13 +45732,12 @@ app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res)
 
         // Log activity
         await SystemLog.create({
-            action: 'authenticator_enabled',
+            action: '2fa_enable',
             entity: 'User',
             entityId: userId,
             performedBy: userId,
             performedByModel: 'User',
             status: 'success',
-            type: 'security',
             metadata: { userId: userId.toString() }
         });
 
@@ -45333,7 +45788,18 @@ async function handleKycAuthenticatorVerification(req, res) {
             });
         }
 
-        const secret = decryptSecret(user.twoFactorAuth.secret);
+        // Decrypt secret
+        let secret;
+        try {
+            secret = decryptSecret(user.twoFactorAuth.secret);
+        } catch (decryptError) {
+            return res.status(500).json({
+                success: false,
+                code: 'DECRYPTION_ERROR',
+                message: 'Failed to verify authenticator code'
+            });
+        }
+        
         const verified = speakeasy.totp.verify({
             secret: secret,
             encoding: 'base32',
@@ -45351,9 +45817,9 @@ async function handleKycAuthenticatorVerification(req, res) {
 
         // Update KYC status
         await User.findByIdAndUpdate(userId, {
-            'kyc.status': 'pending',
-            'kyc.submittedAt': new Date(),
-            'kyc.verificationMethod': 'authenticator'
+            'kycStatus.status': 'pending',
+            'kycStatus.submittedAt': new Date(),
+            'kycStatus.verificationMethod': 'authenticator'
         });
 
         await SystemLog.create({
@@ -45363,7 +45829,6 @@ async function handleKycAuthenticatorVerification(req, res) {
             performedBy: userId,
             performedByModel: 'User',
             status: 'success',
-            type: 'verification',
             metadata: {
                 userId: userId.toString(),
                 method: 'authenticator'
@@ -45541,6 +46006,21 @@ app.put('/api/users/settings', protect, async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // ERROR HANDLING MIDDLEWARE
