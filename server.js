@@ -45856,15 +45856,7 @@ function generateRecoveryCodes(count = 10) {
     return codes;
 }
 
-// =============================================
-// SEND PROFESSIONAL EMAIL
-// =============================================
-async function sendProfessionalEmail({ email, template, data }) {
-    // Implementation depends on your email service
-    // This is a placeholder - replace with actual email sending
-    console.log(`[EMAIL] Sending ${template} to ${email}`, data);
-    return true;
-}
+
 
 
 
