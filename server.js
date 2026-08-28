@@ -44659,7 +44659,6 @@ let languagesCache = null;
 let timezonesCache = null;
 let languagesCacheTime = 0;
 let timezonesCacheTime = 0;
-const CACHE_TTL = 300000; // 5 minutes
 
 // GET /api/settings/languages - Return comprehensive language catalogue with flag mappings
 app.get('/api/settings/languages', async (req, res) => {
