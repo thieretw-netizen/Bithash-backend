@@ -301,7 +301,10 @@ if (!JWT_SECRET) {
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s';
 const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083;
 
-console.log('✅ JWT Configuration loaded successfully');
+
+
+
+
 const UserSchema = new mongoose.Schema({
   firstName: { 
     type: String, 
@@ -519,6 +522,7 @@ const UserSchema = new mongoose.Schema({
     theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
     language: { type: String, default: 'en' },
     currency: { type: String, default: 'USD' },
+      timezone: { type: String, default: 'UTC' },
     displayAsset: { type: String, default: 'btc' }
   },
   location: {
@@ -728,8 +732,7 @@ UserSchema.methods.unlinkWeb3Wallet = function() {
     });
   }
 
-  // DO NOT change authProvider here - authProvider is only set during signup!
-  // Even if we unlink a web3 wallet, the authProvider remains as originally set.
+ 
 
   return this;
 };
@@ -3132,9 +3135,8 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
-// =============================================
-// UNCOMMENT AND ENSURE THIS MODEL EXISTS (Around line 1260)
-// =============================================
+
+
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -3157,46 +3159,102 @@ const UserPreferenceSchema = new mongoose.Schema({
     sms: { type: Boolean, default: false }
   },
   language: { type: String, default: 'en' },
-  currency: { type: String, default: 'USD' },
-  // --- ADD THESE FIELDS FOR THE SETTINGS PAGE ---
-  timezone: { type: String, default: 'UTC' }
+    timezone: { type: String, default: 'UTC' },
+  currency: { type: String, default: 'USD' }
 }, { timestamps: true });
 
-// Ensure the model is compiled
-const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
-
-
-
-
+UserPreferenceSchema.index({ user: 1 });
+UserPreferenceSchema.index({ displayAsset: 1 });
 
 
 // =============================================
-// ADD THESE MODELS (Add around line 900)
+// LANGUAGE SCHEMA
 // =============================================
-
-// Language Schema for storing supported languages
 const LanguageSchema = new mongoose.Schema({
-    code: { type: String, required: true, unique: true, index: true }, // e.g., 'en', 'es'
-    name: { type: String, required: true }, // e.g., 'English', 'Spanish'
-    nativeName: { type: String, required: true }, // e.g., 'English', 'Español'
-    isActive: { type: Boolean, default: true },
-    sortOrder: { type: Number, default: 0 },
-    flagEmoji: { type: String, default: '' },
-    flagImageUrl: { type: String, default: '' }
+    code: {
+        type: String,
+        required: [true, 'Language code is required'],
+        unique: true,
+        uppercase: true,
+        index: true
+    },
+    name: {
+        type: String,
+        required: [true, 'Language name is required']
+    },
+    nativeName: {
+        type: String,
+        required: [true, 'Native name is required']
+    },
+    flag: {
+        type: String,
+        required: [true, 'Flag emoji is required']
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    sortOrder: {
+        type: Number,
+        default: 0
+    }
 }, { timestamps: true });
 
 const Language = mongoose.model('Language', LanguageSchema);
 
-// Timezone Schema for storing supported timezones
+// =============================================
+// TIMEZONE SCHEMA
+// =============================================
 const TimezoneSchema = new mongoose.Schema({
-    id: { type: String, required: true, unique: true, index: true }, // 'America/New_York'
-    label: { type: String, required: true }, // 'Eastern Time (ET)'
-    utcOffset: { type: String, required: true }, // '-04:00'
-    isActive: { type: Boolean, default: true },
-    sortOrder: { type: Number, default: 0 }
+    id: {
+        type: String,
+        required: [true, 'Timezone ID is required'],
+        unique: true,
+        index: true
+    },
+    label: {
+        type: String,
+        required: [true, 'Timezone label is required']
+    },
+    utcOffset: {
+        type: String,
+        required: [true, 'UTC offset is required']
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    sortOrder: {
+        type: Number,
+        default: 0
+    }
 }, { timestamps: true });
 
 const Timezone = mongoose.model('Timezone', TimezoneSchema);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -7612,7 +7670,135 @@ console.log('🏦 Bank-like financial statement cron job scheduled (runs daily a
 
 
 
+// =============================================
+// SEED LANGUAGES AND TIMEZONES
+// =============================================
+const seedLanguagesAndTimezones = async () => {
+    try {
+        // Languages
+        const languagesCount = await Language.countDocuments();
+        if (languagesCount === 0) {
+            const languages = [
+                // Most spoken languages worldwide
+                { code: 'en', name: 'English', nativeName: 'English', flag: '🇬🇧', sortOrder: 1 },
+                { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳', sortOrder: 2 },
+                { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flag: '🇮🇳', sortOrder: 3 },
+                { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', sortOrder: 4 },
+                { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', sortOrder: 5 },
+                { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦', sortOrder: 6 },
+                { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', flag: '🇧🇩', sortOrder: 7 },
+                { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: '🇷🇺', sortOrder: 8 },
+                { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹', sortOrder: 9 },
+                { code: 'ur', name: 'Urdu', nativeName: 'اردو', flag: '🇵🇰', sortOrder: 10 },
+                
+                // European languages
+                { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪', sortOrder: 11 },
+                { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹', sortOrder: 12 },
+                { code: 'ro', name: 'Romanian', nativeName: 'Română', flag: '🇷🇴', sortOrder: 13 },
+                { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: '🇳🇱', sortOrder: 14 },
+                { code: 'pl', name: 'Polish', nativeName: 'Polski', flag: '🇵🇱', sortOrder: 15 },
+                { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', flag: '🇺🇦', sortOrder: 16 },
+                { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', flag: '🇬🇷', sortOrder: 17 },
+                { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', flag: '🇭🇺', sortOrder: 18 },
+                { code: 'cs', name: 'Czech', nativeName: 'Čeština', flag: '🇨🇿', sortOrder: 19 },
+                { code: 'sv', name: 'Swedish', nativeName: 'Svenska', flag: '🇸🇪', sortOrder: 20 },
+                { code: 'no', name: 'Norwegian', nativeName: 'Norsk', flag: '🇳🇴', sortOrder: 21 },
+                { code: 'da', name: 'Danish', nativeName: 'Dansk', flag: '🇩🇰', sortOrder: 22 },
+                { code: 'fi', name: 'Finnish', nativeName: 'Suomi', flag: '🇫🇮', sortOrder: 23 },
+                
+                // Asian languages
+                { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵', sortOrder: 24 },
+                { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷', sortOrder: 25 },
+                { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭', sortOrder: 26 },
+                { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', flag: '🇻🇳', sortOrder: 27 },
+                { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', flag: '🇮🇩', sortOrder: 28 },
+                { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', flag: '🇲🇾', sortOrder: 29 },
+                { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்', flag: '🇱🇰', sortOrder: 30 },
+                { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', flag: '🇮🇳', sortOrder: 31 },
+                { code: 'mr', name: 'Marathi', nativeName: 'मराठी', flag: '🇮🇳', sortOrder: 32 },
+                { code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી', flag: '🇮🇳', sortOrder: 33 },
+                { code: 'kn', name: 'Kannada', nativeName: 'ಕನ್ನಡ', flag: '🇮🇳', sortOrder: 34 },
+                { code: 'ml', name: 'Malayalam', nativeName: 'മലയാളം', flag: '🇮🇳', sortOrder: 35 },
+                { code: 'ne', name: 'Nepali', nativeName: 'नेपाली', flag: '🇳🇵', sortOrder: 36 },
+                { code: 'si', name: 'Sinhala', nativeName: 'සිංහල', flag: '🇱🇰', sortOrder: 37 },
+                { code: 'km', name: 'Khmer', nativeName: 'ភាសាខ្មែរ', flag: '🇰🇭', sortOrder: 38 },
+                { code: 'my', name: 'Burmese', nativeName: 'မြန်မာစာ', flag: '🇲🇲', sortOrder: 39 },
+                
+                // Middle Eastern languages
+                { code: 'he', name: 'Hebrew', nativeName: 'עברית', flag: '🇮🇱', sortOrder: 40 },
+                { code: 'fa', name: 'Persian', nativeName: 'فارسی', flag: '🇮🇷', sortOrder: 41 },
+                { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', flag: '🇹🇷', sortOrder: 42 },
+                
+                // African languages
+                { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', flag: '🇹🇿', sortOrder: 43 },
+                { code: 'ha', name: 'Hausa', nativeName: 'Hausa', flag: '🇳🇬', sortOrder: 44 },
+                { code: 'yo', name: 'Yoruba', nativeName: 'Yorùbá', flag: '🇳🇬', sortOrder: 45 },
+                { code: 'ig', name: 'Igbo', nativeName: 'Igbo', flag: '🇳🇬', sortOrder: 46 },
+                { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', flag: '🇪🇹', sortOrder: 47 },
+                { code: 'zu', name: 'Zulu', nativeName: 'IsiZulu', flag: '🇿🇦', sortOrder: 48 },
+                { code: 'xh', name: 'Xhosa', nativeName: 'IsiXhosa', flag: '🇿🇦', sortOrder: 49 },
+                
+                // Other important languages
+                { code: 'fil', name: 'Filipino', nativeName: 'Wikang Filipino', flag: '🇵🇭', sortOrder: 50 },
+                { code: 'mn', name: 'Mongolian', nativeName: 'Монгол', flag: '🇲🇳', sortOrder: 51 },
+                { code: 'ka', name: 'Georgian', nativeName: 'ქართული', flag: '🇬🇪', sortOrder: 52 },
+                { code: 'hy', name: 'Armenian', nativeName: 'Հայերեն', flag: '🇦🇲', sortOrder: 53 },
+                { code: 'sq', name: 'Albanian', nativeName: 'Shqip', flag: '🇦🇱', sortOrder: 54 },
+                { code: 'bs', name: 'Bosnian', nativeName: 'Bosanski', flag: '🇧🇦', sortOrder: 55 },
+                { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', flag: '🇭🇷', sortOrder: 56 },
+                { code: 'sr', name: 'Serbian', nativeName: 'Српски', flag: '🇷🇸', sortOrder: 57 },
+                { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', flag: '🇸🇰', sortOrder: 58 },
+                { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina', flag: '🇸🇮', sortOrder: 59 },
+                { code: 'et', name: 'Estonian', nativeName: 'Eesti', flag: '🇪🇪', sortOrder: 60 },
+                { code: 'lv', name: 'Latvian', nativeName: 'Latviešu', flag: '🇱🇻', sortOrder: 61 },
+                { code: 'lt', name: 'Lithuanian', nativeName: 'Lietuvių', flag: '🇱🇹', sortOrder: 62 },
+                { code: 'bg', name: 'Bulgarian', nativeName: 'Български', flag: '🇧🇬', sortOrder: 63 },
+                { code: 'is', name: 'Icelandic', nativeName: 'Íslenska', flag: '🇮🇸', sortOrder: 64 }
+            ];
+            
+            await Language.insertMany(languages);
+            console.log(`✅ ${languages.length} languages seeded successfully`);
+        }
 
+        // Timezones
+        const timezonesCount = await Timezone.countDocuments();
+        if (timezonesCount === 0) {
+            const timezones = [
+                { id: 'UTC', label: 'UTC', utcOffset: '+00:00', sortOrder: 1 },
+                { id: 'America/New_York', label: 'Eastern Time (US & Canada)', utcOffset: '-04:00', sortOrder: 2 },
+                { id: 'America/Chicago', label: 'Central Time (US & Canada)', utcOffset: '-05:00', sortOrder: 3 },
+                { id: 'America/Denver', label: 'Mountain Time (US & Canada)', utcOffset: '-06:00', sortOrder: 4 },
+                { id: 'America/Los_Angeles', label: 'Pacific Time (US & Canada)', utcOffset: '-07:00', sortOrder: 5 },
+                { id: 'America/Phoenix', label: 'Arizona', utcOffset: '-07:00', sortOrder: 6 },
+                { id: 'America/Anchorage', label: 'Alaska', utcOffset: '-08:00', sortOrder: 7 },
+                { id: 'America/Honolulu', label: 'Hawaii', utcOffset: '-10:00', sortOrder: 8 },
+                { id: 'Europe/London', label: 'London', utcOffset: '+01:00', sortOrder: 9 },
+                { id: 'Europe/Paris', label: 'Paris', utcOffset: '+02:00', sortOrder: 10 },
+                { id: 'Europe/Berlin', label: 'Berlin', utcOffset: '+02:00', sortOrder: 11 },
+                { id: 'Europe/Rome', label: 'Rome', utcOffset: '+02:00', sortOrder: 12 },
+                { id: 'Europe/Madrid', label: 'Madrid', utcOffset: '+02:00', sortOrder: 13 },
+                { id: 'Europe/Bucharest', label: 'Bucharest', utcOffset: '+03:00', sortOrder: 14 },
+                { id: 'Europe/Moscow', label: 'Moscow', utcOffset: '+03:00', sortOrder: 15 },
+                { id: 'Asia/Dubai', label: 'Dubai', utcOffset: '+04:00', sortOrder: 16 },
+                { id: 'Asia/Kolkata', label: 'India Standard Time', utcOffset: '+05:30', sortOrder: 17 },
+                { id: 'Asia/Singapore', label: 'Singapore', utcOffset: '+08:00', sortOrder: 18 },
+                { id: 'Asia/Tokyo', label: 'Tokyo', utcOffset: '+09:00', sortOrder: 19 },
+                { id: 'Asia/Shanghai', label: 'Shanghai', utcOffset: '+08:00', sortOrder: 20 },
+                { id: 'Australia/Sydney', label: 'Sydney', utcOffset: '+10:00', sortOrder: 21 },
+                { id: 'Australia/Melbourne', label: 'Melbourne', utcOffset: '+10:00', sortOrder: 22 },
+                { id: 'Pacific/Auckland', label: 'Auckland', utcOffset: '+12:00', sortOrder: 23 }
+            ];
+            
+            await Timezone.insertMany(timezones);
+            console.log('✅ Timezones seeded successfully');
+        }
+    } catch (err) {
+        console.error('Error seeding languages/timezones:', err);
+    }
+};
+
+// Call this during initialization
+seedLanguagesAndTimezones();
 
 
 
