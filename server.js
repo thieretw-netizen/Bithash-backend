@@ -45908,7 +45908,418 @@ app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res
 });
 
 
+// =============================================
+// DEVICE & SECURITY ENDPOINTS - COMPLETE IMPLEMENTATION
+// =============================================
 
+// =============================================
+// 1. GET /api/users/security - Load security overview
+// =============================================
+app.get('/api/users/security', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('+passwordChangedAt +twoFactorAuth.secret');
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Get active devices count
+        const deviceSessions = await redis.keys(`session:${userId}:*`);
+        const activeDevices = deviceSessions.length;
+
+        // Get user's password last changed
+        const passwordLastChanged = user.passwordChangedAt || user.createdAt;
+
+        // Calculate password age in days
+        const passwordAgeDays = Math.floor((Date.now() - new Date(passwordLastChanged).getTime()) / (1000 * 60 * 60 * 24));
+
+        // Determine password strength
+        let passwordStrength = 'strong';
+        let passwordStatus = 'Protected';
+        if (passwordAgeDays > 90) {
+            passwordStrength = 'medium';
+            passwordStatus = 'Should update';
+        }
+        if (passwordAgeDays > 180) {
+            passwordStrength = 'weak';
+            passwordStatus = 'Update recommended';
+        }
+
+        // Check if user has a password set
+        const hasPassword = user.password && user.password.length > 0;
+
+        // Check authenticator status
+        const authenticator = {
+            enabled: user.twoFactorAuth && user.twoFactorAuth.enabled === true,
+            enabledAt: user.twoFactorAuth && user.twoFactorAuth.enabled === true ? user.updatedAt : null
+        };
+
+        // Check if recovery codes exist
+        const recoveryCodes = await UserRecoveryCodes.findOne({ userId: userId });
+        const recoveryAvailable = !!recoveryCodes && recoveryCodes.hashes && recoveryCodes.hashes.length > 0;
+
+        // Determine security level
+        let securityLevel = 'weak';
+        let statusMessage = 'Your account needs security improvements.';
+        const score = {
+            password: hasPassword ? 1 : 0,
+            passwordAge: passwordAgeDays < 90 ? 1 : 0,
+            authenticator: authenticator.enabled ? 1 : 0,
+            recoveryCodes: recoveryAvailable ? 1 : 0,
+            activeDevices: activeDevices <= 3 ? 1 : 0
+        };
+
+        const totalScore = Object.values(score).reduce((a, b) => a + b, 0);
+
+        if (totalScore >= 4) {
+            securityLevel = 'strong';
+            statusMessage = 'Your account has strong security protection.';
+        } else if (totalScore >= 2) {
+            securityLevel = 'medium';
+            statusMessage = 'Your account has moderate security. Consider enabling 2FA.';
+        } else {
+            securityLevel = 'weak';
+            statusMessage = 'Your account needs security improvements.';
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                securityLevel: securityLevel,
+                statusMessage: statusMessage,
+                password: {
+                    enabled: hasPassword,
+                    lastChanged: passwordLastChanged,
+                    ageDays: passwordAgeDays,
+                    strength: passwordStrength,
+                    status: passwordStatus
+                },
+                authenticator: {
+                    enabled: authenticator.enabled,
+                    enabledAt: authenticator.enabledAt,
+                    configured: authenticator.enabled,
+                    recoveryAvailable: recoveryAvailable
+                },
+                devices: {
+                    activeCount: activeDevices,
+                    totalCount: activeDevices
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching security overview:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch security overview'
+        });
+    }
+});
+
+// =============================================
+// 2. GET /api/users/devices - Get active devices with session status
+// =============================================
+app.get('/api/users/devices', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const currentToken = req.headers.authorization?.split(' ')[1] || req.cookies.jwt;
+
+        // Get all session keys for this user
+        const sessionKeys = await redis.keys(`session:${userId}:*`);
+        
+        const devices = [];
+        let currentDeviceId = null;
+
+        // Find current device ID from token
+        if (currentToken) {
+            try {
+                const decoded = verifyJWT(currentToken);
+                currentDeviceId = decoded.sessionId || null;
+            } catch (err) {
+                // Token might be expired, continue
+            }
+        }
+
+        for (const key of sessionKeys) {
+            try {
+                const sessionData = await redis.get(key);
+                if (!sessionData) continue;
+
+                const session = JSON.parse(sessionData);
+                
+                // Generate a consistent device ID from the session
+                const deviceId = key.split(':').pop();
+
+                // Determine if this is the current device
+                const isCurrent = deviceId === currentDeviceId;
+
+                // Determine session status
+                let sessionStatus = 'inactive';
+                if (session.lastActive) {
+                    const lastActiveTime = new Date(session.lastActive);
+                    const now = new Date();
+                    const inactiveMinutes = (now - lastActiveTime) / (1000 * 60);
+                    if (inactiveMinutes < 30) {
+                        sessionStatus = 'active';
+                    } else if (inactiveMinutes < 1440) { // 24 hours
+                        sessionStatus = 'inactive';
+                    } else {
+                        sessionStatus = 'expired';
+                    }
+                }
+
+                // Build device info
+                const deviceInfo = session.deviceInfo || {};
+                const locationInfo = session.locationInfo || {};
+
+                devices.push({
+                    id: deviceId,
+                    name: deviceInfo.name || `${deviceInfo.browser || 'Unknown'} on ${deviceInfo.os || 'Unknown'}`,
+                    deviceType: deviceInfo.type || 'desktop',
+                    browser: deviceInfo.browser || 'Unknown',
+                    os: deviceInfo.os || 'Unknown',
+                    sessionStatus: sessionStatus,
+                    current: isCurrent === true,
+                    lastActiveAt: session.lastActive || session.createdAt,
+                    timestamp: session.createdAt,
+                    ip: session.ip || 'Unknown',
+                    location: {
+                        city: locationInfo.city || 'Unknown',
+                        country: locationInfo.country || 'Unknown',
+                        region: locationInfo.region || 'Unknown'
+                    }
+                });
+
+            } catch (err) {
+                console.error('Error parsing session data for key:', key, err);
+            }
+        }
+
+        // Sort devices: current first, then by lastActive descending
+        devices.sort((a, b) => {
+            if (a.current) return -1;
+            if (b.current) return 1;
+            return new Date(b.lastActiveAt) - new Date(a.lastActiveAt);
+        });
+
+        // Remove duplicate devices (same browser+os+ip combination within 24 hours)
+        const uniqueDevices = [];
+        const seenKeys = new Set();
+
+        for (const device of devices) {
+            // Create a unique key for deduplication
+            const key = `${device.browser}|${device.os}|${device.ip}`;
+            const timeKey = Math.floor(new Date(device.lastActiveAt).getTime() / 86400000); // Day-based key
+            
+            if (device.current) {
+                // Always include current device
+                uniqueDevices.push(device);
+                continue;
+            }
+
+            const fullKey = `${key}|${timeKey}`;
+            if (!seenKeys.has(fullKey)) {
+                seenKeys.add(fullKey);
+                uniqueDevices.push(device);
+            }
+        }
+
+        res.status(200).json({
+            status: 'success',
+            devices: uniqueDevices,
+            data: uniqueDevices // For backward compatibility
+        });
+
+    } catch (err) {
+        console.error('Error fetching devices:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch devices'
+        });
+    }
+});
+
+// =============================================
+// 3. POST /api/users/devices/:deviceId/logout - Log out a specific device
+// =============================================
+app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { deviceId } = req.params;
+
+        if (!deviceId) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Device ID is required'
+            });
+        }
+
+        const currentToken = req.headers.authorization?.split(' ')[1] || req.cookies.jwt;
+        let currentDeviceId = null;
+
+        if (currentToken) {
+            try {
+                const decoded = verifyJWT(token);
+                currentDeviceId = decoded.sessionId || null;
+            } catch (err) {
+                // Token might be expired, continue
+            }
+        }
+
+        // Prevent logging out current device
+        if (deviceId === currentDeviceId) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'You cannot log out your current device. Use the logout button in the header instead.'
+            });
+        }
+
+        // Find and delete the session
+        const sessionKey = `session:${userId}:${deviceId}`;
+        const sessionData = await redis.get(sessionKey);
+
+        if (!sessionData) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Device not found or already logged out'
+            });
+        }
+
+        // Delete the session from Redis
+        await redis.del(sessionKey);
+
+        // Also blacklist any tokens associated with this session
+        const tokenKey = `token:${userId}:${deviceId}`;
+        const token = await redis.get(tokenKey);
+        if (token) {
+            await redis.del(tokenKey);
+            // Add to blacklist with expiration
+            await redis.set(`blacklist:${token}`, 'true', 'EX', 86400); // 24 hours
+        }
+
+        // Log the activity
+        await logActivity(
+            'device_logged_out',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            {
+                deviceId: deviceId,
+                method: 'manual'
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Device logged out successfully'
+        });
+
+    } catch (err) {
+        console.error('Error logging out device:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to log out device'
+        });
+    }
+});
+
+// =============================================
+// 4. POST /api/users/devices/logout-all - Log out all other devices
+// =============================================
+app.post('/api/users/devices/logout-all', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const currentToken = req.headers.authorization?.split(' ')[1] || req.cookies.jwt;
+
+        if (!currentToken) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Authentication required'
+            });
+        }
+
+        // Get current device ID from token
+        let currentDeviceId = null;
+        let currentTokenPayload = null;
+        try {
+            currentTokenPayload = verifyJWT(currentToken);
+            currentDeviceId = currentTokenPayload.sessionId || null;
+        } catch (err) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Invalid session. Please log in again.'
+            });
+        }
+
+        // Get all session keys for this user
+        const sessionKeys = await redis.keys(`session:${userId}:*`);
+        let loggedOutCount = 0;
+
+        for (const key of sessionKeys) {
+            const deviceId = key.split(':').pop();
+
+            // Skip current device
+            if (deviceId === currentDeviceId) {
+                continue;
+            }
+
+            // Get the session data
+            const sessionData = await redis.get(key);
+            if (!sessionData) continue;
+
+            const session = JSON.parse(sessionData);
+
+            // Delete the session from Redis
+            await redis.del(key);
+
+            // Blacklist any tokens associated with this session
+            const tokenKey = `token:${userId}:${deviceId}`;
+            const token = await redis.get(tokenKey);
+            if (token) {
+                await redis.del(tokenKey);
+                await redis.set(`blacklist:${token}`, 'true', 'EX', 86400);
+            }
+
+            loggedOutCount++;
+        }
+
+        // Log the activity
+        await logActivity(
+            'all_devices_logged_out',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            {
+                devicesLoggedOut: loggedOutCount,
+                method: 'manual'
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: `${loggedOutCount} device(s) logged out successfully`,
+            data: {
+                loggedOutCount: loggedOutCount,
+                remainingDevices: 1 // Current device only
+            }
+        });
+
+    } catch (err) {
+        console.error('Error logging out all devices:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to log out all devices'
+        });
+    }
+});
 
 
 
