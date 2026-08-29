@@ -17533,22 +17533,7 @@ app.get('/api/users/activity', protect, async (req, res) => {
   }
 });
 
-app.get('/api/users/devices', protect, async (req, res) => {
-  try {
-    const devices = req.user.loginHistory;
 
-    res.status(200).json({
-      status: 'success',
-      data: devices
-    });
-  } catch (err) {
-    console.error('Get user devices error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while fetching user devices'
-    });
-  }
-});
 
 
 
@@ -28469,70 +28454,6 @@ app.post('/api/users/kyc/facial', protect, upload.fields([
   }
 });
 
-// =============================================
-// ENHANCED KYC Status Endpoint with Real-time Support
-// =============================================
-app.get('/api/users/kyc/status', protect, async (req, res) => {
-  try {
-    const kycRecord = await KYC.findOne({ user: req.user.id }).lean();
-
-    if (!kycRecord) {
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          status: {
-            identity: 'not-submitted',
-            address: 'not-submitted',
-            facial: 'not-submitted',
-            overall: 'not-started'
-          },
-          isSubmitted: false,
-          canSubmit: false,
-          lastUpdated: new Date().toISOString()
-        }
-      });
-    }
-
-    const canSubmit = 
-      kycRecord.identity.status === 'pending' &&
-      kycRecord.address.status === 'pending' &&
-      kycRecord.facial.status === 'pending' &&
-      kycRecord.overallStatus === 'in-progress';
-
-    const responseData = {
-      status: 'success',
-      data: {
-        status: {
-          identity: kycRecord.identity.status || 'not-submitted',
-          address: kycRecord.address.status || 'not-submitted',
-          facial: kycRecord.facial.status || 'not-submitted',
-          overall: kycRecord.overallStatus || 'not-started'
-        },
-        isSubmitted: ['pending', 'verified', 'rejected'].includes(kycRecord.overallStatus),
-        canSubmit,
-        submittedAt: kycRecord.submittedAt,
-        lastUpdated: kycRecord.updatedAt || kycRecord.createdAt
-      }
-    };
-
-    // Set cache headers for efficient polling
-    res.set({
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Last-Modified': new Date().toUTCString()
-    });
-
-    res.status(200).json(responseData);
-
-  } catch (err) {
-    console.error('Get KYC status error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch KYC status'
-    });
-  }
-});
 
 // =============================================
 // ENHANCED KYC Submit for Review Endpoint
@@ -28632,80 +28553,6 @@ app.post('/api/users/kyc/submit', protect, async (req, res) => {
   }
 });
 
-// =============================================
-// KYC Data Endpoint - Frontend Integration
-// =============================================
-app.get('/api/users/kyc', protect, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    
-    const kycRecord = await KYC.findOne({ user: userId })
-      .populate('identity.verifiedBy', 'name email')
-      .populate('address.verifiedBy', 'name email')
-      .populate('facial.verifiedBy', 'name email')
-      .lean();
-
-    if (!kycRecord) {
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          kyc: {
-            identity: {
-              documentType: '',
-              documentNumber: '',
-              documentExpiry: '',
-              frontImage: null,
-              backImage: null,
-              status: 'unverified',
-              verifiedAt: null,
-              verifiedBy: null,
-              rejectionReason: ''
-            },
-            address: {
-              documentType: '',
-              documentDate: '',
-              documentImage: null,
-              status: 'unverified',
-              verifiedAt: null,
-              verifiedBy: null,
-              rejectionReason: ''
-            },
-            facial: {
-              verificationVideo: null,
-              verificationPhoto: null,
-              status: 'unverified',
-              verifiedAt: null,
-              verifiedBy: null,
-              rejectionReason: ''
-            },
-            overallStatus: 'unverified',
-            submittedAt: null,
-            reviewedAt: null,
-            adminNotes: ''
-          },
-          isSubmitted: false
-        }
-      });
-    }
-
-    const responseData = {
-      status: 'success',
-      data: {
-        kyc: kycRecord,
-        isSubmitted: kycRecord.overallStatus === 'pending' || kycRecord.overallStatus === 'verified' || kycRecord.overallStatus === 'rejected'
-      }
-    };
-
-    res.status(200).json(responseData);
-
-  } catch (err) {
-    console.error('Get KYC data error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch KYC data'
-    });
-  }
-});
 
 // =============================================
 // GET KYC SUBMISSIONS - Paginated with status filters
