@@ -47180,7 +47180,270 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
 
 
 
+// =============================================
+// ADD THESE ENDPOINTS TO YOUR server.js
+// =============================================
 
+// 1. Send KYC OTP
+app.post('/api/users/kyc/send-otp', protect, async (req, res) => {
+    try {
+        const { email } = req.body;
+        const userId = req.user._id;
+        
+        if (!email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email is required'
+            });
+        }
+        
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+        
+        // Check for recent OTP
+        const recentOtp = await OTP.findOne({
+            email: email,
+            type: 'kyc_verification',
+            used: false,
+            createdAt: { $gte: new Date(Date.now() - 60 * 1000) }
+        });
+        
+        if (recentOtp) {
+            return res.status(429).json({
+                status: 'fail',
+                message: 'Please wait 60 seconds before requesting a new OTP'
+            });
+        }
+        
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        
+        // Delete existing OTPs
+        await OTP.deleteMany({ email: email, type: 'kyc_verification', used: false });
+        
+        // Create new OTP
+        await OTP.create({
+            email: email,
+            otp: otp,
+            type: 'kyc_verification',
+            expiresAt: expiresAt,
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown'
+        });
+        
+        // Send email
+        await sendProfessionalEmail({
+            email: email,
+            template: 'otp',
+            data: {
+                name: user.firstName || 'User',
+                otp: otp,
+                action: 'KYC verification'
+            }
+        });
+        
+        res.status(200).json({
+            status: 'success',
+            message: 'OTP sent successfully'
+        });
+        
+    } catch (err) {
+        console.error('Send KYC OTP error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to send OTP'
+        });
+    }
+});
+
+// 2. Verify KYC OTP
+app.post('/api/users/kyc/verify', protect, async (req, res) => {
+    try {
+        const { otp, email } = req.body;
+        const userId = req.user._id;
+        
+        if (!otp || !email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'OTP and email are required'
+            });
+        }
+        
+        // Find the OTP record
+        const otpRecord = await OTP.findOne({
+            email: email,
+            otp: otp,
+            type: 'kyc_verification',
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+        
+        if (!otpRecord) {
+            // Check if expired
+            const expiredOtp = await OTP.findOne({
+                email: email,
+                otp: otp,
+                type: 'kyc_verification',
+                used: false,
+                expiresAt: { $lte: new Date() }
+            });
+            
+            if (expiredOtp) {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'OTP has expired. Please request a new one.'
+                });
+            }
+            
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid OTP. Please try again.'
+            });
+        }
+        
+        // Mark OTP as used
+        otpRecord.used = true;
+        await otpRecord.save();
+        
+        // Get KYC record
+        let kycRecord = await KYC.findOne({ user: userId });
+        
+        if (!kycRecord) {
+            kycRecord = new KYC({ user: userId });
+        }
+        
+        // If user has submitted all documents but KYC was rejected, allow resubmission
+        if (kycRecord.overallStatus === 'rejected' || kycRecord.overallStatus === 'not-started' || kycRecord.overallStatus === 'in-progress') {
+            // Check if user has uploaded all required documents
+            const hasIdentity = kycRecord.identity && kycRecord.identity.status === 'pending';
+            const hasAddress = kycRecord.address && kycRecord.address.status === 'pending';
+            const hasFacial = kycRecord.facial && kycRecord.facial.status === 'pending';
+            
+            // If all sections are pending, submit for review
+            if (hasIdentity && hasAddress && hasFacial) {
+                kycRecord.overallStatus = 'pending';
+                kycRecord.submittedAt = new Date();
+                await kycRecord.save();
+                
+                // Update user's KYC status
+                await User.findByIdAndUpdate(userId, {
+                    'kycStatus.overall': 'pending',
+                    kycUpdatedAt: new Date()
+                });
+                
+                // Notify admins
+                await sendAdminKYCNotification(userId, kycRecord);
+                
+                return res.status(200).json({
+                    status: 'success',
+                    message: 'KYC application submitted for review successfully!'
+                });
+            } else {
+                // User hasn't completed all sections
+                const missingSections = [];
+                if (!hasIdentity) missingSections.push('Identity Verification');
+                if (!hasAddress) missingSections.push('Address Verification');
+                if (!hasFacial) missingSections.push('Facial Verification');
+                
+                return res.status(400).json({
+                    status: 'fail',
+                    message: `Please complete all KYC sections before submitting: ${missingSections.join(', ')}`
+                });
+            }
+        }
+        
+        res.status(200).json({
+            status: 'success',
+            message: 'OTP verified successfully!'
+        });
+        
+    } catch (err) {
+        console.error('Verify KYC OTP error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to verify OTP'
+        });
+    }
+});
+
+// Helper function for admin notification
+async function sendAdminKYCNotification(userId, kycRecord) {
+    try {
+        const user = await User.findById(userId).select('firstName lastName email');
+        if (!user) return;
+        
+        const brandHeader = `
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+        `;
+        
+        const brandFooter = `
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+            </div>
+        `;
+        
+        await supportTransporter.sendMail({
+            from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+            to: 'thieretw@gmail.com',
+            subject: `🆕 KYC Application Submitted: ${user.firstName} ${user.lastName}`,
+            html: `
+                <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                    ${brandHeader}
+                    <div style="padding: 30px; background: #FFFFFF;">
+                        <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                            <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">KYC Application Submitted!</h2>
+                            <p style="color: #92400E; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} has submitted their KYC application</p>
+                        </div>
+                        
+                        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <tr style="border-bottom: 1px solid #E2E8F0;">
+                                    <td style="padding: 8px 0;"><strong>User:</strong></td>
+                                    <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</td>
+                                </tr>
+                                <tr style="border-top: 1px solid #E2E8F0;">
+                                    <td style="padding: 8px 0;"><strong>Identity Document:</strong></td>
+                                    <td style="padding: 8px 0; text-align: right;">${kycRecord.identity?.documentType || 'Not provided'}</td>
+                                </tr>
+                                <tr style="border-top: 1px solid #E2E8F0;">
+                                    <td style="padding: 8px 0;"><strong>Address Document:</strong></td>
+                                    <td style="padding: 8px 0; text-align: right;">${kycRecord.address?.documentType || 'Not provided'}</td>
+                                </tr>
+                                <tr style="border-top: 1px solid #E2E8F0;">
+                                    <td style="padding: 8px 0;"><strong>Facial Verification:</strong></td>
+                                    <td style="padding: 8px 0; text-align: right;">${kycRecord.facial?.status === 'pending' ? '✅ Submitted' : 'Not submitted'}</td>
+                                </tr>
+                                <tr style="border-top: 1px solid #E2E8F0;">
+                                    <td style="padding: 8px 0;"><strong>Submitted At:</strong></td>
+                                    <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="https://www.bithashcapital.live/admin/kyc/${kycRecord._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Review KYC Application</a>
+                        </div>
+                    </div>
+                    ${brandFooter}
+                </div>
+            `
+        });
+        
+    } catch (err) {
+        console.error('Failed to send admin KYC notification:', err);
+    }
+}
 
 
 
