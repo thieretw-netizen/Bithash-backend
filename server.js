@@ -44477,18 +44477,34 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
-// =============================================
-// LANGUAGE AND TIMEZONE SETTINGS ENDPOINTS
-// =============================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
-// 1. GET /api/settings/languages - Get all languages with flags
+// 1. GET /api/settings/languages - Get all languages
 // =============================================
 app.get('/api/settings/languages', async (req, res) => {
   try {
-    // Comprehensive list of 100+ world languages with flag emojis
+    // Comprehensive list of world languages with representative country flags.
+    // IMPORTANT:
+    // The flag represents a primary/common geographic association with the
+    // language. It does not mean the language belongs exclusively to that country.
     const languages = [
-      // Major world languages
       { code: 'ab', name: 'Abkhazian', nativeName: 'аҧсуа бызшәа', flag: '🇬🇪' },
       { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', flag: '🇿🇦' },
       { code: 'ak', name: 'Akan', nativeName: 'Akan', flag: '🇬🇭' },
@@ -44519,7 +44535,12 @@ app.get('/api/settings/languages', async (req, res) => {
       { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: '🇳🇱' },
       { code: 'dz', name: 'Dzongkha', nativeName: 'རྫོང་ཁ', flag: '🇧🇹' },
       { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸' },
-      { code: 'eo', name: 'Esperanto', nativeName: 'Esperanto', flag: '🏳️' },
+
+      // Esperanto has no official country.
+      // Use a real country flag rather than 🏳️ because 🏳️ is not a country flag
+      // and can render inconsistently.
+      { code: 'eo', name: 'Esperanto', nativeName: 'Esperanto', flag: '🇪🇺' },
+
       { code: 'et', name: 'Estonian', nativeName: 'Eesti', flag: '🇪🇪' },
       { code: 'ee', name: 'Ewe', nativeName: 'Eʋegbe', flag: '🇬🇭' },
       { code: 'fo', name: 'Faroese', nativeName: 'Føroyskt', flag: '🇫🇴' },
@@ -44530,14 +44551,18 @@ app.get('/api/settings/languages', async (req, res) => {
       { code: 'ka', name: 'Georgian', nativeName: 'ქართული', flag: '🇬🇪' },
       { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪' },
       { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', flag: '🇬🇷' },
-      { code: 'gn', name: 'Guarani', nativeName: 'Avañe\'ẽ', flag: '🇵🇾' },
+      { code: 'gn', name: 'Guarani', nativeName: "Avañe'ẽ", flag: '🇵🇾' },
       { code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી', flag: '🇮🇳' },
       { code: 'ht', name: 'Haitian Creole', nativeName: 'Kreyòl ayisyen', flag: '🇭🇹' },
       { code: 'ha', name: 'Hausa', nativeName: 'Hausa', flag: '🇳🇬' },
       { code: 'haw', name: 'Hawaiian', nativeName: 'ʻŌlelo Hawaiʻi', flag: '🇺🇸' },
       { code: 'he', name: 'Hebrew', nativeName: 'עברית', flag: '🇮🇱' },
       { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flag: '🇮🇳' },
-      { code: 'hmn', name: 'Hmong', nativeName: 'Hmoob', flag: '🇨🇳' },
+
+      // Hmong is widely spoken across several countries.
+      // Vietnam is used as the representative flag.
+      { code: 'hmn', name: 'Hmong', nativeName: 'Hmoob', flag: '🇻🇳' },
+
       { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', flag: '🇭🇺' },
       { code: 'is', name: 'Icelandic', nativeName: 'Íslenska', flag: '🇮🇸' },
       { code: 'ig', name: 'Igbo', nativeName: 'Igbo', flag: '🇳🇬' },
@@ -44551,7 +44576,11 @@ app.get('/api/settings/languages', async (req, res) => {
       { code: 'km', name: 'Khmer', nativeName: 'ភាសាខ្មែរ', flag: '🇰🇭' },
       { code: 'rw', name: 'Kinyarwanda', nativeName: 'Kinyarwanda', flag: '🇷🇼' },
       { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷' },
-      { code: 'ku', name: 'Kurdish', nativeName: 'Kurdî', flag: '🇹🇷' },
+
+      // Kurdish is spoken across several countries.
+      // Iraq is used as the representative flag.
+      { code: 'ku', name: 'Kurdish', nativeName: 'Kurdî', flag: '🇮🇶' },
+
       { code: 'ky', name: 'Kyrgyz', nativeName: 'Кыргызча', flag: '🇰🇬' },
       { code: 'lo', name: 'Lao', nativeName: 'ພາສາລາວ', flag: '🇱🇦' },
       { code: 'la', name: 'Latin', nativeName: 'Lingua Latina', flag: '🇻🇦' },
@@ -44608,7 +44637,7 @@ app.get('/api/settings/languages', async (req, res) => {
       { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', flag: '🇮🇳' },
       { code: 'th', name: 'Thai', nativeName: 'ภาษาไทย', flag: '🇹🇭' },
       { code: 'ti', name: 'Tigrinya', nativeName: 'ትግርኛ', flag: '🇪🇷' },
-      { code: 'ts', name: 'Tsonga', nativeName: 'Xitsonga', flag: '🇿🇦' },
+      { code: 'ts', name: 'Tsonga', nativeName: 'itsonga', flag: '🇿🇦' },
       { code: 'tn', name: 'Tswana', nativeName: 'Setswana', flag: '🇧🇼' },
       { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', flag: '🇹🇷' },
       { code: 'tk', name: 'Turkmen', nativeName: 'Türkmençe', flag: '🇹🇲' },
@@ -44627,8 +44656,44 @@ app.get('/api/settings/languages', async (req, res) => {
       { code: 'zu', name: 'Zulu', nativeName: 'isiZulu', flag: '🇿🇦' }
     ];
 
-    // Sort by name (English name) for better UX
+    // ---------------------------------------------------------
+    // Defensive validation:
+    // Guarantee that every language returned to the frontend
+    // has a non-empty flag string.
+    // ---------------------------------------------------------
+    const fallbackFlag = '🌐';
+
+    languages.forEach(language => {
+      if (
+        !language.flag ||
+        typeof language.flag !== 'string' ||
+        language.flag.trim() === ''
+      ) {
+        language.flag = fallbackFlag;
+      }
+    });
+
+    // Sort by English language name for consistent frontend UX.
     languages.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Final integrity check.
+    // This should never fail because every language above already
+    // has a valid representative flag.
+    const invalidLanguage = languages.find(
+      language =>
+        !language.code ||
+        !language.name ||
+        !language.nativeName ||
+        !language.flag ||
+        typeof language.flag !== 'string' ||
+        !language.flag.trim()
+    );
+
+    if (invalidLanguage) {
+      throw new Error(
+        `Invalid language configuration for code: ${invalidLanguage.code || 'unknown'}`
+      );
+    }
 
     res.status(200).json({
       status: 'success',
@@ -44638,13 +44703,22 @@ app.get('/api/settings/languages', async (req, res) => {
 
   } catch (err) {
     console.error('Error fetching languages:', err);
+
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch languages',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      error: process.env.NODE_ENV === 'development'
+        ? err.message
+        : undefined
     });
   }
 });
+
+
+
+
+
+
 
 // =============================================
 // 2. GET /api/settings/timezones - Get all timezones
