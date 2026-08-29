@@ -1617,6 +1617,129 @@ const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
 
 
 
+const PromoSchema = new mongoose.Schema({
+  code: {
+    type: String,
+    required: [true, 'Promo code is required'],
+    unique: true,
+    uppercase: true,
+    trim: true,
+    index: true
+  },
+  description: {
+    type: String,
+    required: [true, 'Description is required']
+  },
+  rewardType: {
+    type: String,
+    enum: ['bonus', 'crypto', 'discount'],
+    required: true
+  },
+  rewardValue: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  rewardAsset: {
+    type: String,
+    default: 'usd',
+    lowercase: true
+  },
+  maxUses: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+  usedCount: {
+    type: Number,
+    default: 0
+  },
+  expiresAt: {
+    type: Date,
+    required: true,
+    index: { expireAfterSeconds: 0 }
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { timestamps: true });
+
+// Indexes
+PromoSchema.index({ code: 1, isActive: 1 });
+PromoSchema.index({ expiresAt: 1 });
+
+// Pre-save: Ensure uppercase code
+PromoSchema.pre('save', function(next) {
+  this.code = this.code.toUpperCase();
+  next();
+});
+
+// Method to check if valid
+PromoSchema.methods.isValid = function() {
+  return this.isActive && 
+         this.usedCount < this.maxUses && 
+         this.expiresAt > new Date();
+};
+
+const Promo = mongoose.model('Promo', PromoSchema);
+
+const RedeemedPromoSchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  promoId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Promo',
+    required: true,
+    index: true
+  },
+  code: {
+    type: String,
+    required: true,
+    uppercase: true
+  },
+  rewardType: {
+    type: String,
+    enum: ['bonus', 'crypto', 'discount'],
+    required: true
+  },
+  rewardValue: {
+    type: Number,
+    required: true
+  },
+  rewardAsset: {
+    type: String,
+    default: 'usd'
+  },
+  transactionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Transaction'
+  },
+  redeemedAt: {
+    type: Date,
+    default: Date.now
+  },
+  ipAddress: String,
+  userAgent: String
+}, { timestamps: true });
+
+// Ensure user can redeem same promo only once
+RedeemedPromoSchema.index({ userId: 1, promoId: 1 }, { unique: true });
+
+const RedeemedPromo = mongoose.model('RedeemedPromo', RedeemedPromoSchema);
 
 
 
@@ -46600,7 +46723,454 @@ app.get('/api/users/kyc', protect, async (req, res) => {
 });
 
 
+// =============================================
+// PROMO CODE REDEMPTION ENDPOINT
+// POST /api/promos/redeem
+// =============================================
+app.post('/api/promos/redeem', protect, async (req, res) => {
+  try {
+    const { code } = req.body;
+    const userId = req.user._id;
+    
+    // Validate input
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Promo code is required',
+        success: false
+      });
+    }
 
+    const promoCode = code.trim().toUpperCase();
+    
+    // =============================================
+    // 1. FIND VALID PROMO CODE
+    // =============================================
+    const promo = await Promo.findOne({
+      code: promoCode,
+      isActive: true,
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!promo) {
+      await SystemLog.create({
+        action: 'promo_code_invalid',
+        entity: 'User',
+        entityId: userId,
+        performedBy: userId,
+        performedByModel: 'User',
+        status: 'failed',
+        metadata: {
+          code: promoCode,
+          reason: 'Invalid or expired promo code'
+        }
+      });
+
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Invalid or expired promo code.',
+        success: false
+      });
+    }
+
+    // =============================================
+    // 2. CHECK USAGE LIMIT
+    // =============================================
+    if (promo.usedCount >= promo.maxUses) {
+      await SystemLog.create({
+        action: 'promo_code_exhausted',
+        entity: 'User',
+        entityId: userId,
+        performedBy: userId,
+        performedByModel: 'User',
+        status: 'failed',
+        metadata: {
+          code: promoCode,
+          usedCount: promo.usedCount,
+          maxUses: promo.maxUses
+        }
+      });
+
+      return res.status(409).json({
+        status: 'fail',
+        message: 'This promo code has reached its usage limit.',
+        success: false
+      });
+    }
+
+    // =============================================
+    // 3. CHECK IF USER ALREADY REDEEMED THIS PROMO
+    // =============================================
+    const alreadyRedeemed = await RedeemedPromo.findOne({
+      userId: userId,
+      promoId: promo._id
+    });
+
+    if (alreadyRedeemed) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'You have already redeemed this promo code.',
+        success: false
+      });
+    }
+
+    // =============================================
+    // 4. GET USER AND PREPARE REWARD
+    // =============================================
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found',
+        success: false
+      });
+    }
+
+    // Initialize balances if needed
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+
+    let rewardDescription = '';
+    let rewardValue = promo.rewardValue;
+    let rewardAsset = promo.rewardAsset || 'usd';
+    let transactionType = 'referral';
+    let successMessage = 'Promo code redeemed successfully!';
+
+    // =============================================
+    // 5. APPLY REWARD BASED ON TYPE
+    // =============================================
+    const assetLower = rewardAsset.toLowerCase();
+    const assetUpper = assetLower.toUpperCase();
+
+    switch (promo.rewardType) {
+      case 'bonus':
+        // Percentage bonus - add to main USD balance
+        // rewardValue is percentage (e.g., 5 = 5%)
+        const currentMainUSD = user.balances.main.get('usd') || 0;
+        const bonusAmount = (currentMainUSD * rewardValue) / 100;
+        user.balances.main.set('usd', currentMainUSD + bonusAmount);
+        
+        rewardDescription = `${rewardValue}% bonus on current main balance ($${bonusAmount.toFixed(2)})`;
+        successMessage = `🎉 ${rewardValue}% bonus credited! $${bonusAmount.toFixed(2)} added to your main wallet.`;
+        break;
+
+      case 'crypto':
+        // Crypto reward - add specified crypto amount
+        // Get current price for the asset
+        let price = await getCryptoPrice(assetUpper);
+        if (!price || price <= 0) {
+          // Fallback: use exchange rate if available
+          const exchangeRate = await getExchangeRate(assetUpper);
+          price = exchangeRate || 1;
+        }
+        
+        const usdValue = rewardValue * (price || 1);
+        const currentCryptoBalance = user.balances.main.get(assetLower) || 0;
+        user.balances.main.set(assetLower, currentCryptoBalance + rewardValue);
+        
+        // Update USD cache
+        const currentMainUSDBefore = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentMainUSDBefore + usdValue);
+        
+        rewardDescription = `${rewardValue} ${assetUpper} (≈ $${usdValue.toFixed(2)})`;
+        successMessage = `💰 ${rewardValue} ${assetUpper} credited to your main wallet!`;
+        break;
+
+      case 'discount':
+        // Discount - add to main USD balance directly (fixed amount)
+        const currentMainUSDDiscount = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentMainUSDDiscount + rewardValue);
+        
+        rewardDescription = `$${rewardValue.toFixed(2)} USD discount credit`;
+        successMessage = `💳 $${rewardValue.toFixed(2)} discount credited to your main wallet!`;
+        break;
+
+      default:
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid reward type',
+          success: false
+        });
+    }
+
+    // Save user with updated balances
+    await user.save();
+
+    // =============================================
+    // 6. CREATE TRANSACTION RECORD
+    // =============================================
+    const transactionReference = `PROMO-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'referral',
+      amount: promo.rewardType === 'crypto' ? (rewardValue * (await getCryptoPrice(assetUpper) || 1)) : rewardValue,
+      asset: promo.rewardType === 'crypto' ? assetLower : 'usd',
+      assetAmount: promo.rewardType === 'crypto' ? rewardValue : 0,
+      currency: 'USD',
+      status: 'completed',
+      method: 'PROMO',
+      reference: transactionReference,
+      details: {
+        promoCode: promo.code,
+        promoId: promo._id,
+        rewardType: promo.rewardType,
+        rewardValue: rewardValue,
+        rewardAsset: assetLower,
+        description: rewardDescription,
+        promoDescription: promo.description
+      },
+      fee: 0,
+      netAmount: promo.rewardType === 'crypto' ? (rewardValue * (await getCryptoPrice(assetUpper) || 1)) : rewardValue,
+      exchangeRateAtTime: await getCryptoPrice(assetUpper) || 1
+    });
+
+    // =============================================
+    // 7. RECORD PLATFORM REVENUE (PROMO COST)
+    // =============================================
+    await PlatformRevenue.create({
+      source: 'referral',
+      amount: promo.rewardType === 'crypto' ? (rewardValue * (await getCryptoPrice(assetUpper) || 1)) : rewardValue,
+      currency: 'USD',
+      transactionId: transaction._id,
+      userId: userId,
+      description: `Promo code redemption: ${promo.code} - ${rewardDescription}`,
+      metadata: {
+        promoCode: promo.code,
+        promoId: promo._id,
+        rewardType: promo.rewardType,
+        rewardValue: rewardValue,
+        rewardAsset: assetLower,
+        usedCount: promo.usedCount + 1
+      }
+    });
+
+    // =============================================
+    // 8. MARK PROMO AS USED
+    // =============================================
+    promo.usedCount += 1;
+    await promo.save();
+
+    // =============================================
+    // 9. RECORD REDEMPTION
+    // =============================================
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    await RedeemedPromo.create({
+      userId: userId,
+      promoId: promo._id,
+      code: promo.code,
+      rewardType: promo.rewardType,
+      rewardValue: rewardValue,
+      rewardAsset: assetLower,
+      transactionId: transaction._id,
+      redeemedAt: new Date(),
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.userAgent
+    });
+
+    // =============================================
+    // 10. LOG ACTIVITY
+    // =============================================
+    await SystemLog.create({
+      action: 'promo_code_redeemed',
+      entity: 'Transaction',
+      entityId: transaction._id,
+      performedBy: userId,
+      performedByModel: 'User',
+      performedByEmail: user.email,
+      performedByName: `${user.firstName} ${user.lastName}`,
+      status: 'success',
+      ip: deviceInfo.ip,
+      userAgent: deviceInfo.userAgent,
+      location: deviceInfo.location,
+      metadata: {
+        promoCode: promo.code,
+        promoId: promo._id,
+        rewardType: promo.rewardType,
+        rewardValue: rewardValue,
+        rewardAsset: assetLower,
+        rewardDescription: rewardDescription,
+        transactionId: transaction._id,
+        usedCount: promo.usedCount
+      }
+    });
+
+    // =============================================
+    // 11. EMIT REAL-TIME UPDATE
+    // =============================================
+    const io = req.app.get('io');
+    if (io) {
+      // Get updated balances for the user
+      const { mainUSD, activeUSD, maturedUSD, mainBreakdown, maturedBreakdown } = 
+        await calculateRealWalletBalances(user);
+      
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: mainUSD,
+        active: activeUSD,
+        matured: maturedUSD,
+        breakdown: {
+          main: mainBreakdown,
+          matured: maturedBreakdown
+        },
+        timestamp: Date.now(),
+        source: 'promo_redemption'
+      });
+
+      // Emit promo redemption event
+      io.to(`user_${userId}`).emit('promo_redeemed', {
+        code: promo.code,
+        rewardType: promo.rewardType,
+        rewardValue: rewardValue,
+        rewardAsset: assetLower,
+        description: rewardDescription,
+        transactionId: transaction._id,
+        timestamp: Date.now()
+      });
+    }
+
+    // =============================================
+    // 12. SEND EMAIL NOTIFICATION
+    // =============================================
+    const rewardDisplay = promo.rewardType === 'crypto' 
+      ? `${rewardValue} ${assetUpper} (≈ $${(rewardValue * (await getCryptoPrice(assetUpper) || 1)).toFixed(2)})`
+      : promo.rewardType === 'bonus'
+        ? `${rewardValue}% bonus`
+        : `$${rewardValue.toFixed(2)}`;
+
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+    `;
+
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+      </div>
+    `;
+
+    const emailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${brandHeader}
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">PROMO CODE REDEEMED!</h2>
+            <p style="color: #065F46; font-size: 13px; margin: 0;">${promo.description}</p>
+          </div>
+          
+          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
+          <p style="color: #333333; line-height: 1.6;">You have successfully redeemed the promo code <strong>${promo.code}</strong>!</p>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Reward Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right; text-transform: capitalize;">${promo.rewardType}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Reward Value:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${rewardDisplay}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Promo Code:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; color: #F7A600;">${promo.code}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-size: 11px;">${transactionReference}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Reward Details</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">${rewardDescription}. The reward has been credited to your Main Wallet.</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Your Balance</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
+        </div>
+        ${brandFooter}
+      </div>
+    `;
+
+    const mailTransporter = infoTransporter;
+    await mailTransporter.sendMail({
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: user.email,
+      subject: `🎉 Promo Code Redeemed - ₿itHash Capital`,
+      html: emailHtml
+    });
+
+    // =============================================
+    // 13. RETURN SUCCESS RESPONSE
+    // =============================================
+    const response = {
+      status: 'success',
+      success: true,
+      message: successMessage,
+      reward: {
+        type: promo.rewardType,
+        value: promo.rewardType === 'bonus' ? `${rewardValue}%` : 
+               promo.rewardType === 'crypto' ? `${rewardValue} ${assetUpper}` :
+               `$${rewardValue.toFixed(2)}`,
+        asset: promo.rewardType === 'crypto' ? assetLower : 'usd'
+      },
+      data: {
+        transaction: {
+          id: transaction._id,
+          reference: transactionReference,
+          amount: transaction.amount,
+          asset: transaction.asset,
+          status: transaction.status
+        },
+        rewardDescription: rewardDescription,
+        promoCode: promo.code
+      }
+    };
+
+    res.status(200).json(response);
+
+  } catch (err) {
+    console.error('Promo code redemption error:', err);
+    
+    // Log error
+    await SystemLog.create({
+      action: 'promo_code_error',
+      entity: 'User',
+      entityId: req.user?._id || null,
+      performedBy: req.user?._id || null,
+      performedByModel: 'User',
+      status: 'failed',
+      errorMessage: err.message,
+      metadata: {
+        code: req.body?.code || 'unknown',
+        error: err.message
+      }
+    });
+
+    res.status(500).json({
+      status: 'error',
+      success: false,
+      message: err.message || 'Failed to redeem promo code. Please try again.'
+    });
+  }
+});
 
 
 
