@@ -44495,522 +44495,518 @@ console.log('🗑️ Redis will be cleared on startup');
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// 1. GET /api/settings/languages - Get all languages
+// LANGUAGE DATA - 100+ LANGUAGES WITH FLAGS
+// =============================================
+const LANGUAGES = [
+  // Official UN Languages
+  { code: 'en', name: 'English', nativeName: 'English', flagCode: 'us', isActive: true, sortOrder: 1 },
+  { code: 'es', name: 'Spanish', nativeName: 'Español', flagCode: 'es', isActive: true, sortOrder: 2 },
+  { code: 'fr', name: 'French', nativeName: 'Français', flagCode: 'fr', isActive: true, sortOrder: 3 },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية', flagCode: 'sa', isActive: true, sortOrder: 4 },
+  { code: 'ru', name: 'Russian', nativeName: 'Русский', flagCode: 'ru', isActive: true, sortOrder: 5 },
+  { code: 'zh', name: 'Chinese', nativeName: '中文', flagCode: 'cn', isActive: true, sortOrder: 6 },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flagCode: 'pt', isActive: true, sortOrder: 7 },
+  { code: 'de', name: 'German', nativeName: 'Deutsch', flagCode: 'de', isActive: true, sortOrder: 8 },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語', flagCode: 'jp', isActive: true, sortOrder: 9 },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano', flagCode: 'it', isActive: true, sortOrder: 10 },
+  { code: 'ko', name: 'Korean', nativeName: '한국어', flagCode: 'kr', isActive: true, sortOrder: 11 },
+  { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flagCode: 'nl', isActive: true, sortOrder: 12 },
+  { code: 'pl', name: 'Polish', nativeName: 'Polski', flagCode: 'pl', isActive: true, sortOrder: 13 },
+  { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', flagCode: 'tr', isActive: true, sortOrder: 14 },
+  { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', flagCode: 'vn', isActive: true, sortOrder: 15 },
+  { code: 'th', name: 'Thai', nativeName: 'ไทย', flagCode: 'th', isActive: true, sortOrder: 16 },
+  { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', flagCode: 'id', isActive: true, sortOrder: 17 },
+  { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', flagCode: 'my', isActive: true, sortOrder: 18 },
+  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flagCode: 'in', isActive: true, sortOrder: 19 },
+  { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', flagCode: 'bd', isActive: true, sortOrder: 20 },
+  { code: 'pa', name: 'Punjabi', nativeName: 'ਪੰਜਾਬੀ', flagCode: 'in', isActive: true, sortOrder: 21 },
+  { code: 'ur', name: 'Urdu', nativeName: 'اردو', flagCode: 'pk', isActive: true, sortOrder: 22 },
+  { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்', flagCode: 'in', isActive: true, sortOrder: 23 },
+  { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', flagCode: 'in', isActive: true, sortOrder: 24 },
+  { code: 'mr', name: 'Marathi', nativeName: 'मराठी', flagCode: 'in', isActive: true, sortOrder: 25 },
+  { code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી', flagCode: 'in', isActive: true, sortOrder: 26 },
+  { code: 'kn', name: 'Kannada', nativeName: 'ಕನ್ನಡ', flagCode: 'in', isActive: true, sortOrder: 27 },
+  { code: 'ml', name: 'Malayalam', nativeName: 'മലയാളം', flagCode: 'in', isActive: true, sortOrder: 28 },
+  { code: 'or', name: 'Odia', nativeName: 'ଓଡ଼ିଆ', flagCode: 'in', isActive: true, sortOrder: 29 },
+  { code: 'ne', name: 'Nepali', nativeName: 'नेपाली', flagCode: 'np', isActive: true, sortOrder: 30 },
+  { code: 'si', name: 'Sinhala', nativeName: 'සිංහල', flagCode: 'lk', isActive: true, sortOrder: 31 },
+  { code: 'my', name: 'Burmese', nativeName: 'မြန်မာစာ', flagCode: 'mm', isActive: true, sortOrder: 32 },
+  { code: 'km', name: 'Khmer', nativeName: 'ភាសាខ្មែរ', flagCode: 'kh', isActive: true, sortOrder: 33 },
+  { code: 'lo', name: 'Lao', nativeName: 'ພາສາລາວ', flagCode: 'la', isActive: true, sortOrder: 34 },
+  { code: 'tl', name: 'Tagalog', nativeName: 'Tagalog', flagCode: 'ph', isActive: true, sortOrder: 35 },
+  { code: 'ceb', name: 'Cebuano', nativeName: 'Cebuano', flagCode: 'ph', isActive: true, sortOrder: 36 },
+  { code: 'jv', name: 'Javanese', nativeName: 'Basa Jawa', flagCode: 'id', isActive: true, sortOrder: 37 },
+  { code: 'su', name: 'Sundanese', nativeName: 'Basa Sunda', flagCode: 'id', isActive: true, sortOrder: 38 },
+  { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', flagCode: 'tz', isActive: true, sortOrder: 39 },
+  { code: 'ha', name: 'Hausa', nativeName: 'Hausa', flagCode: 'ng', isActive: true, sortOrder: 40 },
+  { code: 'yo', name: 'Yoruba', nativeName: 'Yorùbá', flagCode: 'ng', isActive: true, sortOrder: 41 },
+  { code: 'ig', name: 'Igbo', nativeName: 'Igbo', flagCode: 'ng', isActive: true, sortOrder: 42 },
+  { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', flagCode: 'et', isActive: true, sortOrder: 43 },
+  { code: 'so', name: 'Somali', nativeName: 'Soomaali', flagCode: 'so', isActive: true, sortOrder: 44 },
+  { code: 'rw', name: 'Kinyarwanda', nativeName: 'Kinyarwanda', flagCode: 'rw', isActive: true, sortOrder: 45 },
+  { code: 'mg', name: 'Malagasy', nativeName: 'Malagasy', flagCode: 'mg', isActive: true, sortOrder: 46 },
+  { code: 'zu', name: 'Zulu', nativeName: 'isiZulu', flagCode: 'za', isActive: true, sortOrder: 47 },
+  { code: 'xh', name: 'Xhosa', nativeName: 'isiXhosa', flagCode: 'za', isActive: true, sortOrder: 48 },
+  { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', flagCode: 'za', isActive: true, sortOrder: 49 },
+  { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', flagCode: 'gr', isActive: true, sortOrder: 50 },
+  { code: 'bg', name: 'Bulgarian', nativeName: 'Български', flagCode: 'bg', isActive: true, sortOrder: 51 },
+  { code: 'cs', name: 'Czech', nativeName: 'Čeština', flagCode: 'cz', isActive: true, sortOrder: 52 },
+  { code: 'da', name: 'Danish', nativeName: 'Dansk', flagCode: 'dk', isActive: true, sortOrder: 53 },
+  { code: 'et', name: 'Estonian', nativeName: 'Eesti', flagCode: 'ee', isActive: true, sortOrder: 54 },
+  { code: 'fi', name: 'Finnish', nativeName: 'Suomi', flagCode: 'fi', isActive: true, sortOrder: 55 },
+  { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', flagCode: 'hu', isActive: true, sortOrder: 56 },
+  { code: 'is', name: 'Icelandic', nativeName: 'Íslenska', flagCode: 'is', isActive: true, sortOrder: 57 },
+  { code: 'lv', name: 'Latvian', nativeName: 'Latviešu', flagCode: 'lv', isActive: true, sortOrder: 58 },
+  { code: 'lt', name: 'Lithuanian', nativeName: 'Lietuvių', flagCode: 'lt', isActive: true, sortOrder: 59 },
+  { code: 'mk', name: 'Macedonian', nativeName: 'Македонски', flagCode: 'mk', isActive: true, sortOrder: 60 },
+  { code: 'mt', name: 'Maltese', nativeName: 'Malti', flagCode: 'mt', isActive: true, sortOrder: 61 },
+  { code: 'ro', name: 'Romanian', nativeName: 'Română', flagCode: 'ro', isActive: true, sortOrder: 62 },
+  { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', flagCode: 'sk', isActive: true, sortOrder: 63 },
+  { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina', flagCode: 'si', isActive: true, sortOrder: 64 },
+  { code: 'sv', name: 'Swedish', nativeName: 'Svenska', flagCode: 'se', isActive: true, sortOrder: 65 },
+  { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', flagCode: 'ua', isActive: true, sortOrder: 66 },
+  { code: 'be', name: 'Belarusian', nativeName: 'Беларуская', flagCode: 'by', isActive: true, sortOrder: 67 },
+  { code: 'sq', name: 'Albanian', nativeName: 'Shqip', flagCode: 'al', isActive: true, sortOrder: 68 },
+  { code: 'bs', name: 'Bosnian', nativeName: 'Bosanski', flagCode: 'ba', isActive: true, sortOrder: 69 },
+  { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', flagCode: 'hr', isActive: true, sortOrder: 70 },
+  { code: 'sr', name: 'Serbian', nativeName: 'Српски', flagCode: 'rs', isActive: true, sortOrder: 71 },
+  { code: 'ca', name: 'Catalan', nativeName: 'Català', flagCode: 'es', isActive: true, sortOrder: 72 },
+  { code: 'gl', name: 'Galician', nativeName: 'Galego', flagCode: 'es', isActive: true, sortOrder: 73 },
+  { code: 'eu', name: 'Basque', nativeName: 'Euskara', flagCode: 'es', isActive: true, sortOrder: 74 },
+  { code: 'cy', name: 'Welsh', nativeName: 'Cymraeg', flagCode: 'gb', isActive: true, sortOrder: 75 },
+  { code: 'gd', name: 'Scottish Gaelic', nativeName: 'Gàidhlig', flagCode: 'gb', isActive: true, sortOrder: 76 },
+  { code: 'ga', name: 'Irish', nativeName: 'Gaeilge', flagCode: 'ie', isActive: true, sortOrder: 77 },
+  { code: 'fy', name: 'Frisian', nativeName: 'Frysk', flagCode: 'nl', isActive: true, sortOrder: 78 },
+  { code: 'lb', name: 'Luxembourgish', nativeName: 'Lëtzebuergesch', flagCode: 'lu', isActive: true, sortOrder: 79 },
+  { code: 'fa', name: 'Persian', nativeName: 'فارسی', flagCode: 'ir', isActive: true, sortOrder: 80 },
+  { code: 'ps', name: 'Pashto', nativeName: 'پښتو', flagCode: 'af', isActive: true, sortOrder: 81 },
+  { code: 'ku', name: 'Kurdish', nativeName: 'Kurdî', flagCode: 'iq', isActive: true, sortOrder: 82 },
+  { code: 'az', name: 'Azerbaijani', nativeName: 'Azərbaycanca', flagCode: 'az', isActive: true, sortOrder: 83 },
+  { code: 'ka', name: 'Georgian', nativeName: 'ქართული', flagCode: 'ge', isActive: true, sortOrder: 84 },
+  { code: 'hy', name: 'Armenian', nativeName: 'Հայերեն', flagCode: 'am', isActive: true, sortOrder: 85 },
+  { code: 'mn', name: 'Mongolian', nativeName: 'Монгол', flagCode: 'mn', isActive: true, sortOrder: 86 },
+  { code: 'kk', name: 'Kazakh', nativeName: 'Қазақша', flagCode: 'kz', isActive: true, sortOrder: 87 },
+  { code: 'uz', name: 'Uzbek', nativeName: 'Oʻzbekcha', flagCode: 'uz', isActive: true, sortOrder: 88 },
+  { code: 'tg', name: 'Tajik', nativeName: 'Тоҷикӣ', flagCode: 'tj', isActive: true, sortOrder: 89 },
+  { code: 'tk', name: 'Turkmen', nativeName: 'Türkmençe', flagCode: 'tm', isActive: true, sortOrder: 90 },
+  { code: 'he', name: 'Hebrew', nativeName: 'עברית', flagCode: 'il', isActive: true, sortOrder: 91 },
+  { code: 'yi', name: 'Yiddish', nativeName: 'ייִדיש', flagCode: 'il', isActive: true, sortOrder: 92 },
+  { code: 'la', name: 'Latin', nativeName: 'Lingua Latina', flagCode: 'va', isActive: true, sortOrder: 93 },
+  { code: 'eo', name: 'Esperanto', nativeName: 'Esperanto', flagCode: 'eu', isActive: true, sortOrder: 94 },
+  { code: 'ht', name: 'Haitian Creole', nativeName: 'Kreyòl Ayisyen', flagCode: 'ht', isActive: true, sortOrder: 95 },
+  { code: 'haw', name: 'Hawaiian', nativeName: 'ʻŌlelo Hawaiʻi', flagCode: 'us', isActive: true, sortOrder: 96 },
+  { code: 'mww', name: 'Hmong Daw', nativeName: 'Hmoob Dawb', flagCode: 'us', isActive: true, sortOrder: 97 },
+  { code: 'ny', name: 'Chichewa', nativeName: 'Chichewa', flagCode: 'mw', isActive: true, sortOrder: 98 },
+  { code: 'st', name: 'Sesotho', nativeName: 'Sesotho', flagCode: 'ls', isActive: true, sortOrder: 99 },
+  { code: 'tn', name: 'Setswana', nativeName: 'Setswana', flagCode: 'bw', isActive: true, sortOrder: 100 }
+];
+
+// =============================================
+// TIMEZONE DATA - ALL MAJOR TIMEZONES
+// =============================================
+const TIMEZONES = [
+  // UTC
+  { id: 'UTC', label: 'Coordinated Universal Time', utcOffset: 'UTC±0:00', isActive: true, sortOrder: 1 },
+  
+  // North America
+  { id: 'America/New_York', label: 'Eastern Time', utcOffset: 'UTC-5:00', isActive: true, sortOrder: 10 },
+  { id: 'America/Chicago', label: 'Central Time', utcOffset: 'UTC-6:00', isActive: true, sortOrder: 11 },
+  { id: 'America/Denver', label: 'Mountain Time', utcOffset: 'UTC-7:00', isActive: true, sortOrder: 12 },
+  { id: 'America/Phoenix', label: 'Mountain Time (No DST)', utcOffset: 'UTC-7:00', isActive: true, sortOrder: 13 },
+  { id: 'America/Los_Angeles', label: 'Pacific Time', utcOffset: 'UTC-8:00', isActive: true, sortOrder: 14 },
+  { id: 'America/Anchorage', label: 'Alaska Time', utcOffset: 'UTC-9:00', isActive: true, sortOrder: 15 },
+  { id: 'America/Adak', label: 'Hawaii-Aleutian Time', utcOffset: 'UTC-10:00', isActive: true, sortOrder: 16 },
+  { id: 'Pacific/Honolulu', label: 'Hawaii Time', utcOffset: 'UTC-10:00', isActive: true, sortOrder: 17 },
+  { id: 'America/Vancouver', label: 'Pacific Time (Canada)', utcOffset: 'UTC-8:00', isActive: true, sortOrder: 18 },
+  { id: 'America/Edmonton', label: 'Mountain Time (Canada)', utcOffset: 'UTC-7:00', isActive: true, sortOrder: 19 },
+  { id: 'America/Winnipeg', label: 'Central Time (Canada)', utcOffset: 'UTC-6:00', isActive: true, sortOrder: 20 },
+  { id: 'America/Toronto', label: 'Eastern Time (Canada)', utcOffset: 'UTC-5:00', isActive: true, sortOrder: 21 },
+  { id: 'America/Halifax', label: 'Atlantic Time (Canada)', utcOffset: 'UTC-4:00', isActive: true, sortOrder: 22 },
+  { id: 'America/St_Johns', label: 'Newfoundland Time', utcOffset: 'UTC-3:30', isActive: true, sortOrder: 23 },
+  { id: 'America/Mexico_City', label: 'Central Time (Mexico)', utcOffset: 'UTC-6:00', isActive: true, sortOrder: 24 },
+  { id: 'America/Tijuana', label: 'Pacific Time (Mexico)', utcOffset: 'UTC-8:00', isActive: true, sortOrder: 25 },
+  
+  // South America
+  { id: 'America/Sao_Paulo', label: 'Brasilia Time', utcOffset: 'UTC-3:00', isActive: true, sortOrder: 30 },
+  { id: 'America/Rio_de_Janeiro', label: 'Brasilia Time', utcOffset: 'UTC-3:00', isActive: true, sortOrder: 31 },
+  { id: 'America/Argentina/Buenos_Aires', label: 'Argentina Time', utcOffset: 'UTC-3:00', isActive: true, sortOrder: 32 },
+  { id: 'America/Santiago', label: 'Chile Time', utcOffset: 'UTC-3:00', isActive: true, sortOrder: 33 },
+  { id: 'America/Bogota', label: 'Colombia Time', utcOffset: 'UTC-5:00', isActive: true, sortOrder: 34 },
+  { id: 'America/Lima', label: 'Peru Time', utcOffset: 'UTC-5:00', isActive: true, sortOrder: 35 },
+  { id: 'America/Caracas', label: 'Venezuela Time', utcOffset: 'UTC-4:00', isActive: true, sortOrder: 36 },
+  { id: 'America/La_Paz', label: 'Bolivia Time', utcOffset: 'UTC-4:00', isActive: true, sortOrder: 37 },
+  { id: 'America/Asuncion', label: 'Paraguay Time', utcOffset: 'UTC-4:00', isActive: true, sortOrder: 38 },
+  { id: 'America/Montevideo', label: 'Uruguay Time', utcOffset: 'UTC-3:00', isActive: true, sortOrder: 39 },
+  
+  // Europe
+  { id: 'Europe/London', label: 'Greenwich Mean Time', utcOffset: 'UTC+0:00', isActive: true, sortOrder: 40 },
+  { id: 'Europe/Dublin', label: 'Irish Standard Time', utcOffset: 'UTC+0:00', isActive: true, sortOrder: 41 },
+  { id: 'Europe/Lisbon', label: 'Western European Time', utcOffset: 'UTC+0:00', isActive: true, sortOrder: 42 },
+  { id: 'Europe/Paris', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 43 },
+  { id: 'Europe/Berlin', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 44 },
+  { id: 'Europe/Rome', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 45 },
+  { id: 'Europe/Madrid', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 46 },
+  { id: 'Europe/Amsterdam', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 47 },
+  { id: 'Europe/Brussels', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 48 },
+  { id: 'Europe/Vienna', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 49 },
+  { id: 'Europe/Zurich', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 50 },
+  { id: 'Europe/Copenhagen', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 51 },
+  { id: 'Europe/Stockholm', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 52 },
+  { id: 'Europe/Oslo', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 53 },
+  { id: 'Europe/Helsinki', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 54 },
+  { id: 'Europe/Athens', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 55 },
+  { id: 'Europe/Istanbul', label: 'Turkey Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 56 },
+  { id: 'Europe/Moscow', label: 'Moscow Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 57 },
+  { id: 'Europe/Kaliningrad', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 58 },
+  { id: 'Europe/Volgograd', label: 'Volgograd Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 59 },
+  { id: 'Europe/Kiev', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 60 },
+  { id: 'Europe/Chisinau', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 61 },
+  { id: 'Europe/Minsk', label: 'Moscow Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 62 },
+  { id: 'Europe/Sofia', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 63 },
+  { id: 'Europe/Bucharest', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 64 },
+  { id: 'Europe/Budapest', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 65 },
+  { id: 'Europe/Prague', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 66 },
+  { id: 'Europe/Warsaw', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 67 },
+  
+  // Africa
+  { id: 'Africa/Cairo', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 70 },
+  { id: 'Africa/Johannesburg', label: 'South Africa Standard Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 71 },
+  { id: 'Africa/Lagos', label: 'West Africa Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 72 },
+  { id: 'Africa/Nairobi', label: 'East Africa Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 73 },
+  { id: 'Africa/Casablanca', label: 'Western European Time', utcOffset: 'UTC+0:00', isActive: true, sortOrder: 74 },
+  { id: 'Africa/Tunis', label: 'Central European Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 75 },
+  { id: 'Africa/Accra', label: 'Greenwich Mean Time', utcOffset: 'UTC+0:00', isActive: true, sortOrder: 76 },
+  { id: 'Africa/Dakar', label: 'Greenwich Mean Time', utcOffset: 'UTC+0:00', isActive: true, sortOrder: 77 },
+  { id: 'Africa/Luanda', label: 'West Africa Time', utcOffset: 'UTC+1:00', isActive: true, sortOrder: 78 },
+  { id: 'Africa/Maputo', label: 'Central Africa Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 79 },
+  { id: 'Africa/Khartoum', label: 'Central Africa Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 80 },
+  { id: 'Africa/Addis_Ababa', label: 'East Africa Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 81 },
+  
+  // Asia
+  { id: 'Asia/Dubai', label: 'Gulf Standard Time', utcOffset: 'UTC+4:00', isActive: true, sortOrder: 90 },
+  { id: 'Asia/Riyadh', label: 'Arabian Standard Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 91 },
+  { id: 'Asia/Kuwait', label: 'Arabian Standard Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 92 },
+  { id: 'Asia/Qatar', label: 'Arabian Standard Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 93 },
+  { id: 'Asia/Bahrain', label: 'Arabian Standard Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 94 },
+  { id: 'Asia/Muscat', label: 'Gulf Standard Time', utcOffset: 'UTC+4:00', isActive: true, sortOrder: 95 },
+  { id: 'Asia/Tehran', label: 'Iran Standard Time', utcOffset: 'UTC+3:30', isActive: true, sortOrder: 96 },
+  { id: 'Asia/Baghdad', label: 'Arabian Standard Time', utcOffset: 'UTC+3:00', isActive: true, sortOrder: 97 },
+  { id: 'Asia/Amman', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 98 },
+  { id: 'Asia/Beirut', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 99 },
+  { id: 'Asia/Damascus', label: 'Eastern European Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 100 },
+  { id: 'Asia/Jerusalem', label: 'Israel Standard Time', utcOffset: 'UTC+2:00', isActive: true, sortOrder: 101 },
+  { id: 'Asia/Ashgabat', label: 'Turkmenistan Time', utcOffset: 'UTC+5:00', isActive: true, sortOrder: 102 },
+  { id: 'Asia/Tashkent', label: 'Uzbekistan Time', utcOffset: 'UTC+5:00', isActive: true, sortOrder: 103 },
+  { id: 'Asia/Almaty', label: 'Kazakhstan Time', utcOffset: 'UTC+6:00', isActive: true, sortOrder: 104 },
+  { id: 'Asia/Bishkek', label: 'Kyrgyzstan Time', utcOffset: 'UTC+6:00', isActive: true, sortOrder: 105 },
+  { id: 'Asia/Dushanbe', label: 'Tajikistan Time', utcOffset: 'UTC+5:00', isActive: true, sortOrder: 106 },
+  { id: 'Asia/Kabul', label: 'Afghanistan Time', utcOffset: 'UTC+4:30', isActive: true, sortOrder: 107 },
+  { id: 'Asia/Karachi', label: 'Pakistan Standard Time', utcOffset: 'UTC+5:00', isActive: true, sortOrder: 108 },
+  { id: 'Asia/Colombo', label: 'Sri Lanka Time', utcOffset: 'UTC+5:30', isActive: true, sortOrder: 109 },
+  { id: 'Asia/Dhaka', label: 'Bangladesh Time', utcOffset: 'UTC+6:00', isActive: true, sortOrder: 110 },
+  { id: 'Asia/Kathmandu', label: 'Nepal Time', utcOffset: 'UTC+5:45', isActive: true, sortOrder: 111 },
+  { id: 'Asia/Kolkata', label: 'India Standard Time', utcOffset: 'UTC+5:30', isActive: true, sortOrder: 112 },
+  { id: 'Asia/Mumbai', label: 'India Standard Time', utcOffset: 'UTC+5:30', isActive: true, sortOrder: 113 },
+  { id: 'Asia/Thimphu', label: 'Bhutan Time', utcOffset: 'UTC+6:00', isActive: true, sortOrder: 114 },
+  { id: 'Asia/Yangon', label: 'Myanmar Time', utcOffset: 'UTC+6:30', isActive: true, sortOrder: 115 },
+  { id: 'Asia/Bangkok', label: 'Indochina Time', utcOffset: 'UTC+7:00', isActive: true, sortOrder: 116 },
+  { id: 'Asia/Jakarta', label: 'Western Indonesia Time', utcOffset: 'UTC+7:00', isActive: true, sortOrder: 117 },
+  { id: 'Asia/Makassar', label: 'Central Indonesia Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 118 },
+  { id: 'Asia/Jayapura', label: 'Eastern Indonesia Time', utcOffset: 'UTC+9:00', isActive: true, sortOrder: 119 },
+  { id: 'Asia/Kuala_Lumpur', label: 'Malaysia Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 120 },
+  { id: 'Asia/Singapore', label: 'Singapore Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 121 },
+  { id: 'Asia/Manila', label: 'Philippine Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 122 },
+  { id: 'Asia/Shanghai', label: 'China Standard Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 123 },
+  { id: 'Asia/Beijing', label: 'China Standard Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 124 },
+  { id: 'Asia/Hong_Kong', label: 'Hong Kong Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 125 },
+  { id: 'Asia/Macau', label: 'Macau Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 126 },
+  { id: 'Asia/Taipei', label: 'Taiwan Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 127 },
+  { id: 'Asia/Seoul', label: 'Korea Standard Time', utcOffset: 'UTC+9:00', isActive: true, sortOrder: 128 },
+  { id: 'Asia/Tokyo', label: 'Japan Standard Time', utcOffset: 'UTC+9:00', isActive: true, sortOrder: 129 },
+  { id: 'Asia/Yakutsk', label: 'Yakutsk Time', utcOffset: 'UTC+9:00', isActive: true, sortOrder: 130 },
+  { id: 'Asia/Vladivostok', label: 'Vladivostok Time', utcOffset: 'UTC+10:00', isActive: true, sortOrder: 131 },
+  { id: 'Asia/Magadan', label: 'Magadan Time', utcOffset: 'UTC+11:00', isActive: true, sortOrder: 132 },
+  { id: 'Asia/Kamchatka', label: 'Kamchatka Time', utcOffset: 'UTC+12:00', isActive: true, sortOrder: 133 },
+  
+  // Australia / Pacific
+  { id: 'Australia/Sydney', label: 'Australian Eastern Time', utcOffset: 'UTC+10:00', isActive: true, sortOrder: 140 },
+  { id: 'Australia/Melbourne', label: 'Australian Eastern Time', utcOffset: 'UTC+10:00', isActive: true, sortOrder: 141 },
+  { id: 'Australia/Brisbane', label: 'Australian Eastern Time (No DST)', utcOffset: 'UTC+10:00', isActive: true, sortOrder: 142 },
+  { id: 'Australia/Adelaide', label: 'Australian Central Time', utcOffset: 'UTC+9:30', isActive: true, sortOrder: 143 },
+  { id: 'Australia/Darwin', label: 'Australian Central Time (No DST)', utcOffset: 'UTC+9:30', isActive: true, sortOrder: 144 },
+  { id: 'Australia/Perth', label: 'Australian Western Time', utcOffset: 'UTC+8:00', isActive: true, sortOrder: 145 },
+  { id: 'Australia/Eucla', label: 'Australian Central Western Time', utcOffset: 'UTC+8:45', isActive: true, sortOrder: 146 },
+  { id: 'Australia/Hobart', label: 'Australian Eastern Time', utcOffset: 'UTC+10:00', isActive: true, sortOrder: 147 },
+  { id: 'Australia/Lord_Howe', label: 'Lord Howe Time', utcOffset: 'UTC+10:30', isActive: true, sortOrder: 148 },
+  { id: 'Pacific/Auckland', label: 'New Zealand Time', utcOffset: 'UTC+12:00', isActive: true, sortOrder: 149 },
+  { id: 'Pacific/Chatham', label: 'Chatham Islands Time', utcOffset: 'UTC+12:45', isActive: true, sortOrder: 150 },
+  { id: 'Pacific/Fiji', label: 'Fiji Time', utcOffset: 'UTC+12:00', isActive: true, sortOrder: 151 },
+  { id: 'Pacific/Tongatapu', label: 'Tonga Time', utcOffset: 'UTC+13:00', isActive: true, sortOrder: 152 },
+  { id: 'Pacific/Apia', label: 'Samoa Time', utcOffset: 'UTC+13:00', isActive: true, sortOrder: 153 },
+  { id: 'Pacific/Pago_Pago', label: 'American Samoa Time', utcOffset: 'UTC-11:00', isActive: true, sortOrder: 154 },
+  { id: 'Pacific/Niue', label: 'Niue Time', utcOffset: 'UTC-11:00', isActive: true, sortOrder: 155 },
+  { id: 'Pacific/Port_Moresby', label: 'Papua New Guinea Time', utcOffset: 'UTC+10:00', isActive: true, sortOrder: 156 },
+  { id: 'Pacific/Guadalcanal', label: 'Solomon Islands Time', utcOffset: 'UTC+11:00', isActive: true, sortOrder: 157 },
+  { id: 'Pacific/Noumea', label: 'New Caledonia Time', utcOffset: 'UTC+11:00', isActive: true, sortOrder: 158 }
+];
+
+// =============================================
+// ENDPOINT 1: GET /api/settings/languages
 // =============================================
 app.get('/api/settings/languages', async (req, res) => {
   try {
-    // Comprehensive list of world languages with representative country flags.
-    // IMPORTANT:
-    // The flag represents a primary/common geographic association with the
-    // language. It does not mean the language belongs exclusively to that country.
-    const languages = [
-      { code: 'ab', name: 'Abkhazian', nativeName: 'аҧсуа бызшәа', flag: '🇬🇪' },
-      { code: 'af', name: 'Afrikaans', nativeName: 'Afrikaans', flag: '🇿🇦' },
-      { code: 'ak', name: 'Akan', nativeName: 'Akan', flag: '🇬🇭' },
-      { code: 'sq', name: 'Albanian', nativeName: 'Shqip', flag: '🇦🇱' },
-      { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', flag: '🇪🇹' },
-      { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦' },
-      { code: 'hy', name: 'Armenian', nativeName: 'Հայերեն', flag: '🇦🇲' },
-      { code: 'as', name: 'Assamese', nativeName: 'অসমীয়া', flag: '🇮🇳' },
-      { code: 'ay', name: 'Aymara', nativeName: 'Aymar aru', flag: '🇧🇴' },
-      { code: 'az', name: 'Azerbaijani', nativeName: 'Azərbaycan', flag: '🇦🇿' },
-      { code: 'bm', name: 'Bambara', nativeName: 'Bamanankan', flag: '🇲🇱' },
-      { code: 'eu', name: 'Basque', nativeName: 'Euskara', flag: '🇪🇸' },
-      { code: 'be', name: 'Belarusian', nativeName: 'Беларуская', flag: '🇧🇾' },
-      { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', flag: '🇧🇩' },
-      { code: 'bho', name: 'Bhojpuri', nativeName: 'भोजपुरी', flag: '🇮🇳' },
-      { code: 'bs', name: 'Bosnian', nativeName: 'Bosanski', flag: '🇧🇦' },
-      { code: 'bg', name: 'Bulgarian', nativeName: 'Български', flag: '🇧🇬' },
-      { code: 'my', name: 'Burmese', nativeName: 'မြန်မာစာ', flag: '🇲🇲' },
-      { code: 'ca', name: 'Catalan', nativeName: 'Català', flag: '🇪🇸' },
-      { code: 'ceb', name: 'Cebuano', nativeName: 'Cebuano', flag: '🇵🇭' },
-      { code: 'ny', name: 'Chichewa', nativeName: 'Chichewa', flag: '🇲🇼' },
-      { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳' },
-      { code: 'co', name: 'Corsican', nativeName: 'Corsu', flag: '🇫🇷' },
-      { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski', flag: '🇭🇷' },
-      { code: 'cs', name: 'Czech', nativeName: 'Čeština', flag: '🇨🇿' },
-      { code: 'da', name: 'Danish', nativeName: 'Dansk', flag: '🇩🇰' },
-      { code: 'dv', name: 'Divehi', nativeName: 'ދިވެހި', flag: '🇲🇻' },
-      { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: '🇳🇱' },
-      { code: 'dz', name: 'Dzongkha', nativeName: 'རྫོང་ཁ', flag: '🇧🇹' },
-      { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸' },
-
-      // Esperanto has no official country.
-      // Use a real country flag rather than 🏳️ because 🏳️ is not a country flag
-      // and can render inconsistently.
-      { code: 'eo', name: 'Esperanto', nativeName: 'Esperanto', flag: '🇪🇺' },
-
-      { code: 'et', name: 'Estonian', nativeName: 'Eesti', flag: '🇪🇪' },
-      { code: 'ee', name: 'Ewe', nativeName: 'Eʋegbe', flag: '🇬🇭' },
-      { code: 'fo', name: 'Faroese', nativeName: 'Føroyskt', flag: '🇫🇴' },
-      { code: 'fi', name: 'Finnish', nativeName: 'Suomi', flag: '🇫🇮' },
-      { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷' },
-      { code: 'fy', name: 'Frisian', nativeName: 'Frysk', flag: '🇳🇱' },
-      { code: 'gl', name: 'Galician', nativeName: 'Galego', flag: '🇪🇸' },
-      { code: 'ka', name: 'Georgian', nativeName: 'ქართული', flag: '🇬🇪' },
-      { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪' },
-      { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', flag: '🇬🇷' },
-      { code: 'gn', name: 'Guarani', nativeName: "Avañe'ẽ", flag: '🇵🇾' },
-      { code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી', flag: '🇮🇳' },
-      { code: 'ht', name: 'Haitian Creole', nativeName: 'Kreyòl ayisyen', flag: '🇭🇹' },
-      { code: 'ha', name: 'Hausa', nativeName: 'Hausa', flag: '🇳🇬' },
-      { code: 'haw', name: 'Hawaiian', nativeName: 'ʻŌlelo Hawaiʻi', flag: '🇺🇸' },
-      { code: 'he', name: 'Hebrew', nativeName: 'עברית', flag: '🇮🇱' },
-      { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flag: '🇮🇳' },
-
-      // Hmong is widely spoken across several countries.
-      // Vietnam is used as the representative flag.
-      { code: 'hmn', name: 'Hmong', nativeName: 'Hmoob', flag: '🇻🇳' },
-
-      { code: 'hu', name: 'Hungarian', nativeName: 'Magyar', flag: '🇭🇺' },
-      { code: 'is', name: 'Icelandic', nativeName: 'Íslenska', flag: '🇮🇸' },
-      { code: 'ig', name: 'Igbo', nativeName: 'Igbo', flag: '🇳🇬' },
-      { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', flag: '🇮🇩' },
-      { code: 'ga', name: 'Irish', nativeName: 'Gaeilge', flag: '🇮🇪' },
-      { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹' },
-      { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵' },
-      { code: 'jv', name: 'Javanese', nativeName: 'Basa Jawa', flag: '🇮🇩' },
-      { code: 'kn', name: 'Kannada', nativeName: 'ಕನ್ನಡ', flag: '🇮🇳' },
-      { code: 'kk', name: 'Kazakh', nativeName: 'Қазақ тілі', flag: '🇰🇿' },
-      { code: 'km', name: 'Khmer', nativeName: 'ភាសាខ្មែរ', flag: '🇰🇭' },
-      { code: 'rw', name: 'Kinyarwanda', nativeName: 'Kinyarwanda', flag: '🇷🇼' },
-      { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷' },
-
-      // Kurdish is spoken across several countries.
-      // Iraq is used as the representative flag.
-      { code: 'ku', name: 'Kurdish', nativeName: 'Kurdî', flag: '🇮🇶' },
-
-      { code: 'ky', name: 'Kyrgyz', nativeName: 'Кыргызча', flag: '🇰🇬' },
-      { code: 'lo', name: 'Lao', nativeName: 'ພາສາລາວ', flag: '🇱🇦' },
-      { code: 'la', name: 'Latin', nativeName: 'Lingua Latina', flag: '🇻🇦' },
-      { code: 'lv', name: 'Latvian', nativeName: 'Latviešu', flag: '🇱🇻' },
-      { code: 'ln', name: 'Lingala', nativeName: 'Lingála', flag: '🇨🇩' },
-      { code: 'lt', name: 'Lithuanian', nativeName: 'Lietuvių', flag: '🇱🇹' },
-      { code: 'lg', name: 'Luganda', nativeName: 'Luganda', flag: '🇺🇬' },
-      { code: 'lb', name: 'Luxembourgish', nativeName: 'Lëtzebuergesch', flag: '🇱🇺' },
-      { code: 'mk', name: 'Macedonian', nativeName: 'Македонски', flag: '🇲🇰' },
-      { code: 'mg', name: 'Malagasy', nativeName: 'Malagasy', flag: '🇲🇬' },
-      { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', flag: '🇲🇾' },
-      { code: 'ml', name: 'Malayalam', nativeName: 'മലയാളം', flag: '🇮🇳' },
-      { code: 'mt', name: 'Maltese', nativeName: 'Malti', flag: '🇲🇹' },
-      { code: 'mi', name: 'Maori', nativeName: 'Te Reo Māori', flag: '🇳🇿' },
-      { code: 'mr', name: 'Marathi', nativeName: 'मराठी', flag: '🇮🇳' },
-      { code: 'mn', name: 'Mongolian', nativeName: 'Монгол хэл', flag: '🇲🇳' },
-      { code: 'ne', name: 'Nepali', nativeName: 'नेपाली', flag: '🇳🇵' },
-      { code: 'nd', name: 'Northern Ndebele', nativeName: 'isiNdebele', flag: '🇿🇼' },
-      { code: 'no', name: 'Norwegian', nativeName: 'Norsk', flag: '🇳🇴' },
-      { code: 'nb', name: 'Norwegian Bokmål', nativeName: 'Norsk Bokmål', flag: '🇳🇴' },
-      { code: 'nn', name: 'Norwegian Nynorsk', nativeName: 'Norsk Nynorsk', flag: '🇳🇴' },
-      { code: 'or', name: 'Odia', nativeName: 'ଓଡ଼ିଆ', flag: '🇮🇳' },
-      { code: 'om', name: 'Oromo', nativeName: 'Afaan Oromoo', flag: '🇪🇹' },
-      { code: 'ps', name: 'Pashto', nativeName: 'پښتو', flag: '🇦🇫' },
-      { code: 'fa', name: 'Persian', nativeName: 'فارسی', flag: '🇮🇷' },
-      { code: 'pl', name: 'Polish', nativeName: 'Polski', flag: '🇵🇱' },
-      { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹' },
-      { code: 'pa', name: 'Punjabi', nativeName: 'ਪੰਜਾਬੀ', flag: '🇮🇳' },
-      { code: 'qu', name: 'Quechua', nativeName: 'Runasimi', flag: '🇵🇪' },
-      { code: 'ro', name: 'Romanian', nativeName: 'Română', flag: '🇷🇴' },
-      { code: 'rm', name: 'Romansh', nativeName: 'Rumantsch', flag: '🇨🇭' },
-      { code: 'rn', name: 'Rundi', nativeName: 'Kirundi', flag: '🇧🇮' },
-      { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: '🇷🇺' },
-      { code: 'sm', name: 'Samoan', nativeName: 'Gagana Samoa', flag: '🇼🇸' },
-      { code: 'sg', name: 'Sango', nativeName: 'Yângâ tî Sängö', flag: '🇨🇫' },
-      { code: 'sa', name: 'Sanskrit', nativeName: 'संस्कृतम्', flag: '🇮🇳' },
-      { code: 'gd', name: 'Scottish Gaelic', nativeName: 'Gàidhlig', flag: '🇬🇧' },
-      { code: 'sr', name: 'Serbian', nativeName: 'Српски', flag: '🇷🇸' },
-      { code: 'sn', name: 'Shona', nativeName: 'chiShona', flag: '🇿🇼' },
-      { code: 'sd', name: 'Sindhi', nativeName: 'سنڌي', flag: '🇵🇰' },
-      { code: 'si', name: 'Sinhala', nativeName: 'සිංහල', flag: '🇱🇰' },
-      { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina', flag: '🇸🇰' },
-      { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina', flag: '🇸🇮' },
-      { code: 'so', name: 'Somali', nativeName: 'Soomaali', flag: '🇸🇴' },
-      { code: 'st', name: 'Southern Sotho', nativeName: 'Sesotho', flag: '🇱🇸' },
-      { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸' },
-      { code: 'su', name: 'Sundanese', nativeName: 'Basa Sunda', flag: '🇮🇩' },
-      { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', flag: '🇹🇿' },
-      { code: 'sv', name: 'Swedish', nativeName: 'Svenska', flag: '🇸🇪' },
-      { code: 'tl', name: 'Tagalog', nativeName: 'Tagalog', flag: '🇵🇭' },
-      { code: 'tg', name: 'Tajik', nativeName: 'Тоҷикӣ', flag: '🇹🇯' },
-      { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்', flag: '🇮🇳' },
-      { code: 'tt', name: 'Tatar', nativeName: 'Татар теле', flag: '🇷🇺' },
-      { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', flag: '🇮🇳' },
-      { code: 'th', name: 'Thai', nativeName: 'ภาษาไทย', flag: '🇹🇭' },
-      { code: 'ti', name: 'Tigrinya', nativeName: 'ትግርኛ', flag: '🇪🇷' },
-      { code: 'ts', name: 'Tsonga', nativeName: 'itsonga', flag: '🇿🇦' },
-      { code: 'tn', name: 'Tswana', nativeName: 'Setswana', flag: '🇧🇼' },
-      { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', flag: '🇹🇷' },
-      { code: 'tk', name: 'Turkmen', nativeName: 'Türkmençe', flag: '🇹🇲' },
-      { code: 'tw', name: 'Twi', nativeName: 'Twi', flag: '🇬🇭' },
-      { code: 'ug', name: 'Uyghur', nativeName: 'ئۇيغۇرچە', flag: '🇨🇳' },
-      { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', flag: '🇺🇦' },
-      { code: 'ur', name: 'Urdu', nativeName: 'اردو', flag: '🇵🇰' },
-      { code: 'uz', name: 'Uzbek', nativeName: 'Oʻzbekcha', flag: '🇺🇿' },
-      { code: 've', name: 'Venda', nativeName: 'Tshivenḓa', flag: '🇿🇦' },
-      { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', flag: '🇻🇳' },
-      { code: 'cy', name: 'Welsh', nativeName: 'Cymraeg', flag: '🇬🇧' },
-      { code: 'wo', name: 'Wolof', nativeName: 'Wolof', flag: '🇸🇳' },
-      { code: 'xh', name: 'Xhosa', nativeName: 'isiXhosa', flag: '🇿🇦' },
-      { code: 'yi', name: 'Yiddish', nativeName: 'ייִדיש', flag: '🇮🇱' },
-      { code: 'yo', name: 'Yoruba', nativeName: 'Yorùbá', flag: '🇳🇬' },
-      { code: 'zu', name: 'Zulu', nativeName: 'isiZulu', flag: '🇿🇦' }
-    ];
-
-    // ---------------------------------------------------------
-    // Defensive validation:
-    // Guarantee that every language returned to the frontend
-    // has a non-empty flag string.
-    // ---------------------------------------------------------
-    const fallbackFlag = '🌐';
-
-    languages.forEach(language => {
-      if (
-        !language.flag ||
-        typeof language.flag !== 'string' ||
-        language.flag.trim() === ''
-      ) {
-        language.flag = fallbackFlag;
-      }
-    });
-
-    // Sort by English language name for consistent frontend UX.
-    languages.sort((a, b) => a.name.localeCompare(b.name));
-
-    // Final integrity check.
-    // This should never fail because every language above already
-    // has a valid representative flag.
-    const invalidLanguage = languages.find(
-      language =>
-        !language.code ||
-        !language.name ||
-        !language.nativeName ||
-        !language.flag ||
-        typeof language.flag !== 'string' ||
-        !language.flag.trim()
-    );
-
-    if (invalidLanguage) {
-      throw new Error(
-        `Invalid language configuration for code: ${invalidLanguage.code || 'unknown'}`
-      );
+    // Check if languages exist in database first
+    const dbLanguages = await Language.find({ isActive: true }).sort({ sortOrder: 1 });
+    
+    if (dbLanguages && dbLanguages.length > 0) {
+      return res.status(200).json({
+        languages: dbLanguages.map(lang => ({
+          code: lang.code,
+          name: lang.name,
+          nativeName: lang.nativeName,
+          flagCode: lang.flagCode || lang.code,
+          isActive: lang.isActive,
+          sortOrder: lang.sortOrder
+        }))
+      });
     }
-
+    
+    // If no languages in DB, seed from LANGUAGES array
+    const seededLanguages = await Language.insertMany(LANGUAGES);
+    
     res.status(200).json({
-      status: 'success',
-      languages: languages,
-      count: languages.length
+      languages: seededLanguages.map(lang => ({
+        code: lang.code,
+        name: lang.name,
+        nativeName: lang.nativeName,
+        flagCode: lang.flagCode || lang.code,
+        isActive: lang.isActive,
+        sortOrder: lang.sortOrder
+      }))
     });
-
+    
   } catch (err) {
     console.error('Error fetching languages:', err);
-
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch languages',
-      error: process.env.NODE_ENV === 'development'
-        ? err.message
-        : undefined
+    
+    // Fallback: return hardcoded languages if DB fails
+    res.status(200).json({
+      languages: LANGUAGES.map(lang => ({
+        code: lang.code,
+        name: lang.name,
+        nativeName: lang.nativeName,
+        flagCode: lang.flagCode || lang.code,
+        isActive: lang.isActive,
+        sortOrder: lang.sortOrder
+      }))
     });
   }
 });
 
-
-
-
-
-
-
 // =============================================
-// 2. GET /api/settings/timezones - Get all timezones
+// ENDPOINT 2: GET /api/settings/timezones
 // =============================================
 app.get('/api/settings/timezones', async (req, res) => {
   try {
-    // Comprehensive list of all major timezones with UTC offsets
-    const timezones = [
-      // UTC-12:00 to UTC-11:00
-      { id: 'Pacific/Midway', label: 'Midway Island', utcOffset: '-11:00' },
-      { id: 'Pacific/Niue', label: 'Niue', utcOffset: '-11:00' },
-      { id: 'Pacific/Pago_Pago', label: 'Pago Pago', utcOffset: '-11:00' },
-      { id: 'Pacific/Honolulu', label: 'Honolulu', utcOffset: '-10:00' },
-      { id: 'Pacific/Rarotonga', label: 'Rarotonga', utcOffset: '-10:00' },
-      { id: 'Pacific/Tahiti', label: 'Tahiti', utcOffset: '-10:00' },
-      { id: 'Pacific/Marquesas', label: 'Marquesas Islands', utcOffset: '-09:30' },
-      { id: 'America/Anchorage', label: 'Anchorage', utcOffset: '-09:00' },
-      { id: 'America/Juneau', label: 'Juneau', utcOffset: '-09:00' },
-      { id: 'America/Nome', label: 'Nome', utcOffset: '-09:00' },
-      { id: 'America/Sitka', label: 'Sitka', utcOffset: '-09:00' },
-      { id: 'America/Yakutat', label: 'Yakutat', utcOffset: '-09:00' },
-      { id: 'America/Dawson', label: 'Dawson', utcOffset: '-09:00' },
-      { id: 'America/Whitehorse', label: 'Whitehorse', utcOffset: '-09:00' },
-      { id: 'America/Vancouver', label: 'Vancouver', utcOffset: '-08:00' },
-      { id: 'America/Los_Angeles', label: 'Los Angeles', utcOffset: '-08:00' },
-      { id: 'America/Tijuana', label: 'Tijuana', utcOffset: '-08:00' },
-      { id: 'America/Phoenix', label: 'Phoenix', utcOffset: '-07:00' },
-      { id: 'America/Denver', label: 'Denver', utcOffset: '-07:00' },
-      { id: 'America/Edmonton', label: 'Edmonton', utcOffset: '-07:00' },
-      { id: 'America/Boise', label: 'Boise', utcOffset: '-07:00' },
-      { id: 'America/Chicago', label: 'Chicago', utcOffset: '-06:00' },
-      { id: 'America/Mexico_City', label: 'Mexico City', utcOffset: '-06:00' },
-      { id: 'America/Winnipeg', label: 'Winnipeg', utcOffset: '-06:00' },
-      { id: 'America/New_York', label: 'New York', utcOffset: '-05:00' },
-      { id: 'America/Toronto', label: 'Toronto', utcOffset: '-05:00' },
-      { id: 'America/Havana', label: 'Havana', utcOffset: '-05:00' },
-      { id: 'America/Bogota', label: 'Bogota', utcOffset: '-05:00' },
-      { id: 'America/Lima', label: 'Lima', utcOffset: '-05:00' },
-      { id: 'America/Quito', label: 'Quito', utcOffset: '-05:00' },
-      { id: 'America/Caracas', label: 'Caracas', utcOffset: '-04:00' },
-      { id: 'America/Santiago', label: 'Santiago', utcOffset: '-04:00' },
-      { id: 'America/La_Paz', label: 'La Paz', utcOffset: '-04:00' },
-      { id: 'America/Manaus', label: 'Manaus', utcOffset: '-04:00' },
-      { id: 'America/Halifax', label: 'Halifax', utcOffset: '-04:00' },
-      { id: 'America/Asuncion', label: 'Asuncion', utcOffset: '-04:00' },
-      { id: 'America/St_Johns', label: 'St. Johns', utcOffset: '-03:30' },
-      { id: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires', utcOffset: '-03:00' },
-      { id: 'America/Sao_Paulo', label: 'Sao Paulo', utcOffset: '-03:00' },
-      { id: 'America/Montevideo', label: 'Montevideo', utcOffset: '-03:00' },
-      { id: 'America/Godthab', label: 'Nuuk', utcOffset: '-03:00' },
-      { id: 'America/Noronha', label: 'Noronha', utcOffset: '-02:00' },
-      { id: 'Atlantic/Azores', label: 'Azores', utcOffset: '-01:00' },
-      { id: 'Atlantic/Cape_Verde', label: 'Cape Verde', utcOffset: '-01:00' },
-      
-      // UTC (GMT)
-      { id: 'UTC', label: 'UTC (Coordinated Universal Time)', utcOffset: '+00:00' },
-      { id: 'GMT', label: 'GMT (Greenwich Mean Time)', utcOffset: '+00:00' },
-      { id: 'Europe/London', label: 'London', utcOffset: '+00:00' },
-      { id: 'Europe/Dublin', label: 'Dublin', utcOffset: '+00:00' },
-      { id: 'Europe/Lisbon', label: 'Lisbon', utcOffset: '+00:00' },
-      
-      // UTC+01:00 to UTC+02:00
-      { id: 'Europe/Paris', label: 'Paris', utcOffset: '+01:00' },
-      { id: 'Europe/Berlin', label: 'Berlin', utcOffset: '+01:00' },
-      { id: 'Europe/Rome', label: 'Rome', utcOffset: '+01:00' },
-      { id: 'Europe/Madrid', label: 'Madrid', utcOffset: '+01:00' },
-      { id: 'Europe/Amsterdam', label: 'Amsterdam', utcOffset: '+01:00' },
-      { id: 'Europe/Brussels', label: 'Brussels', utcOffset: '+01:00' },
-      { id: 'Europe/Vienna', label: 'Vienna', utcOffset: '+01:00' },
-      { id: 'Europe/Copenhagen', label: 'Copenhagen', utcOffset: '+01:00' },
-      { id: 'Europe/Stockholm', label: 'Stockholm', utcOffset: '+01:00' },
-      { id: 'Europe/Oslo', label: 'Oslo', utcOffset: '+01:00' },
-      { id: 'Europe/Zurich', label: 'Zurich', utcOffset: '+01:00' },
-      { id: 'Europe/Warsaw', label: 'Warsaw', utcOffset: '+01:00' },
-      { id: 'Europe/Prague', label: 'Prague', utcOffset: '+01:00' },
-      { id: 'Europe/Budapest', label: 'Budapest', utcOffset: '+01:00' },
-      { id: 'Europe/Belgrade', label: 'Belgrade', utcOffset: '+01:00' },
-      { id: 'Europe/Sarajevo', label: 'Sarajevo', utcOffset: '+01:00' },
-      { id: 'Europe/Skopje', label: 'Skopje', utcOffset: '+01:00' },
-      { id: 'Europe/Zagreb', label: 'Zagreb', utcOffset: '+01:00' },
-      { id: 'Europe/Athens', label: 'Athens', utcOffset: '+02:00' },
-      { id: 'Europe/Helsinki', label: 'Helsinki', utcOffset: '+02:00' },
-      { id: 'Europe/Sofia', label: 'Sofia', utcOffset: '+02:00' },
-      { id: 'Europe/Bucharest', label: 'Bucharest', utcOffset: '+02:00' },
-      { id: 'Europe/Kiev', label: 'Kyiv', utcOffset: '+02:00' },
-      { id: 'Europe/Chisinau', label: 'Chisinau', utcOffset: '+02:00' },
-      { id: 'Europe/Vilnius', label: 'Vilnius', utcOffset: '+02:00' },
-      { id: 'Europe/Riga', label: 'Riga', utcOffset: '+02:00' },
-      { id: 'Europe/Tallinn', label: 'Tallinn', utcOffset: '+02:00' },
-      { id: 'Africa/Cairo', label: 'Cairo', utcOffset: '+02:00' },
-      { id: 'Africa/Johannesburg', label: 'Johannesburg', utcOffset: '+02:00' },
-      { id: 'Africa/Lagos', label: 'Lagos', utcOffset: '+01:00' },
-      { id: 'Africa/Nairobi', label: 'Nairobi', utcOffset: '+03:00' },
-      
-      // UTC+03:00 to UTC+04:00
-      { id: 'Europe/Moscow', label: 'Moscow', utcOffset: '+03:00' },
-      { id: 'Europe/Minsk', label: 'Minsk', utcOffset: '+03:00' },
-      { id: 'Europe/Istanbul', label: 'Istanbul', utcOffset: '+03:00' },
-      { id: 'Asia/Riyadh', label: 'Riyadh', utcOffset: '+03:00' },
-      { id: 'Asia/Kuwait', label: 'Kuwait City', utcOffset: '+03:00' },
-      { id: 'Asia/Baghdad', label: 'Baghdad', utcOffset: '+03:00' },
-      { id: 'Asia/Tehran', label: 'Tehran', utcOffset: '+03:30' },
-      { id: 'Asia/Dubai', label: 'Dubai', utcOffset: '+04:00' },
-      { id: 'Asia/Baku', label: 'Baku', utcOffset: '+04:00' },
-      { id: 'Asia/Tbilisi', label: 'Tbilisi', utcOffset: '+04:00' },
-      { id: 'Asia/Yerevan', label: 'Yerevan', utcOffset: '+04:00' },
-      { id: 'Asia/Kabul', label: 'Kabul', utcOffset: '+04:30' },
-      
-      // UTC+05:00 to UTC+06:00
-      { id: 'Asia/Karachi', label: 'Karachi', utcOffset: '+05:00' },
-      { id: 'Asia/Tashkent', label: 'Tashkent', utcOffset: '+05:00' },
-      { id: 'Asia/Ashgabat', label: 'Ashgabat', utcOffset: '+05:00' },
-      { id: 'Asia/Colombo', label: 'Colombo', utcOffset: '+05:30' },
-      { id: 'Asia/Kolkata', label: 'Kolkata', utcOffset: '+05:30' },
-      { id: 'Asia/Kathmandu', label: 'Kathmandu', utcOffset: '+05:45' },
-      { id: 'Asia/Dhaka', label: 'Dhaka', utcOffset: '+06:00' },
-      { id: 'Asia/Thimphu', label: 'Thimphu', utcOffset: '+06:00' },
-      { id: 'Asia/Urumqi', label: 'Urumqi', utcOffset: '+06:00' },
-      { id: 'Asia/Yangon', label: 'Yangon', utcOffset: '+06:30' },
-      
-      // UTC+07:00 to UTC+09:00
-      { id: 'Asia/Bangkok', label: 'Bangkok', utcOffset: '+07:00' },
-      { id: 'Asia/Jakarta', label: 'Jakarta', utcOffset: '+07:00' },
-      { id: 'Asia/Ho_Chi_Minh', label: 'Ho Chi Minh City', utcOffset: '+07:00' },
-      { id: 'Asia/Phnom_Penh', label: 'Phnom Penh', utcOffset: '+07:00' },
-      { id: 'Asia/Vientiane', label: 'Vientiane', utcOffset: '+07:00' },
-      { id: 'Asia/Singapore', label: 'Singapore', utcOffset: '+08:00' },
-      { id: 'Asia/Kuala_Lumpur', label: 'Kuala Lumpur', utcOffset: '+08:00' },
-      { id: 'Asia/Shanghai', label: 'Shanghai', utcOffset: '+08:00' },
-      { id: 'Asia/Hong_Kong', label: 'Hong Kong', utcOffset: '+08:00' },
-      { id: 'Asia/Taipei', label: 'Taipei', utcOffset: '+08:00' },
-      { id: 'Asia/Manila', label: 'Manila', utcOffset: '+08:00' },
-      { id: 'Asia/Makassar', label: 'Makassar', utcOffset: '+08:00' },
-      { id: 'Asia/Perth', label: 'Perth', utcOffset: '+08:00' },
-      { id: 'Asia/Pyongyang', label: 'Pyongyang', utcOffset: '+09:00' },
-      { id: 'Asia/Seoul', label: 'Seoul', utcOffset: '+09:00' },
-      { id: 'Asia/Tokyo', label: 'Tokyo', utcOffset: '+09:00' },
-      { id: 'Asia/Yakutsk', label: 'Yakutsk', utcOffset: '+09:00' },
-      
-      // UTC+09:30 to UTC+10:00
-      { id: 'Australia/Darwin', label: 'Darwin', utcOffset: '+09:30' },
-      { id: 'Australia/Adelaide', label: 'Adelaide', utcOffset: '+09:30' },
-      { id: 'Australia/Brisbane', label: 'Brisbane', utcOffset: '+10:00' },
-      { id: 'Australia/Sydney', label: 'Sydney', utcOffset: '+10:00' },
-      { id: 'Australia/Melbourne', label: 'Melbourne', utcOffset: '+10:00' },
-      { id: 'Australia/Hobart', label: 'Hobart', utcOffset: '+10:00' },
-      { id: 'Pacific/Guam', label: 'Guam', utcOffset: '+10:00' },
-      { id: 'Pacific/Saipan', label: 'Saipan', utcOffset: '+10:00' },
-      { id: 'Pacific/Port_Moresby', label: 'Port Moresby', utcOffset: '+10:00' },
-      
-      // UTC+10:30 to UTC+12:00
-      { id: 'Australia/Lord_Howe', label: 'Lord Howe Island', utcOffset: '+10:30' },
-      { id: 'Pacific/Noumea', label: 'Noumea', utcOffset: '+11:00' },
-      { id: 'Pacific/Auckland', label: 'Auckland', utcOffset: '+12:00' },
-      { id: 'Pacific/Fiji', label: 'Fiji', utcOffset: '+12:00' },
-      { id: 'Pacific/Tarawa', label: 'Tarawa', utcOffset: '+12:00' },
-      { id: 'Pacific/Majuro', label: 'Majuro', utcOffset: '+12:00' },
-      { id: 'Pacific/Nauru', label: 'Nauru', utcOffset: '+12:00' },
-      
-      // UTC+13:00 to UTC+14:00
-      { id: 'Pacific/Apia', label: 'Apia', utcOffset: '+13:00' },
-      { id: 'Pacific/Tongatapu', label: 'Tongatapu', utcOffset: '+13:00' },
-      { id: 'Pacific/Kiritimati', label: 'Kiritimati', utcOffset: '+14:00' }
-    ];
-
-    // Sort by UTC offset then label
-    timezones.sort((a, b) => {
-      const offsetA = parseInt(a.utcOffset.replace(':', ''));
-      const offsetB = parseInt(b.utcOffset.replace(':', ''));
-      if (offsetA !== offsetB) return offsetA - offsetB;
-      return a.label.localeCompare(b.label);
-    });
-
+    // Check if timezones exist in database first
+    const dbTimezones = await Timezone.find({ isActive: true }).sort({ sortOrder: 1 });
+    
+    if (dbTimezones && dbTimezones.length > 0) {
+      return res.status(200).json({
+        timezones: dbTimezones.map(tz => ({
+          id: tz.id,
+          label: tz.label,
+          utcOffset: tz.utcOffset,
+          isActive: tz.isActive,
+          sortOrder: tz.sortOrder
+        }))
+      });
+    }
+    
+    // If no timezones in DB, seed from TIMEZONES array
+    const seededTimezones = await Timezone.insertMany(TIMEZONES);
+    
     res.status(200).json({
-      status: 'success',
-      timezones: timezones,
-      count: timezones.length
+      timezones: seededTimezones.map(tz => ({
+        id: tz.id,
+        label: tz.label,
+        utcOffset: tz.utcOffset,
+        isActive: tz.isActive,
+        sortOrder: tz.sortOrder
+      }))
     });
-
+    
   } catch (err) {
     console.error('Error fetching timezones:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch timezones',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    
+    // Fallback: return hardcoded timezones if DB fails
+    res.status(200).json({
+      timezones: TIMEZONES.map(tz => ({
+        id: tz.id,
+        label: tz.label,
+        utcOffset: tz.utcOffset,
+        isActive: tz.isActive,
+        sortOrder: tz.sortOrder
+      }))
     });
   }
 });
 
 // =============================================
-// 3. GET /api/users/settings - Get user's language/timezone preferences
+// ENDPOINT 3: GET /api/users/settings
 // =============================================
 app.get('/api/users/settings', protect, async (req, res) => {
   try {
     const userId = req.user._id;
-    const user = await User.findById(userId).select('preferences timezone');
-
+    
+    // Get user with preferences
+    const user = await User.findById(userId).select('preferences ipPreferences');
+    
     if (!user) {
       return res.status(404).json({
         status: 'fail',
         message: 'User not found'
       });
     }
-
-    // Get language from preferences or use default
-    const language = user.preferences?.language || 'en';
     
-    // Get timezone from user document or use default
-    const timezone = user.preferences?.timezone || user.timezone || 'UTC';
-
+    // Get language from preferences or ipPreferences or default to 'en'
+    const language = user.preferences?.language || 
+                    user.ipPreferences?.language || 
+                    'en';
+    
+    // Get timezone from preferences or ipPreferences or default to 'UTC'
+    const timezone = user.preferences?.timezone || 
+                    user.ipPreferences?.timezone || 
+                    'UTC';
+    
     res.status(200).json({
-      status: 'success',
       language: language,
       timezone: timezone
     });
-
+    
   } catch (err) {
     console.error('Error fetching user settings:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch user settings',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      message: 'Failed to fetch user settings'
     });
   }
 });
 
 // =============================================
-// 4. PUT /api/users/settings - Update user's language/timezone preferences
+// ENDPOINT 4: PUT /api/users/settings
 // =============================================
 app.put('/api/users/settings', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const { language, timezone } = req.body;
-
-    // Validate input
-    if (!language && !timezone) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'At least one of language or timezone must be provided'
-      });
-    }
-
-    // Validate language format (2-5 characters, letters only)
-    if (language && !/^[a-z]{2,5}$/.test(language)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid language format. Must be 2-5 lowercase letters.'
-      });
-    }
-
-    // Validate timezone format (should be a valid IANA timezone)
-    if (timezone) {
-      try {
-        // Check if timezone is valid by trying to create a date with it
-        new Intl.DateTimeFormat('en-US', { timeZone: timezone });
-      } catch (err) {
+    
+    // Validate language exists
+    if (language) {
+      const langExists = await Language.findOne({ code: language, isActive: true });
+      if (!langExists) {
         return res.status(400).json({
           status: 'fail',
-          message: 'Invalid timezone format. Please provide a valid IANA timezone.',
-          error: err.message
+          message: `Language '${language}' is not supported`
         });
       }
     }
-
+    
+    // Validate timezone exists
+    if (timezone) {
+      const tzExists = await Timezone.findOne({ id: timezone, isActive: true });
+      if (!tzExists) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `Timezone '${timezone}' is not supported`
+        });
+      }
+    }
+    
     // Build update object
     const updateData = {};
-    
     if (language) {
-      if (!updateData.preferences) updateData.preferences = {};
-      updateData.preferences.language = language;
+      updateData['preferences.language'] = language;
+      updateData['ipPreferences.language'] = language;
+    }
+    if (timezone) {
+      updateData['preferences.timezone'] = timezone;
+      updateData['ipPreferences.timezone'] = timezone;
+      updateData['ipPreferences.detectedAt'] = new Date();
     }
     
-    if (timezone) {
-      if (!updateData.preferences) updateData.preferences = {};
-      updateData.preferences.timezone = timezone;
-    }
-
     // Update user
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateData },
-      { new: true, runValidators: true }
-    ).select('preferences');
-
-    if (!updatedUser) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
+      { new: true }
+    ).select('preferences ipPreferences');
+    
+    // Also update UserPreference collection for consistency
+    await UserPreference.findOneAndUpdate(
+      { user: userId },
+      {
+        $set: {
+          language: language || updatedUser.preferences?.language || 'en',
+          timezone: timezone || updatedUser.preferences?.timezone || 'UTC'
+        }
+      },
+      { upsert: true, new: true }
+    );
+    
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('preferences_update', {
+        language: language || updatedUser.preferences?.language || 'en',
+        timezone: timezone || updatedUser.preferences?.timezone || 'UTC'
       });
     }
-
-    // Log the activity
+    
+    // Log activity
     await SystemLog.create({
       action: 'settings_updated',
       entity: 'User',
@@ -45021,30 +45017,82 @@ app.put('/api/users/settings', protect, async (req, res) => {
       performedByName: `${req.user.firstName} ${req.user.lastName}`,
       status: 'success',
       metadata: {
-        language: language || undefined,
-        timezone: timezone || undefined,
-        updatedAt: new Date()
+        language: language || updatedUser.preferences?.language || 'en',
+        timezone: timezone || updatedUser.preferences?.timezone || 'UTC'
       }
     });
-
+    
     res.status(200).json({
       status: 'success',
       message: 'Settings updated successfully',
       data: {
-        language: updatedUser.preferences?.language || 'en',
-        timezone: updatedUser.preferences?.timezone || 'UTC'
+        language: language || updatedUser.preferences?.language || 'en',
+        timezone: timezone || updatedUser.preferences?.timezone || 'UTC'
       }
     });
-
+    
   } catch (err) {
     console.error('Error updating user settings:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to update user settings',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      message: err.message || 'Failed to update user settings'
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
