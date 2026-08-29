@@ -46763,6 +46763,11 @@ app.get('/api/users/devices', protect, async (req, res) => {
     }
 });
 
+
+
+
+
+
 // =============================================
 // 3. POST /api/users/devices/:deviceId/logout - Log out a specific device
 // =============================================
@@ -46770,6 +46775,7 @@ app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
     try {
         const userId = req.user._id;
         const { deviceId } = req.params;
+        const io = req.app.get('io'); // Get Socket.IO instance
 
         if (!deviceId) {
             return res.status(400).json({
@@ -46783,10 +46789,11 @@ app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
 
         if (currentToken) {
             try {
-                const decoded = verifyJWT(token);
+                const decoded = verifyJWT(currentToken);
                 currentDeviceId = decoded.sessionId || null;
             } catch (err) {
                 // Token might be expired, continue
+                console.warn('Could not decode current token:', err.message);
             }
         }
 
@@ -46821,6 +46828,41 @@ app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
             await redis.set(`blacklist:${token}`, 'true', 'EX', 86400); // 24 hours
         }
 
+        // =============================================
+        // FORCE DISCONNECT THE SPECIFIC DEVICE'S SOCKET
+        // =============================================
+        if (io) {
+            try {
+                const sockets = await io.fetchSockets();
+                let disconnectedCount = 0;
+                
+                for (const socket of sockets) {
+                    const socketUserId = socket.handshake.auth?.userId || socket.userId;
+                    const socketDeviceId = socket.handshake.auth?.deviceId || socket.deviceId;
+                    
+                    // Check if this socket belongs to the user and the specific device
+                    if (socketUserId === userId.toString() && socketDeviceId === deviceId) {
+                        // Emit a logout event to force client-side logout
+                        socket.emit('forced_logout', {
+                            reason: 'device_logout_single',
+                            deviceId: deviceId,
+                            timestamp: Date.now()
+                        });
+                        
+                        // Disconnect the socket
+                        socket.disconnect(true);
+                        disconnectedCount++;
+                        console.log(`🔌 Force disconnected socket ${socket.id} for device ${deviceId}`);
+                    }
+                }
+                
+                console.log(`✅ Force disconnected ${disconnectedCount} socket(s) for device ${deviceId}`);
+            } catch (socketError) {
+                console.error('Error force disconnecting sockets:', socketError);
+                // Continue even if socket disconnect fails
+            }
+        }
+
         // Log the activity
         await logActivity(
             'device_logged_out',
@@ -46831,13 +46873,28 @@ app.post('/api/users/devices/:deviceId/logout', protect, async (req, res) => {
             req,
             {
                 deviceId: deviceId,
-                method: 'manual'
+                method: 'manual',
+                forceDisconnect: !!io
             }
         );
 
+        // Send notification to current device about the logout
+        if (io) {
+            io.to(`user_${userId}`).emit('security_update', {
+                type: 'device_logged_out',
+                deviceId: deviceId,
+                timestamp: Date.now()
+            });
+        }
+
         res.status(200).json({
             status: 'success',
-            message: 'Device logged out successfully'
+            message: 'Device logged out successfully',
+            data: {
+                deviceId: deviceId,
+                forceDisconnect: !!io,
+                socketDisconnected: true
+            }
         });
 
     } catch (err) {
@@ -46856,6 +46913,7 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
     try {
         const userId = req.user._id;
         const currentToken = req.headers.authorization?.split(' ')[1] || req.cookies.jwt;
+        const io = req.app.get('io'); // Get Socket.IO instance
 
         if (!currentToken) {
             return res.status(401).json({
@@ -46880,6 +46938,7 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
         // Get all session keys for this user
         const sessionKeys = await redis.keys(`session:${userId}:*`);
         let loggedOutCount = 0;
+        const loggedOutDeviceIds = [];
 
         for (const key of sessionKeys) {
             const deviceId = key.split(':').pop();
@@ -46893,7 +46952,14 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
             const sessionData = await redis.get(key);
             if (!sessionData) continue;
 
-            const session = JSON.parse(sessionData);
+            // Parse session to get additional info
+            let session = null;
+            try {
+                session = JSON.parse(sessionData);
+            } catch (parseError) {
+                console.warn('Failed to parse session data for key:', key);
+                // Continue with just the device ID
+            }
 
             // Delete the session from Redis
             await redis.del(key);
@@ -46906,7 +46972,41 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
                 await redis.set(`blacklist:${token}`, 'true', 'EX', 86400);
             }
 
+            loggedOutDeviceIds.push(deviceId);
             loggedOutCount++;
+        }
+
+        // =============================================
+        // FORCE DISCONNECT ALL OTHER DEVICES' SOCKETS
+        // =============================================
+        if (io) {
+            try {
+                const sockets = await io.fetchSockets();
+                let disconnectedCount = 0;
+                
+                for (const socket of sockets) {
+                    const socketUserId = socket.handshake.auth?.userId || socket.userId;
+                    const socketDeviceId = socket.handshake.auth?.deviceId || socket.deviceId;
+                    
+                    // Check if this socket belongs to the user and is not the current device
+                    if (socketUserId === userId.toString() && socketDeviceId !== currentDeviceId) {
+                        // Emit a logout event to force client-side logout
+                        socket.emit('forced_logout', {
+                            reason: 'device_logout_all',
+                            timestamp: Date.now()
+                        });
+                        
+                        // Disconnect the socket
+                        socket.disconnect(true);
+                        disconnectedCount++;
+                    }
+                }
+                
+                console.log(`🔌 Force disconnected ${disconnectedCount} socket(s) for user ${userId}`);
+            } catch (socketError) {
+                console.error('Error force disconnecting sockets:', socketError);
+                // Continue even if socket disconnect fails
+            }
         }
 
         // Log the activity
@@ -46919,16 +47019,30 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
             req,
             {
                 devicesLoggedOut: loggedOutCount,
-                method: 'manual'
+                deviceIds: loggedOutDeviceIds,
+                method: 'manual',
+                forceDisconnect: !!io
             }
         );
+
+        // Send notification to current device
+        if (io) {
+            io.to(`user_${userId}`).emit('security_update', {
+                type: 'all_devices_logged_out',
+                count: loggedOutCount,
+                timestamp: Date.now()
+            });
+        }
 
         res.status(200).json({
             status: 'success',
             message: `${loggedOutCount} device(s) logged out successfully`,
             data: {
                 loggedOutCount: loggedOutCount,
-                remainingDevices: 1 // Current device only
+                loggedOutDeviceIds: loggedOutDeviceIds,
+                remainingDevices: 1, // Current device only
+                forceDisconnect: !!io,
+                socketDisconnected: true
             }
         });
 
@@ -46940,6 +47054,16 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // KYC ENDPOINTS - COMPLETE IMPLEMENTATION
@@ -48096,7 +48220,7 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({
     status: 'error',
     message: err.message,
-    stack: err.stack,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
     name: err.name
   });
 });
@@ -48117,13 +48241,49 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://www.bithashcapital.live'],
-    methods: ['GET', 'POST']
+    methods: ['GET', 'POST'],
+    credentials: true
   },
   transports: ['websocket', 'polling'],
-  allowEIO3: true
+  allowEIO3: true,
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 app.set('io', io);
+
+// =============================================
+// SOCKET.IO AUTH MIDDLEWARE
+// =============================================
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+      // Allow connection but mark as unauthenticated
+      socket.isAuthenticated = false;
+      return next();
+    }
+
+    const decoded = verifyJWT(token);
+    if (decoded && !decoded.isAdmin) {
+      socket.userId = decoded.id;
+      socket.sessionId = decoded.sessionId || null;
+      socket.isAuthenticated = true;
+      socket.isAdmin = false;
+    } else if (decoded && decoded.isAdmin) {
+      socket.userId = decoded.id;
+      socket.isAuthenticated = true;
+      socket.isAdmin = true;
+    } else {
+      socket.isAuthenticated = false;
+    }
+    next();
+  } catch (err) {
+    console.error('Socket auth middleware error:', err);
+    socket.isAuthenticated = false;
+    next();
+  }
+});
 
 // =============================================
 // REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
@@ -48630,31 +48790,33 @@ async function calculateRealWalletBalances(user) {
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
   
-  const token = socket.handshake.auth.token;
-  let userId = null;
-  
-  if (token) {
+  // Socket already has userId and sessionId from middleware
+  const userId = socket.userId;
+  const sessionId = socket.sessionId;
+  const isAuthenticated = socket.isAuthenticated;
+  const isAdmin = socket.isAdmin;
+
+  // Store device info for logout tracking
+  if (userId) {
+    socket.join(`user_${userId}`);
+    console.log(`Socket authenticated for user: ${userId}, session: ${sessionId}`);
+  }
+
+  // Send initial data if authenticated
+  if (isAuthenticated && userId && !isAdmin) {
     try {
-      const decoded = verifyJWT(token);
-      if (decoded && !decoded.isAdmin) {
-        userId = decoded.id;
-        socket.join(`user_${userId}`);
-        console.log(`Socket authenticated for user: ${userId}`);
+      const user = await User.findById(userId).select('balances');
+      if (user) {
+        const { mainUSD, activeUSD, maturedUSD, priceErrors, mainBreakdown, maturedBreakdown } = await calculateRealWalletBalances(user);
         
-        const user = await User.findById(userId).select('balances');
-        if (user) {
-          const { mainUSD, activeUSD, maturedUSD, priceErrors, mainBreakdown, maturedBreakdown } = await calculateRealWalletBalances(user);
-          
-          if (priceErrors.length > 0) {
-            socket.emit('error', {
-              type: 'price_fetch_failed',
-              message: `Unable to fetch current prices for: ${priceErrors.join(', ').toUpperCase()}. Please try again.`,
-              missingAssets: priceErrors,
-              timestamp: Date.now()
-            });
-            return;
-          }
-          
+        if (priceErrors.length > 0) {
+          socket.emit('error', {
+            type: 'price_fetch_failed',
+            message: `Unable to fetch current prices for: ${priceErrors.join(', ').toUpperCase()}. Please try again.`,
+            missingAssets: priceErrors,
+            timestamp: Date.now()
+          });
+        } else {
           socket.emit('balance_update', {
             main: mainUSD,
             active: activeUSD,
@@ -48671,94 +48833,128 @@ io.on('connection', async (socket) => {
           console.log(`   MATURED breakdown: ${maturedBreakdown.map(a => `${a.balance} ${a.asset.toUpperCase()}`).join(', ')}`);
           
           const assetData = await buildRealAssetData(user, userId);
-          if (assetData.length > 0 || priceErrors.length === 0) {
+          if (assetData.length > 0) {
             socket.emit('asset_balances_update', assetData);
           }
         }
-        
-        const userPref = await UserPreference.findOne({ user: userId });
-        if (userPref) {
-          socket.emit('preferences_update', {
-            displayAsset: userPref.displayAsset,
-            language: userPref.language,
-            currency: userPref.currency
-          });
-        }
+      }
+      
+      const userPref = await UserPreference.findOne({ user: userId });
+      if (userPref) {
+        socket.emit('preferences_update', {
+          displayAsset: userPref.displayAsset,
+          language: userPref.language,
+          currency: userPref.currency
+        });
       }
     } catch (err) {
-      console.error('Socket auth error:', err);
-      socket.emit('error', { type: 'auth_failed', message: 'Authentication failed' });
+      console.error('Error sending initial data to user:', err);
+      socket.emit('error', { type: 'data_error', message: 'Failed to load user data' });
     }
   }
-  
+
+  // Send stats to all clients
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
-  console.log(`📡 Sent stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
+  console.log(`📡 Sent stats to client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
 
+  // =============================================
+  // HANDLE FORCED LOGOUT FROM SERVER
+  // =============================================
+  socket.on('forced_logout', (data) => {
+    console.log(`🔴 Socket ${socket.id} forced to logout:`, data);
+    // Acknowledge receipt
+    socket.emit('logout_acknowledged', { 
+      timestamp: Date.now(),
+      reason: data.reason || 'forced_logout'
+    });
+    // Disconnect after sending acknowledgment
+    setTimeout(() => {
+      socket.disconnect(true);
+    }, 100);
+  });
+
+  // =============================================
+  // ADMIN AUTHENTICATION
+  // =============================================
   socket.on('authenticate', async (token) => {
     try {
       const decoded = verifyJWT(token);
       if (!decoded.isAdmin) {
+        socket.emit('auth_error', { message: 'Admin access required' });
         socket.disconnect();
         return;
       }
 
       const admin = await Admin.findById(decoded.id);
       if (!admin) {
+        socket.emit('auth_error', { message: 'Admin not found' });
         socket.disconnect();
         return;
       }
 
       socket.adminId = admin._id;
+      socket.isAdmin = true;
       console.log(`Admin ${admin.email} connected`);
+      socket.emit('auth_success', { role: 'admin', name: admin.name });
     } catch (err) {
+      console.error('Admin authentication error:', err);
+      socket.emit('auth_error', { message: 'Authentication failed' });
       socket.disconnect();
     }
   });
   
+  // =============================================
+  // REFRESH PNL
+  // =============================================
   socket.on('refresh_pnl', async () => {
-    if (userId) {
-      const user = await User.findById(userId).select('balances');
-      let totalMainValue = 0;
-      let previousDayValue = 0;
-      
-      if (user && user.balances && user.balances.main) {
-        for (const [asset, balance] of user.balances.main.entries()) {
-          if (balance > 0 && asset !== 'usd') {
-            const currentPrice = await getCryptoPrice(asset.toUpperCase());
-            if (currentPrice && currentPrice > 0) {
-              totalMainValue += balance * currentPrice;
-              
-              let change24h = 0;
-              try {
-                const assetUpper = asset.toUpperCase();
-                const priceData = await getCryptoPriceWithChange(assetUpper);
-                change24h = priceData?.change24h || 0;
-              } catch (err) {
-                change24h = 0;
+    if (userId && isAuthenticated) {
+      try {
+        const user = await User.findById(userId).select('balances');
+        let totalMainValue = 0;
+        let previousDayValue = 0;
+        
+        if (user && user.balances && user.balances.main) {
+          for (const [asset, balance] of user.balances.main.entries()) {
+            if (balance > 0 && asset !== 'usd') {
+              const currentPrice = await getCryptoPrice(asset.toUpperCase());
+              if (currentPrice && currentPrice > 0) {
+                totalMainValue += balance * currentPrice;
+                
+                let change24h = 0;
+                try {
+                  const assetUpper = asset.toUpperCase();
+                  const priceData = await getCryptoPriceWithChange(assetUpper);
+                  change24h = priceData?.change24h || 0;
+                } catch (err) {
+                  change24h = 0;
+                }
+                
+                const previousPrice = currentPrice / (1 + change24h / 100);
+                previousDayValue += balance * previousPrice;
               }
-              
-              const previousPrice = currentPrice / (1 + change24h / 100);
-              previousDayValue += balance * previousPrice;
             }
           }
         }
+        
+        const dailyPnL = totalMainValue - previousDayValue;
+        const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
+        
+        socket.emit('pnl_update', {
+          main: {
+            amount: dailyPnL,
+            percentage: dailyPnLPercentage
+          },
+          matured: {
+            amount: 0,
+            percentage: 0
+          },
+          timestamp: Date.now()
+        });
+      } catch (err) {
+        console.error('Error refreshing PNL:', err);
+        socket.emit('error', { type: 'pnl_error', message: 'Failed to refresh PNL' });
       }
-      
-      const dailyPnL = totalMainValue - previousDayValue;
-      const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
-      
-      socket.emit('pnl_update', {
-        main: {
-          amount: dailyPnL,
-          percentage: dailyPnLPercentage
-        },
-        matured: {
-          amount: 0,
-          percentage: 0
-        },
-        timestamp: Date.now()
-      });
     }
   });
 
@@ -48771,19 +48967,20 @@ io.on('connection', async (socket) => {
       return;
     }
 
-    const token = socket.handshake.auth.token;
-    if (token) {
-      try {
-        const decoded = verifyJWT(token);
-        const user = await User.findById(decoded.id);
-        if (!user || !user.web3Wallet || user.web3Wallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
-          socket.emit('wallet_error', { message: 'Unauthorized wallet address' });
-          return;
-        }
-      } catch (err) {
-        socket.emit('wallet_error', { message: 'Authentication required' });
+    if (!isAuthenticated || !userId) {
+      socket.emit('wallet_error', { message: 'Authentication required' });
+      return;
+    }
+
+    try {
+      const user = await User.findById(userId);
+      if (!user || !user.web3Wallet || user.web3Wallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
+        socket.emit('wallet_error', { message: 'Unauthorized wallet address' });
         return;
       }
+    } catch (err) {
+      socket.emit('wallet_error', { message: 'Failed to verify wallet ownership' });
+      return;
     }
 
     socket.join(`wallet_${walletAddress.toLowerCase()}`);
@@ -48803,18 +49000,25 @@ io.on('connection', async (socket) => {
       }
     }, 30000);
 
-    socket.on('disconnect', () => {
-      clearInterval(interval);
-    });
-
-    socket.on('unsubscribe_wallet', () => {
+    // Clean up on disconnect
+    const cleanup = () => {
       clearInterval(interval);
       socket.leave(`wallet_${walletAddress.toLowerCase()}`);
-    });
+    };
+
+    socket.on('disconnect', cleanup);
+    socket.on('unsubscribe_wallet', cleanup);
   });
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+  // =============================================
+  // DISCONNECT HANDLER
+  // =============================================
+  socket.on('disconnect', (reason) => {
+    console.log(`Client disconnected: ${socket.id}, reason: ${reason}`);
+    // Clean up any room associations if needed
+    if (userId) {
+      // We don't leave the user room automatically - they might reconnect
+    }
   });
 });
 
@@ -49081,10 +49285,23 @@ startPnLCronJob(io);
 // =============================================
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
+  
+  // Clear all intervals
   if (priceBroadcastInterval) clearInterval(priceBroadcastInterval);
   if (balanceBroadcastInterval) clearInterval(balanceBroadcastInterval);
   stopInvestorGrowthJob();
-  process.exit(0);
+  
+  // Close Socket.IO connections gracefully
+  io.close(() => {
+    console.log('Socket.IO server closed');
+    process.exit(0);
+  });
+  
+  // Force exit after 10 seconds if graceful shutdown fails
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
 };
 
 process.on('SIGTERM', gracefulShutdown);
@@ -49101,5 +49318,6 @@ httpServer.listen(PORT, () => {
   console.log(`📡 Real-time balance broadcaster: EVERY 10 SECONDS`);
   console.log(`📊 Real-time price broadcaster: EVERY 5 SECONDS`);
   console.log(`📈 Investor growth job: ${INITIAL_INVESTOR_COUNT.toLocaleString()} base, +1-49 every 3-120s, max ${DAILY_GROWTH_LIMIT}/day`);
+  console.log(`🔐 Socket.IO forced logout: ENABLED`);
   console.log(`${'='.repeat(60)}\n`);
 });
