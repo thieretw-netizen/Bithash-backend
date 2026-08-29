@@ -17512,26 +17512,6 @@ app.delete('/api/users/two-factor', protect, [
   }
 });
 
-app.get('/api/users/activity', protect, async (req, res) => {
-  try {
-    const { limit = 20 } = req.query;
-    const activities = await SystemLog.find({ performedBy: req.user.id, performedByModel: 'User' })
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .lean();
-
-    res.status(200).json({
-      status: 'success',
-      data: activities
-    });
-  } catch (err) {
-    console.error('Get user activity error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while fetching user activity'
-    });
-  }
-});
 
 
 
