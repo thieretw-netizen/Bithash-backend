@@ -45185,7 +45185,747 @@ app.get('/api/users/activity', protect, async (req, res) => {
     }
 });
 
+// =============================================
+// TWO-FACTOR AUTHENTICATION ENDPOINTS - COMPLETE IMPLEMENTATION
+// =============================================
 
+// =============================================
+// 1. POST /api/users/two-factor/authenticator/setup - Initialize 2FA setup
+// =============================================
+app.post('/api/users/two-factor/authenticator/setup', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('+twoFactorAuth.secret email firstName lastName');
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Check if 2FA is already enabled
+        if (user.twoFactorAuth && user.twoFactorAuth.enabled === true) {
+            return res.status(409).json({
+                status: 'fail',
+                message: 'Two-factor authentication is already enabled for this account',
+                code: 'TWO_FACTOR_ALREADY_ENABLED'
+            });
+        }
+
+        // Generate TOTP secret
+        const secret = speakeasy.generateSecret({
+            length: 20,
+            name: '₿itHash Capital',
+            issuer: '₿itHash Capital'
+        });
+
+        // Generate enrollment ID
+        const enrollmentId = crypto.randomBytes(32).toString('hex');
+
+        // Store the secret temporarily with enrollment
+        const enrollment = await UserEnrollment.create({
+            userId: userId,
+            enrollmentId: enrollmentId,
+            secret: secret.base32,
+            type: 'totp_setup',
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+            status: 'pending',
+            attempts: 0
+        });
+
+        // Generate QR code URL for the frontend
+        const otpauthUrl = secret.otpauth_url;
+
+        // Generate a QR code as data URL
+        let qrCodeDataUrl = null;
+        try {
+            // Use the QRCode library to generate the QR code
+            const QRCode = require('qrcode');
+            qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl, {
+                width: 200,
+                margin: 2,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                }
+            });
+        } catch (qrError) {
+            console.warn('QR code generation failed, returning OTP auth URL instead:', qrError.message);
+            // If QR generation fails, return the otpauth URL for manual entry
+        }
+
+        res.status(200).json({
+            status: 'success',
+            enrollmentId: enrollmentId,
+            manualKey: secret.base32,
+            qrCode: qrCodeDataUrl,
+            otpauthUri: otpauthUrl
+        });
+
+        // Log the activity
+        await logActivity(
+            'two_factor_setup_initiated',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            {
+                enrollmentId: enrollmentId,
+                method: 'authenticator'
+            }
+        );
+
+    } catch (err) {
+        console.error('Error setting up 2FA:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to initialize two-factor authentication setup'
+        });
+    }
+});
+
+// =============================================
+// 2. POST /api/users/two-factor/authenticator/verify - Verify OTP and complete 2FA setup
+// =============================================
+app.post('/api/users/two-factor/authenticator/verify', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { code, enrollmentId } = req.body;
+
+        if (!code || !enrollmentId) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Verification code and enrollment ID are required'
+            });
+        }
+
+        if (!/^\d{6}$/.test(code)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Verification code must be 6 digits'
+            });
+        }
+
+        const user = await User.findById(userId).select('+twoFactorAuth.secret');
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Check if 2FA is already enabled
+        if (user.twoFactorAuth && user.twoFactorAuth.enabled === true) {
+            return res.status(409).json({
+                status: 'fail',
+                message: 'Two-factor authentication is already enabled',
+                code: 'TWO_FACTOR_ALREADY_ENABLED'
+            });
+        }
+
+        // Find the enrollment
+        const enrollment = await UserEnrollment.findOne({
+            userId: userId,
+            enrollmentId: enrollmentId,
+            type: 'totp_setup',
+            status: 'pending',
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!enrollment) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid or expired enrollment. Please restart the setup process.',
+                code: 'INVALID_ENROLLMENT'
+            });
+        }
+
+        // Check attempts
+        if (enrollment.attempts >= 5) {
+            return res.status(429).json({
+                status: 'fail',
+                message: 'Too many failed attempts. Please restart the setup process.',
+                code: 'TOO_MANY_ATTEMPTS'
+            });
+        }
+
+        // Verify the TOTP code
+        const isValid = speakeasy.totp.verify({
+            secret: enrollment.secret,
+            encoding: 'base32',
+            token: code,
+            window: 2
+        });
+
+        if (!isValid) {
+            // Increment attempts
+            enrollment.attempts += 1;
+            await enrollment.save();
+
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid verification code. Please try again.',
+                code: 'INVALID_CODE',
+                attemptsRemaining: 5 - enrollment.attempts
+            });
+        }
+
+        // Mark enrollment as used
+        enrollment.status = 'used';
+        await enrollment.save();
+
+        // Enable 2FA for the user
+        user.twoFactorAuth = {
+            enabled: true,
+            secret: enrollment.secret
+        };
+        user.passwordChangedAt = new Date(); // Invalidate existing sessions
+        await user.save();
+
+        // Generate recovery codes
+        const recoveryCodes = [];
+        const recoveryCodeHashes = [];
+
+        for (let i = 0; i < 10; i++) {
+            // Generate a random 8-character alphanumeric code with dashes for readability
+            const codeSegment1 = crypto.randomBytes(4).toString('hex').toUpperCase();
+            const codeSegment2 = crypto.randomBytes(4).toString('hex').toUpperCase();
+            const code = `${codeSegment1}-${codeSegment2}`;
+            recoveryCodes.push(code);
+
+            // Hash the code for storage
+            const hashedCode = crypto.createHash('sha256').update(code).digest('hex');
+            recoveryCodeHashes.push(hashedCode);
+        }
+
+        // Store recovery code hashes
+        await UserRecoveryCodes.findOneAndUpdate(
+            { userId: userId },
+            {
+                userId: userId,
+                hashes: recoveryCodeHashes,
+                generatedAt: new Date()
+            },
+            { upsert: true, new: true }
+        );
+
+        // Log the activity
+        await logActivity(
+            'two_factor_enabled',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            {
+                method: 'authenticator',
+                recoveryCodesGenerated: recoveryCodes.length
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Two-factor authentication enabled successfully',
+            recoveryCodes: recoveryCodes
+        });
+
+    } catch (err) {
+        console.error('Error verifying 2FA setup:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to verify two-factor authentication'
+        });
+    }
+});
+
+// =============================================
+// 3. POST /api/users/two-factor/authenticator/disable/challenge - Request challenge to disable 2FA
+// =============================================
+app.post('/api/users/two-factor/authenticator/disable/challenge', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('email firstName lastName twoFactorAuth');
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Check if 2FA is enabled
+        if (!user.twoFactorAuth || user.twoFactorAuth.enabled !== true) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Two-factor authentication is not enabled for this account',
+                code: 'TWO_FACTOR_NOT_ENABLED'
+            });
+        }
+
+        // Generate a challenge ID
+        const challengeId = crypto.randomBytes(32).toString('hex');
+
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // Hash the OTP for storage
+        const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+
+        // Store the challenge
+        await UserChallenge.create({
+            userId: userId,
+            challengeId: challengeId,
+            type: 'disable_authenticator',
+            otpHash: otpHash,
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+            attempts: 0
+        });
+
+        // Send OTP email
+        try {
+            await sendProfessionalEmail({
+                email: user.email,
+                template: 'otp',
+                data: {
+                    name: user.firstName || 'User',
+                    otp: otp,
+                    action: 'disable two-factor authentication'
+                }
+            });
+        } catch (emailError) {
+            console.error('Failed to send disable 2FA OTP:', emailError);
+            // Continue anyway - the challenge is created
+        }
+
+        // Log the activity
+        await logActivity(
+            'two_factor_disable_challenge',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            {
+                challengeId: challengeId,
+                method: 'otp'
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            challengeId: challengeId,
+            email: user.email,
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+        });
+
+    } catch (err) {
+        console.error('Error creating disable challenge:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to create disable challenge'
+        });
+    }
+});
+
+// =============================================
+// 4. POST /api/users/two-factor/authenticator/disable/verify - Verify challenge and disable 2FA
+// =============================================
+app.post('/api/users/two-factor/authenticator/disable/verify', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { otp, challengeId, code } = req.body;
+
+        // Support both OTP and authenticator code verification
+        const verificationCode = otp || code;
+
+        if (!verificationCode || !challengeId) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Verification code and challenge ID are required'
+            });
+        }
+
+        if (!/^\d{6}$/.test(verificationCode)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Verification code must be 6 digits'
+            });
+        }
+
+        const user = await User.findById(userId).select('+twoFactorAuth.secret');
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Check if 2FA is enabled
+        if (!user.twoFactorAuth || user.twoFactorAuth.enabled !== true) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Two-factor authentication is not enabled',
+                code: 'TWO_FACTOR_NOT_ENABLED'
+            });
+        }
+
+        // Find the challenge
+        const challenge = await UserChallenge.findOne({
+            userId: userId,
+            challengeId: challengeId,
+            type: 'disable_authenticator',
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!challenge) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid or expired challenge. Please restart the process.',
+                code: 'INVALID_CHALLENGE'
+            });
+        }
+
+        // Check attempts
+        if (challenge.attempts >= 5) {
+            return res.status(429).json({
+                status: 'fail',
+                message: 'Too many failed attempts. Please restart the process.',
+                code: 'TOO_MANY_ATTEMPTS'
+            });
+        }
+
+        let isValid = false;
+
+        // If we have an OTP hash, verify the OTP
+        if (challenge.otpHash) {
+            const hashedInput = crypto.createHash('sha256').update(verificationCode).digest('hex');
+            isValid = hashedInput === challenge.otpHash;
+        }
+
+        // If OTP verification failed, try authenticator code
+        if (!isValid && user.twoFactorAuth.secret) {
+            isValid = speakeasy.totp.verify({
+                secret: user.twoFactorAuth.secret,
+                encoding: 'base32',
+                token: verificationCode,
+                window: 2
+            });
+        }
+
+        if (!isValid) {
+            // Increment attempts
+            challenge.attempts += 1;
+            await challenge.save();
+
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid verification code. Please try again.',
+                code: 'INVALID_CODE',
+                attemptsRemaining: 5 - challenge.attempts
+            });
+        }
+
+        // Disable 2FA
+        user.twoFactorAuth = {
+            enabled: false,
+            secret: undefined
+        };
+        user.passwordChangedAt = new Date(); // Invalidate existing sessions
+        await user.save();
+
+        // Delete recovery codes
+        await UserRecoveryCodes.findOneAndDelete({ userId: userId });
+
+        // Delete the challenge
+        await UserChallenge.findByIdAndDelete(challenge._id);
+
+        // Log the activity
+        await logActivity(
+            'two_factor_disabled',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            {
+                method: 'authenticator'
+            }
+        );
+
+        // Send confirmation email
+        try {
+            await sendProfessionalEmail({
+                email: user.email,
+                template: 'default',
+                data: {
+                    name: user.firstName || 'User',
+                    subject: 'Two-Factor Authentication Disabled',
+                    message: 'Two-factor authentication has been disabled on your account. If you did not perform this action, please contact support immediately.'
+                }
+            });
+        } catch (emailError) {
+            console.error('Failed to send disable confirmation email:', emailError);
+        }
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Two-factor authentication has been disabled'
+        });
+
+    } catch (err) {
+        console.error('Error verifying disable challenge:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to verify disable challenge'
+        });
+    }
+});
+
+// =============================================
+// 5. POST /api/users/two-factor/recovery-codes/challenge - Request challenge to regenerate recovery codes
+// =============================================
+app.post('/api/users/two-factor/recovery-codes/challenge', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId).select('email firstName lastName twoFactorAuth');
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Check if 2FA is enabled
+        if (!user.twoFactorAuth || user.twoFactorAuth.enabled !== true) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Two-factor authentication is not enabled for this account',
+                code: 'TWO_FACTOR_NOT_ENABLED'
+            });
+        }
+
+        // Generate a challenge ID
+        const challengeId = crypto.randomBytes(32).toString('hex');
+
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // Hash the OTP for storage
+        const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+
+        // Store the challenge
+        await UserChallenge.create({
+            userId: userId,
+            challengeId: challengeId,
+            type: 'recovery_codes',
+            otpHash: otpHash,
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+            attempts: 0
+        });
+
+        // Send OTP email
+        try {
+            await sendProfessionalEmail({
+                email: user.email,
+                template: 'otp',
+                data: {
+                    name: user.firstName || 'User',
+                    otp: otp,
+                    action: 'regenerate recovery codes'
+                }
+            });
+        } catch (emailError) {
+            console.error('Failed to send recovery codes OTP:', emailError);
+        }
+
+        // Log the activity
+        await logActivity(
+            'recovery_codes_challenge',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            {
+                challengeId: challengeId
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            challengeId: challengeId,
+            email: user.email,
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+        });
+
+    } catch (err) {
+        console.error('Error creating recovery codes challenge:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to create recovery codes challenge'
+        });
+    }
+});
+
+// =============================================
+// 6. POST /api/users/two-factor/recovery-codes/verify - Verify challenge and get new recovery codes
+// =============================================
+app.post('/api/users/two-factor/recovery-codes/verify', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { otp, challengeId, code } = req.body;
+
+        // Support both OTP and authenticator code verification
+        const verificationCode = otp || code;
+
+        if (!verificationCode || !challengeId) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Verification code and challenge ID are required'
+            });
+        }
+
+        if (!/^\d{6}$/.test(verificationCode)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Verification code must be 6 digits'
+            });
+        }
+
+        const user = await User.findById(userId).select('+twoFactorAuth.secret');
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Check if 2FA is enabled
+        if (!user.twoFactorAuth || user.twoFactorAuth.enabled !== true) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Two-factor authentication is not enabled',
+                code: 'TWO_FACTOR_NOT_ENABLED'
+            });
+        }
+
+        // Find the challenge
+        const challenge = await UserChallenge.findOne({
+            userId: userId,
+            challengeId: challengeId,
+            type: 'recovery_codes',
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!challenge) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid or expired challenge. Please restart the process.',
+                code: 'INVALID_CHALLENGE'
+            });
+        }
+
+        // Check attempts
+        if (challenge.attempts >= 5) {
+            return res.status(429).json({
+                status: 'fail',
+                message: 'Too many failed attempts. Please restart the process.',
+                code: 'TOO_MANY_ATTEMPTS'
+            });
+        }
+
+        let isValid = false;
+
+        // If we have an OTP hash, verify the OTP
+        if (challenge.otpHash) {
+            const hashedInput = crypto.createHash('sha256').update(verificationCode).digest('hex');
+            isValid = hashedInput === challenge.otpHash;
+        }
+
+        // If OTP verification failed, try authenticator code
+        if (!isValid && user.twoFactorAuth.secret) {
+            isValid = speakeasy.totp.verify({
+                secret: user.twoFactorAuth.secret,
+                encoding: 'base32',
+                token: verificationCode,
+                window: 2
+            });
+        }
+
+        if (!isValid) {
+            // Increment attempts
+            challenge.attempts += 1;
+            await challenge.save();
+
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid verification code. Please try again.',
+                code: 'INVALID_CODE',
+                attemptsRemaining: 5 - challenge.attempts
+            });
+        }
+
+        // Delete the challenge
+        await UserChallenge.findByIdAndDelete(challenge._id);
+
+        // Generate new recovery codes
+        const recoveryCodes = [];
+        const recoveryCodeHashes = [];
+
+        for (let i = 0; i < 10; i++) {
+            const codeSegment1 = crypto.randomBytes(4).toString('hex').toUpperCase();
+            const codeSegment2 = crypto.randomBytes(4).toString('hex').toUpperCase();
+            const code = `${codeSegment1}-${codeSegment2}`;
+            recoveryCodes.push(code);
+
+            const hashedCode = crypto.createHash('sha256').update(code).digest('hex');
+            recoveryCodeHashes.push(hashedCode);
+        }
+
+        // Update stored recovery codes
+        await UserRecoveryCodes.findOneAndUpdate(
+            { userId: userId },
+            {
+                userId: userId,
+                hashes: recoveryCodeHashes,
+                generatedAt: new Date()
+            },
+            { upsert: true, new: true }
+        );
+
+        // Log the activity
+        await logActivity(
+            'recovery_codes_regenerated',
+            'User',
+            userId,
+            userId,
+            'User',
+            req,
+            {
+                codesGenerated: recoveryCodes.length
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Recovery codes regenerated successfully',
+            recoveryCodes: recoveryCodes
+        });
+
+    } catch (err) {
+        console.error('Error verifying recovery codes challenge:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to verify recovery codes challenge'
+        });
+    }
+});
 
 
 
