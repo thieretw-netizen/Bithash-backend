@@ -45047,7 +45047,296 @@ app.put('/api/users/settings', protect, async (req, res) => {
 
 
 
+// =============================================
+// 1. GET /api/users/activity - Get paginated, filtered activity log
+// =============================================
+app.get('/api/users/activity', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const skip = (page - 1) * limit;
+        const filter = req.query.type || 'all';
 
+        // Build the query - fetch from SystemLog (single source of truth)
+        let query = {
+            performedBy: userId,
+            performedByModel: { $in: ['User', 'System'] }
+        };
+
+        // Apply filters based on actionCategory
+        if (filter !== 'all') {
+            const filterMap = {
+                'authentication': ['authentication'],
+                'security': ['security'],
+                'devices': ['authentication'],
+                'deposits': ['financial'],
+                'withdrawals': ['financial'],
+                'wallets': ['financial'],
+                'verification': ['verification'],
+                'api': ['system'],
+                'account': ['profile', 'security']
+            };
+
+            const categories = filterMap[filter] || [];
+            if (categories.length > 0) {
+                query.actionCategory = { $in: categories };
+            }
+
+            // Additional filters for specific types
+            if (filter === 'deposits') {
+                query.action = { $in: ['deposit_created', 'deposit_completed', 'deposit_pending', 'deposit_failed', 'deposit_cancelled', 'deposit_approved', 'deposit_rejected'] };
+            } else if (filter === 'withdrawals') {
+                query.action = { $in: ['withdrawal_created', 'withdrawal_pending', 'withdrawal_completed', 'withdrawal_failed', 'withdrawal_cancelled', 'withdrawal_approved', 'withdrawal_rejected'] };
+            } else if (filter === 'wallets') {
+                query.action = { $in: ['wallet_connected', 'wallet_disconnected', 'wallet_linked', 'wallet_unlinked', 'web3_wallet_added', 'web3_wallet_removed'] };
+            } else if (filter === 'devices') {
+                query.action = { $in: ['device_login', 'device_verification', 'trusted_device_added', 'login', 'logout', 'session_created', 'session_timeout'] };
+            } else if (filter === 'verification') {
+                query.action = { $in: ['kyc_submission', 'kyc_pending', 'kyc_approved', 'kyc_rejected', 'kyc_document_upload', 'identity_verification', 'address_verification', 'email_verification'] };
+            } else if (filter === 'api') {
+                query.action = { $in: ['api_key_create', 'api_key_delete', 'api_key_regenerate'] };
+            } else if (filter === 'account') {
+                query.action = { $in: ['profile_update', 'account_settings_update', 'password_change', 'password_reset_request', 'password_reset_complete', '2fa_enable', '2fa_disable'] };
+            } else if (filter === 'authentication') {
+                query.action = { $in: ['login', 'logout', 'login_attempt', 'failed_login', 'suspicious_activity', 'session_created', 'session_timeout'] };
+            } else if (filter === 'security') {
+                query.action = { $in: ['password_change', 'password_reset_request', 'password_reset_complete', '2fa_enable', '2fa_disable', 'security_settings_update', 'suspicious_activity'] };
+            }
+        }
+
+        // Date range for performance (last 30 days by default)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        query.createdAt = { $gte: thirtyDaysAgo };
+
+        // Get total count for pagination
+        const total = await SystemLog.countDocuments(query);
+
+        // Fetch activities from SystemLog with proper population
+        const activities = await SystemLog.find(query)
+            .populate('performedBy', 'firstName lastName email')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        // Format activities to match frontend expectations
+        const formattedActivities = activities.map(log => {
+            // Extract location info
+            let city = 'Unknown';
+            let country = 'Unknown';
+            let region = 'Unknown';
+            let latitude = null;
+            let longitude = null;
+
+            if (log.location) {
+                // Try to parse location string
+                if (typeof log.location === 'string' && log.location !== 'Unknown') {
+                    const parts = log.location.split(',').map(p => p.trim());
+                    if (parts.length >= 1) city = parts[0];
+                    if (parts.length >= 2) region = parts[1];
+                    if (parts.length >= 3) country = parts[2];
+                } else if (typeof log.location === 'object') {
+                    city = log.location.city || 'Unknown';
+                    region = log.location.region || 'Unknown';
+                    country = log.location.country || 'Unknown';
+                    latitude = log.location.latitude || null;
+                    longitude = log.location.longitude || null;
+                }
+            }
+
+            // Use the stored location if available, otherwise fallback
+            const locationString = typeof log.location === 'string' ? log.location : 
+                `${city}, ${region}, ${country}`;
+
+            // Determine activity type for icon mapping
+            let type = log.actionCategory || 'system';
+            let title = log.action || 'Activity';
+            
+            // Map action to user-friendly title
+            const titleMap = {
+                'login': 'Login',
+                'logout': 'Logout',
+                'signup': 'Account Created',
+                'password_change': 'Password Changed',
+                '2fa_enable': '2FA Enabled',
+                '2fa_disable': '2FA Disabled',
+                'deposit_created': 'Deposit Initiated',
+                'deposit_completed': 'Deposit Completed',
+                'deposit_failed': 'Deposit Failed',
+                'deposit_approved': 'Deposit Approved',
+                'deposit_rejected': 'Deposit Rejected',
+                'withdrawal_created': 'Withdrawal Requested',
+                'withdrawal_completed': 'Withdrawal Completed',
+                'withdrawal_failed': 'Withdrawal Failed',
+                'withdrawal_approved': 'Withdrawal Approved',
+                'withdrawal_rejected': 'Withdrawal Rejected',
+                'investment_created': 'Investment Created',
+                'investment_completed': 'Investment Completed',
+                'investment_cancelled': 'Investment Cancelled',
+                'investment_matured': 'Investment Matured',
+                'wallet_linked': 'Wallet Linked',
+                'wallet_unlinked': 'Wallet Unlinked',
+                'wallet_connected': 'Wallet Connected',
+                'wallet_disconnected': 'Wallet Disconnected',
+                'web3_wallet_added': 'Web3 Wallet Added',
+                'web3_wallet_removed': 'Web3 Wallet Removed',
+                'kyc_submission': 'KYC Submitted',
+                'kyc_approved': 'KYC Approved',
+                'kyc_rejected': 'KYC Rejected',
+                'api_key_create': 'API Key Created',
+                'api_key_delete': 'API Key Revoked',
+                'profile_update': 'Profile Updated',
+                'transfer_created': 'Transfer Initiated',
+                'transfer_completed': 'Transfer Completed',
+                'buy_created': 'Buy Order Created',
+                'buy_completed': 'Buy Order Completed',
+                'sell_created': 'Sell Order Created',
+                'sell_completed': 'Sell Order Completed',
+                'referral_joined': 'Referral Joined',
+                'referral_bonus_earned': 'Referral Bonus Earned'
+            };
+
+            title = titleMap[log.action] || log.action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+            // Determine status
+            let status = 'completed';
+            if (log.status === 'failed' || log.status === 'error') {
+                status = 'failed';
+            } else if (log.status === 'pending' || log.status === 'processing') {
+                status = 'pending';
+            }
+
+            // Extract transaction info if available
+            let transaction = null;
+            if (log.financial && log.financial.transactionId) {
+                transaction = {
+                    hash: log.financial.reference || log.financial.transactionId,
+                    amount: log.financial.amount,
+                    asset: log.financial.cryptoAsset || 'USD'
+                };
+            }
+
+            // Build device info
+            let device = {
+                browser: log.browser || 'Unknown',
+                os: log.os || 'Unknown',
+                type: log.deviceType || 'desktop'
+            };
+
+            // Get user name
+            let userName = 'System';
+            let userEmail = 'system@bithash.com';
+            
+            if (log.performedBy) {
+                if (log.performedByModel === 'Admin') {
+                    userName = log.performedBy.name || log.performedByName || 'Admin';
+                    userEmail = log.performedBy.email || log.performedByEmail || 'admin@bithash.com';
+                } else {
+                    userName = `${log.performedBy.firstName || ''} ${log.performedBy.lastName || ''}`.trim() || 
+                               log.performedByName || 
+                               'User';
+                    userEmail = log.performedBy.email || log.performedByEmail || 'user@bithash.com';
+                }
+            } else if (log.performedByName) {
+                userName = log.performedByName;
+                userEmail = log.performedByEmail || 'unknown@bithash.com';
+            }
+
+            // Build description
+            let description = log.errorMessage || log.metadata?.description || '';
+            
+            // If no description, generate one from action and metadata
+            if (!description) {
+                if (log.financial && log.financial.amount) {
+                    const asset = log.financial.cryptoAsset || 'USD';
+                    const amount = log.financial.amount;
+                    description = `${title}: ${amount} ${asset}`;
+                } else if (log.action === 'login') {
+                    description = `Login from ${device.browser} on ${device.os}`;
+                } else if (log.action === 'logout') {
+                    description = 'Logged out successfully';
+                } else if (log.action === 'password_change') {
+                    description = 'Password was changed';
+                } else if (log.action === 'profile_update') {
+                    const fields = log.changes?.fields || [];
+                    if (fields.length > 0) {
+                        description = `Updated: ${fields.join(', ')}`;
+                    } else {
+                        description = 'Profile information updated';
+                    }
+                } else if (log.action === 'deposit_created') {
+                    const amount = log.financial?.amount || log.metadata?.amount || 0;
+                    const asset = log.financial?.cryptoAsset || log.metadata?.asset || 'USD';
+                    description = `Deposit of ${amount} ${asset} initiated`;
+                } else if (log.action === 'withdrawal_created') {
+                    const amount = log.financial?.amount || log.metadata?.amount || 0;
+                    const asset = log.financial?.cryptoAsset || log.metadata?.asset || 'USD';
+                    description = `Withdrawal of ${amount} ${asset} requested`;
+                } else if (log.action === 'investment_created') {
+                    const amount = log.metadata?.investmentAmountUSD || log.financial?.amount || 0;
+                    const plan = log.metadata?.planName || '';
+                    description = `Investment of $${amount} in ${plan}`;
+                } else if (log.action === 'kyc_submission') {
+                    description = 'KYC application submitted for review';
+                } else if (log.action === 'kyc_approved') {
+                    description = 'KYC verification approved';
+                } else if (log.action === 'kyc_rejected') {
+                    description = `KYC verification rejected: ${log.metadata?.reason || 'No reason provided'}`;
+                } else {
+                    description = `${title} performed`;
+                }
+            }
+
+            return {
+                id: log._id.toString(),
+                type: type,
+                title: title,
+                description: description,
+                status: status,
+                createdAt: log.createdAt,
+                user: {
+                    name: userName,
+                    email: userEmail
+                },
+                location: {
+                    city: city,
+                    country: country,
+                    region: region
+                },
+                device: device,
+                transaction: transaction,
+                metadata: log.metadata || {},
+                changes: log.changes || null
+            };
+        });
+
+        // Determine if there are more items
+        const hasNext = skip + limit < total;
+
+        // Return in the format the HTML expects
+        res.status(200).json({
+            status: 'success',
+            data: {
+                activities: formattedActivities,
+                pagination: {
+                    page: page,
+                    limit: limit,
+                    total: total,
+                    hasNext: hasNext
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching user activity:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch activity log'
+        });
+    }
+});
 
 
 
