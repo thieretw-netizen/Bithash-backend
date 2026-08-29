@@ -46321,6 +46321,284 @@ app.post('/api/users/devices/logout-all', protect, async (req, res) => {
     }
 });
 
+// =============================================
+// KYC ENDPOINTS - COMPLETE IMPLEMENTATION
+// =============================================
+
+// =============================================
+// 1. GET /api/users/kyc/status - Get KYC verification status
+// =============================================
+app.get('/api/users/kyc/status', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        
+        const kycRecord = await KYC.findOne({ user: userId }).lean();
+
+        if (!kycRecord) {
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    status: 'unverified',
+                    message: 'KYC verification not started',
+                    rejectionReason: null,
+                    isSubmitted: false,
+                    canSubmit: false
+                }
+            });
+        }
+
+        // Determine overall status
+        let status = 'unverified';
+        let message = 'KYC verification not completed';
+        let rejectionReason = null;
+
+        // Check individual statuses
+        const identityStatus = kycRecord.identity?.status || 'not-submitted';
+        const addressStatus = kycRecord.address?.status || 'not-submitted';
+        const facialStatus = kycRecord.facial?.status || 'not-submitted';
+
+        // Check if all required sections are submitted
+        const allSubmitted = 
+            identityStatus === 'pending' || identityStatus === 'verified' ||
+            addressStatus === 'pending' || addressStatus === 'verified' ||
+            facialStatus === 'pending' || facialStatus === 'verified';
+
+        // Overall status mapping
+        if (kycRecord.overallStatus === 'verified') {
+            status = 'verified';
+            message = 'KYC verification completed successfully';
+        } else if (kycRecord.overallStatus === 'pending') {
+            status = 'pending';
+            message = 'KYC verification is under review';
+        } else if (kycRecord.overallStatus === 'rejected') {
+            status = 'rejected';
+            message = 'KYC verification was rejected';
+            // Get rejection reason from any section that has it
+            if (kycRecord.identity?.rejectionReason) {
+                rejectionReason = kycRecord.identity.rejectionReason;
+            } else if (kycRecord.address?.rejectionReason) {
+                rejectionReason = kycRecord.address.rejectionReason;
+            } else if (kycRecord.facial?.rejectionReason) {
+                rejectionReason = kycRecord.facial.rejectionReason;
+            } else if (kycRecord.adminNotes) {
+                rejectionReason = kycRecord.adminNotes;
+            }
+        } else if (allSubmitted) {
+            status = 'pending';
+            message = 'KYC documents submitted, awaiting review';
+        } else {
+            // Check if any documents are uploaded
+            const hasIdentity = identityStatus !== 'not-submitted';
+            const hasAddress = addressStatus !== 'not-submitted';
+            const hasFacial = facialStatus !== 'not-submitted';
+            
+            if (hasIdentity || hasAddress || hasFacial) {
+                status = 'in-progress';
+                message = 'KYC verification in progress';
+            } else {
+                status = 'unverified';
+                message = 'KYC verification not started';
+            }
+        }
+
+        // Determine if user can submit
+        const canSubmit = 
+            (identityStatus === 'pending' || identityStatus === 'verified') &&
+            (addressStatus === 'pending' || addressStatus === 'verified') &&
+            (facialStatus === 'pending' || facialStatus === 'verified') &&
+            kycRecord.overallStatus !== 'pending' &&
+            kycRecord.overallStatus !== 'verified';
+
+        // Check if application is already submitted
+        const isSubmitted = 
+            kycRecord.overallStatus === 'pending' || 
+            kycRecord.overallStatus === 'verified' ||
+            kycRecord.overallStatus === 'rejected';
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                status: status,
+                message: message,
+                rejectionReason: rejectionReason,
+                isSubmitted: isSubmitted,
+                canSubmit: canSubmit,
+                // Additional details for frontend display
+                details: {
+                    identity: identityStatus,
+                    address: addressStatus,
+                    facial: facialStatus,
+                    overall: kycRecord.overallStatus || 'not-started',
+                    submittedAt: kycRecord.submittedAt,
+                    reviewedAt: kycRecord.reviewedAt
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching KYC status:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch KYC status'
+        });
+    }
+});
+
+// =============================================
+// 2. GET /api/users/kyc - Get full KYC record with document URLs
+// =============================================
+app.get('/api/users/kyc', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        
+        const kycRecord = await KYC.findOne({ user: userId })
+            .populate('identity.verifiedBy', 'name email')
+            .populate('address.verifiedBy', 'name email')
+            .populate('facial.verifiedBy', 'name email')
+            .lean();
+
+        if (!kycRecord) {
+            // Return empty KYC structure
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    kyc: {
+                        identity: {
+                            documentType: '',
+                            documentNumber: '',
+                            documentExpiry: null,
+                            frontImage: null,
+                            backImage: null,
+                            status: 'not-submitted',
+                            verifiedAt: null,
+                            verifiedBy: null,
+                            rejectionReason: ''
+                        },
+                        address: {
+                            documentType: '',
+                            documentDate: null,
+                            documentImage: null,
+                            status: 'not-submitted',
+                            verifiedAt: null,
+                            verifiedBy: null,
+                            rejectionReason: ''
+                        },
+                        facial: {
+                            verificationVideo: null,
+                            verificationPhoto: null,
+                            status: 'not-submitted',
+                            verifiedAt: null,
+                            verifiedBy: null,
+                            rejectionReason: ''
+                        },
+                        overallStatus: 'not-started',
+                        submittedAt: null,
+                        reviewedAt: null,
+                        adminNotes: ''
+                    },
+                    isSubmitted: false
+                }
+            });
+        }
+
+        // Generate document URLs with authentication tokens
+        const generateDocumentUrl = (filename, type) => {
+            if (!filename) return null;
+            
+            // Generate a short-lived token for accessing the document
+            const token = jwt.sign(
+                { 
+                    kycId: kycRecord._id,
+                    userId: userId,
+                    type: type,
+                    filename: filename
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: '1h' }
+            );
+            
+            // Return the URL that will serve the file
+            return `/api/admin/kyc/files/preview/${token}/${type}/${encodeURIComponent(filename)}`;
+        };
+
+        // Format the KYC record with document URLs
+        const formattedKYC = {
+            identity: {
+                documentType: kycRecord.identity?.documentType || '',
+                documentNumber: kycRecord.identity?.documentNumber || '',
+                documentExpiry: kycRecord.identity?.documentExpiry || null,
+                frontImage: kycRecord.identity?.frontImage ? {
+                    filename: kycRecord.identity.frontImage.filename,
+                    url: generateDocumentUrl(kycRecord.identity.frontImage.filename, 'identity-front'),
+                    originalName: kycRecord.identity.frontImage.originalName
+                } : null,
+                backImage: kycRecord.identity?.backImage ? {
+                    filename: kycRecord.identity.backImage.filename,
+                    url: generateDocumentUrl(kycRecord.identity.backImage.filename, 'identity-back'),
+                    originalName: kycRecord.identity.backImage.originalName
+                } : null,
+                status: kycRecord.identity?.status || 'not-submitted',
+                verifiedAt: kycRecord.identity?.verifiedAt || null,
+                verifiedBy: kycRecord.identity?.verifiedBy || null,
+                rejectionReason: kycRecord.identity?.rejectionReason || ''
+            },
+            address: {
+                documentType: kycRecord.address?.documentType || '',
+                documentDate: kycRecord.address?.documentDate || null,
+                documentImage: kycRecord.address?.documentImage ? {
+                    filename: kycRecord.address.documentImage.filename,
+                    url: generateDocumentUrl(kycRecord.address.documentImage.filename, 'address'),
+                    originalName: kycRecord.address.documentImage.originalName
+                } : null,
+                status: kycRecord.address?.status || 'not-submitted',
+                verifiedAt: kycRecord.address?.verifiedAt || null,
+                verifiedBy: kycRecord.address?.verifiedBy || null,
+                rejectionReason: kycRecord.address?.rejectionReason || ''
+            },
+            facial: {
+                verificationVideo: kycRecord.facial?.verificationVideo ? {
+                    filename: kycRecord.facial.verificationVideo.filename,
+                    url: generateDocumentUrl(kycRecord.facial.verificationVideo.filename, 'facial-video'),
+                    originalName: kycRecord.facial.verificationVideo.originalName
+                } : null,
+                verificationPhoto: kycRecord.facial?.verificationPhoto ? {
+                    filename: kycRecord.facial.verificationPhoto.filename,
+                    url: generateDocumentUrl(kycRecord.facial.verificationPhoto.filename, 'facial-photo'),
+                    originalName: kycRecord.facial.verificationPhoto.originalName
+                } : null,
+                status: kycRecord.facial?.status || 'not-submitted',
+                verifiedAt: kycRecord.facial?.verifiedAt || null,
+                verifiedBy: kycRecord.facial?.verifiedBy || null,
+                rejectionReason: kycRecord.facial?.rejectionReason || ''
+            },
+            overallStatus: kycRecord.overallStatus || 'not-started',
+            submittedAt: kycRecord.submittedAt || null,
+            reviewedAt: kycRecord.reviewedAt || null,
+            adminNotes: kycRecord.adminNotes || ''
+        };
+
+        const isSubmitted = 
+            kycRecord.overallStatus === 'pending' || 
+            kycRecord.overallStatus === 'verified' ||
+            kycRecord.overallStatus === 'rejected';
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                kyc: formattedKYC,
+                isSubmitted: isSubmitted
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching KYC record:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to fetch KYC record'
+        });
+    }
+});
+
 
 
 
