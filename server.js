@@ -8838,8 +8838,209 @@ const failAuthLog = async (logId, failureReason, metadata = {}) => {
     }
 };
 
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// SIGNUP ENDPOINT - authProvider is set ONLY during signup
+// SESSION MANAGEMENT HELPER FUNCTIONS
+// =============================================
+
+/**
+ * Create a new session for a user after successful authentication
+ * @param {Object} user - User document
+ * @param {Object} req - Express request object
+ * @param {string} token - JWT token
+ * @returns {Promise<string>} - Session ID
+ */
+async function createUserSession(user, req, token) {
+    try {
+        const sessionId = crypto.randomBytes(16).toString('hex');
+        const deviceInfo = await getUserDeviceInfo(req);
+        const now = new Date();
+        
+        // Get device type
+        const deviceType = getDeviceType(req);
+        
+        // Get browser and OS from user agent
+        const userAgent = req.headers['user-agent'] || 'Unknown';
+        const browser = getBrowserFromUserAgent(userAgent);
+        const os = getOSFromUserAgent(userAgent);
+        
+        // Build session data
+        const sessionData = {
+            userId: user._id.toString(),
+            sessionId: sessionId,
+            deviceInfo: {
+                type: deviceType,
+                name: `${browser} on ${os}`,
+                browser: browser,
+                os: os,
+                userAgent: userAgent,
+                platform: deviceInfo.device || 'Unknown',
+                language: req.headers['accept-language'] || 'Unknown'
+            },
+            locationInfo: {
+                city: deviceInfo.locationDetails?.city || 'Unknown',
+                country: deviceInfo.locationDetails?.country || 'Unknown',
+                region: deviceInfo.locationDetails?.region || 'Unknown',
+                latitude: deviceInfo.locationDetails?.latitude || null,
+                longitude: deviceInfo.locationDetails?.longitude || null,
+                timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+                formatted: deviceInfo.location || 'Unknown'
+            },
+            ip: getRealClientIP(req),
+            createdAt: now.toISOString(),
+            lastActive: now.toISOString(),
+            isActive: true,
+            token: token
+        };
+        
+        // Store session in Redis with 30-day expiry
+        const SESSION_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
+        await redis.setex(
+            `session:${user._id}:${sessionId}`,
+            SESSION_TTL,
+            JSON.stringify(sessionData)
+        );
+        
+        // Store token-to-session mapping for quick lookup
+        await redis.setex(
+            `token:${user._id}:${sessionId}`,
+            SESSION_TTL,
+            token
+        );
+        
+        // Store session ID in token mapping for device logout
+        await redis.setex(
+            `session_token:${token}`,
+            SESSION_TTL,
+            sessionId
+        );
+        
+        // Also store in a user's session list for quick count
+        await redis.sadd(`user_sessions:${user._id}`, sessionId);
+        
+        console.log(`📱 Session created for user ${user.email}: ${sessionId}`);
+        
+        // Update user's login history with device info
+        await User.findByIdAndUpdate(user._id, {
+            $push: {
+                loginHistory: {
+                    ip: getRealClientIP(req),
+                    device: userAgent,
+                    location: deviceInfo.location || 'Unknown',
+                    timestamp: now
+                }
+            }
+        });
+        
+        return sessionId;
+        
+    } catch (err) {
+        console.error('Error creating session:', err);
+        return null;
+    }
+}
+
+/**
+ * Update the lastActive timestamp for a session
+ * @param {string} userId - User ID
+ * @param {string} sessionId - Session ID
+ */
+async function updateSessionActivity(userId, sessionId) {
+    try {
+        const sessionKey = `session:${userId}:${sessionId}`;
+        const sessionData = await redis.get(sessionKey);
+        
+        if (sessionData) {
+            const data = JSON.parse(sessionData);
+            data.lastActive = new Date().toISOString();
+            await redis.setex(sessionKey, 30 * 24 * 60 * 60, JSON.stringify(data));
+        }
+    } catch (err) {
+        // Silently fail - non-critical
+    }
+}
+
+/**
+ * Get session ID from token
+ * @param {string} token - JWT token
+ * @returns {Promise<string|null>} - Session ID or null
+ */
+async function getSessionIdFromToken(token) {
+    try {
+        return await redis.get(`session_token:${token}`);
+    } catch (err) {
+        return null;
+    }
+}
+
+/**
+ * Invalidate a session (logout)
+ * @param {string} userId - User ID
+ * @param {string} sessionId - Session ID
+ */
+async function invalidateSession(userId, sessionId) {
+    try {
+        // Get token before deleting session
+        const tokenKey = `token:${userId}:${sessionId}`;
+        const token = await redis.get(tokenKey);
+        
+        // Delete session data
+        await redis.del(`session:${userId}:${sessionId}`);
+        await redis.del(tokenKey);
+        
+        if (token) {
+            await redis.del(`session_token:${token}`);
+            // Add to blacklist
+            await redis.setex(`blacklist:${token}`, 24 * 60 * 60, 'true');
+        }
+        
+        // Remove from user's session list
+        await redis.srem(`user_sessions:${userId}`, sessionId);
+        
+        console.log(`🔓 Session invalidated: ${sessionId} for user ${userId}`);
+        return true;
+    } catch (err) {
+        console.error('Error invalidating session:', err);
+        return false;
+    }
+}
+
+/**
+ * Invalidate all sessions except the current one
+ * @param {string} userId - User ID
+ * @param {string} currentSessionId - Current session ID to keep
+ * @returns {Promise<number>} - Number of sessions invalidated
+ */
+async function invalidateAllSessionsExcept(userId, currentSessionId) {
+    try {
+        const sessionIds = await redis.smembers(`user_sessions:${userId}`);
+        let invalidatedCount = 0;
+        
+        for (const sessionId of sessionIds) {
+            if (sessionId !== currentSessionId) {
+                await invalidateSession(userId, sessionId);
+                invalidatedCount++;
+            }
+        }
+        
+        return invalidatedCount;
+    } catch (err) {
+        console.error('Error invalidating all sessions:', err);
+        return 0;
+    }
+}
+
+// =============================================
+// SIGNUP ENDPOINT - With Session Tracking
 // =============================================
 app.post('/api/auth/signup', [
     body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
@@ -9338,7 +9539,285 @@ app.post('/api/auth/signup', [
 });
 
 // =============================================
-// LOGIN ENDPOINT - Does NOT change authProvider
+// OTP VERIFICATION ENDPOINT - UPDATED WITH SESSION CREATION
+// =============================================
+app.post('/api/auth/verify-otp', [
+    body('email').isEmail().withMessage('Please provide a valid email'),
+    body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            status: 'fail',
+            message: 'Please enter a valid 6-digit OTP code'
+        });
+    }
+
+    try {
+        const { email, otp } = req.body;
+        const token = req.headers.authorization?.replace('Bearer ', '');
+
+        if (!token) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Authentication required. Please try logging in again.'
+            });
+        }
+
+        let decoded;
+        try {
+            decoded = verifyJWT(token);
+        } catch (err) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Session expired. Please try logging in again.'
+            });
+        }
+
+        const user = await User.findById(decoded.id).select('-password');
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        if (user.email !== email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email does not match user account'
+            });
+        }
+
+        const otpRecord = await OTP.findOne({
+            email: email,
+            otp,
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!otpRecord) {
+            await OTP.updateMany(
+                { email: email, otp, used: false },
+                { $inc: { attempts: 1 } }
+            );
+
+            const failedAttempts = await OTP.countDocuments({
+                email: email,
+                used: false,
+                createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+                attempts: { $gte: 5 }
+            });
+
+            if (failedAttempts >= 5) {
+                await User.findByIdAndUpdate(user._id, {
+                    status: 'suspended',
+                    suspensionLiftAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+                });
+
+                // UPDATE SYSTEMLOG FROM PENDING TO FAILED
+                await failAuthLog(null, 'Too many failed OTP attempts', {
+                    'metadata.email': email,
+                    'metadata.failedAt': new Date().toISOString()
+                });
+
+                return res.status(429).json({
+                    status: 'fail',
+                    message: 'Too many failed attempts. Account suspended for 24 hours.'
+                });
+            }
+
+            const expiredOtp = await OTP.findOne({
+                email: email,
+                otp,
+                used: false,
+                expiresAt: { $lte: new Date() }
+            });
+
+            if (expiredOtp) {
+                // UPDATE SYSTEMLOG FROM PENDING TO FAILED
+                await failAuthLog(null, 'OTP expired', {
+                    'metadata.email': email,
+                    'metadata.failedAt': new Date().toISOString()
+                });
+
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'Verification code has expired. Please request a new one.'
+                });
+            }
+
+            // UPDATE SYSTEMLOG FROM PENDING TO FAILED
+            await failAuthLog(null, 'Invalid OTP', {
+                'metadata.email': email,
+                'metadata.failedAt': new Date().toISOString()
+            });
+
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid verification code. Please try again.'
+            });
+        }
+
+        otpRecord.used = true;
+        await otpRecord.save();
+
+        const isSignupOtp = otpRecord.type === 'signup';
+        const isLoginOtp = otpRecord.type === 'login';
+
+        let wasJustVerified = false;
+        if (isSignupOtp && !user.isVerified) {
+            user.isVerified = true;
+            wasJustVerified = true;
+            await user.save();
+        }
+
+        const finalToken = generateJWT(user._id);
+
+        // =============================================
+        // SESSION CREATION - CRITICAL FOR DEVICE TRACKING
+        // =============================================
+        let sessionId = null;
+        
+        if (isLoginOtp || isSignupOtp) {
+            // Create a new session for this authentication
+            sessionId = await createUserSession(user, req, finalToken);
+            
+            // Update lastLogin
+            user.lastLogin = new Date();
+            
+            // Add to login history
+            const deviceInfo = await getUserDeviceInfo(req);
+            user.loginHistory.push(deviceInfo);
+            
+            await user.save();
+        }
+
+        // Emit device update via Socket.IO if available
+        const io = req.app.get('io');
+        if (io && sessionId) {
+            const deviceInfo = await getUserDeviceInfo(req);
+            io.to(`user_${user._id}`).emit('device_update', {
+                action: 'device_added',
+                device: {
+                    id: sessionId,
+                    name: `${getBrowserFromUserAgent(req.headers['user-agent'])} on ${getOSFromUserAgent(req.headers['user-agent'])}`,
+                    browser: getBrowserFromUserAgent(req.headers['user-agent']),
+                    os: getOSFromUserAgent(req.headers['user-agent']),
+                    type: getDeviceType(req),
+                    location: deviceInfo.location || 'Unknown',
+                    sessionStatus: 'active',
+                    current: true,
+                    lastActiveAt: new Date().toISOString(),
+                    timestamp: new Date().toISOString()
+                },
+                timestamp: Date.now()
+            });
+        }
+
+        res.cookie('jwt', finalToken, {
+            expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict'
+        });
+
+        const deviceInfoForEmail = await getUserDeviceInfo(req);
+
+        if (isSignupOtp && wasJustVerified) {
+            try {
+                await sendAutomatedEmail(user, 'welcome', {
+                    name: user.firstName,
+                    email: user.email
+                });
+                console.log(`📧 Welcome email sent to ${user.email} (after OTP verification)`);
+            } catch (emailError) {
+                console.error('Failed to send welcome email:', emailError);
+            }
+        }
+
+        if (isLoginOtp) {
+            try {
+                await sendAutomatedEmail(user, 'login_success', {
+                    name: user.firstName,
+                    device: deviceInfoForEmail.device || 'Unknown device',
+                    location: deviceInfoForEmail.location || 'Unknown location',
+                    ip: deviceInfoForEmail.ip || 'Unknown IP',
+                    timestamp: new Date().toISOString()
+                });
+                console.log(`📧 Login success email sent to ${user.email} (after OTP verification)`);
+            } catch (emailError) {
+                console.error('Failed to send login success email:', emailError);
+            }
+        }
+
+        // Update SystemLog from pending to success
+        await completeAuthLog(null, {
+            'metadata.email': email,
+            'metadata.verifiedAt': new Date().toISOString(),
+            'metadata.verificationMethod': 'otp',
+            'metadata.otpVerified': true,
+            'metadata.otpType': otpRecord.type,
+            'metadata.sessionId': sessionId,
+            'metadata.sessionCreated': !!sessionId
+        });
+
+        // LOG: Authentication success
+        await createAuthLog({
+            action: isSignupOtp ? 'signup_completed' : 'login_completed',
+            entity: 'User',
+            entityId: user._id,
+            performedBy: user._id,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'success',
+            requestMethod: req.method,
+            requestPath: req.path,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            location: deviceInfoForEmail.location || 'Unknown',
+            metadata: {
+                authProvider: user.authProvider || 'email',
+                sessionId: sessionId,
+                isNewUser: isSignupOtp && wasJustVerified,
+                otpVerified: true
+            }
+        });
+
+        res.status(200).json({
+            status: 'success',
+            message: isSignupOtp
+                ? 'Email verified successfully! Welcome to ₿itHash Capital!'
+                : 'Login successful! Redirecting to dashboard...',
+            token: finalToken,
+            sessionId: sessionId,
+            data: {
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    isVerified: user.isVerified,
+                    hasGoogleAuth: !!user.googleId,
+                    accountType: user.accountType,
+                    authProvider: user.authProvider
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Verify OTP error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'An error occurred during verification. Please try again.'
+        });
+    }
+});
+
+// =============================================
+// LOGIN ENDPOINT - Updated with Session Tracking
 // =============================================
 app.post('/api/auth/login', [
     body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
@@ -9779,7 +10258,7 @@ app.post('/api/auth/login', [
 });
 
 // =============================================
-// GOOGLE AUTH ENDPOINT - Does NOT change authProvider on login
+// GOOGLE AUTH ENDPOINT - Updated with Session Tracking
 // =============================================
 app.post('/api/auth/google', async (req, res) => {
     try {
@@ -10655,6 +11134,24 @@ app.post('/api/auth/google', async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // OTP VERIFICATION ENDPOINT - UPDATES SYSTEMLOG FROM PENDING TO SUCCESS/FAILED
