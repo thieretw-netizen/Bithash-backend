@@ -49227,70 +49227,135 @@ async function sendAdminKYCNotification(userId, kycRecord) {
 
 
 
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// ADMIN PROMO CODE ENDPOINTS
+// PROMO CODES ENDPOINTS - COMPLETE IMPLEMENTATION
 // =============================================
 
-app.post('/api/admin/promos/generate-code', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+// =============================================
+// 1. GET /api/admin/promos/stats - Get promo statistics
+// =============================================
+app.get('/api/admin/promos/stats', adminProtect, async (req, res) => {
     try {
-        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        let code = 'BH-';
-        for (let i = 0; i < 12; i++) {
-            if (i === 4 || i === 8) code += '-';
-            code += characters.charAt(Math.floor(Math.random() * characters.length));
-        }
+        const now = new Date();
+        const sevenDaysFromNow = new Date(now);
+        sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
 
-        let existing = await Promo.findOne({ code: code });
-        let attempts = 0;
-        while (existing && attempts < 10) {
-            code = 'BH-';
-            for (let i = 0; i < 12; i++) {
-                if (i === 4 || i === 8) code += '-';
-                code += characters.charAt(Math.floor(Math.random() * characters.length));
+        // Get all promos
+        const allPromos = await Promo.find({}).lean();
+        
+        // Calculate stats
+        let activeCodes = 0;
+        let totalRedemptions = 0;
+        let totalRewarded = 0;
+        let expiringSoon = 0;
+
+        for (const promo of allPromos) {
+            // Check if active
+            const isActive = promo.isActive && promo.usedCount < promo.maxUses && promo.expiresAt > now;
+            if (isActive) {
+                activeCodes++;
             }
-            existing = await Promo.findOne({ code: code });
-            attempts++;
+
+            // Count redemptions from RedeemedPromo
+            const redemptionCount = await RedeemedPromo.countDocuments({ promoId: promo._id });
+            totalRedemptions += redemptionCount;
+
+            // Calculate total rewarded value
+            const redeemed = await RedeemedPromo.find({ 
+                promoId: promo._id,
+                rewardType: { $ne: 'discount' }
+            });
+            for (const r of redeemed) {
+                if (r.rewardType === 'crypto') {
+                    const price = await getCryptoPrice(r.rewardAsset || 'USDT');
+                    totalRewarded += (r.rewardValue || 0) * (price || 1);
+                } else {
+                    totalRewarded += (r.rewardValue || 0);
+                }
+            }
+
+            // Check if expiring soon (within 7 days)
+            if (promo.isActive && promo.expiresAt && promo.expiresAt <= sevenDaysFromNow && promo.expiresAt > now) {
+                expiringSoon++;
+            }
         }
 
         res.status(200).json({
             status: 'success',
             data: {
-                code: code
+                stats: {
+                    activeCodes: activeCodes,
+                    totalRedemptions: totalRedemptions,
+                    totalRewarded: totalRewarded,
+                    expiringSoon: expiringSoon
+                }
             }
         });
 
     } catch (err) {
-        console.error('Error generating promo code:', err);
+        console.error('Error fetching promo stats:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to generate promo code'
+            message: err.message || 'Failed to fetch promo stats'
         });
     }
 });
 
-app.get('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+// =============================================
+// 2. GET /api/admin/promos - Get paginated promo codes
+// =============================================
+app.get('/api/admin/promos', adminProtect, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 25;
+        const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
         const search = req.query.search || '';
-        const status = req.query.status || 'all';
-        const rewardType = req.query.rewardType || 'all';
+        const statusFilter = req.query.status || 'all';
 
-        let query = {};
-
+        // Build query
+        const query = {};
+        
         if (search) {
             query.code = { $regex: search, $options: 'i' };
         }
 
-        if (status !== 'all') {
-            query.status = status;
+        // Status filter
+        const now = new Date();
+        if (statusFilter !== 'all') {
+            if (statusFilter === 'active') {
+                query.isActive = true;
+                query.usedCount = { $lt: '$maxUses' };
+                query.expiresAt = { $gt: now };
+            } else if (statusFilter === 'expired') {
+                query.expiresAt = { $lte: now };
+            } else if (statusFilter === 'exhausted') {
+                query.isActive = true;
+                query.$expr = { $gte: ['$usedCount', '$maxUses'] };
+            } else if (statusFilter === 'disabled') {
+                query.isActive = false;
+                query.expiresAt = { $gt: now };
+            } else if (statusFilter === 'paused') {
+                query.isActive = false;
+                query.expiresAt = { $gt: now };
+                query.usedCount = { $lt: '$maxUses' };
+            } else if (statusFilter === 'draft') {
+                query.isActive = false;
+                query.expiresAt = { $gt: now };
+                query.usedCount = 0;
+            }
         }
 
-        if (rewardType !== 'all') {
-            query.rewardType = rewardType;
-        }
-
+        // Get promos with pagination
         const promos = await Promo.find(query)
             .populate('createdBy', 'name email')
             .sort({ createdAt: -1 })
@@ -49299,29 +49364,50 @@ app.get('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), async
             .lean();
 
         const total = await Promo.countDocuments(query);
-        const totalPages = Math.ceil(total / limit);
 
+        // Get redemption counts for each promo
+        const promoIds = promos.map(p => p._id);
+        const redemptionCounts = await RedeemedPromo.aggregate([
+            { $match: { promoId: { $in: promoIds } } },
+            { $group: { _id: '$promoId', count: { $sum: 1 } } }
+        ]);
+
+        const redemptionMap = {};
+        redemptionCounts.forEach(r => {
+            redemptionMap[r._id.toString()] = r.count;
+        });
+
+        // Format promos
         const formattedPromos = promos.map(promo => {
-            const targetUserCount = promo.targetUserIds ? promo.targetUserIds.length : 0;
+            const usedCount = redemptionMap[promo._id.toString()] || 0;
+            const isExpired = promo.expiresAt && new Date(promo.expiresAt) <= now;
+            const isExhausted = usedCount >= promo.maxUses && promo.maxUses > 0;
+            
+            let status = 'active';
+            if (!promo.isActive && usedCount === 0 && !isExpired) status = 'draft';
+            else if (!promo.isActive && !isExpired) status = 'paused';
+            else if (!promo.isActive || (promo.isActive && isExpired)) status = 'disabled';
+            else if (isExpired) status = 'expired';
+            else if (isExhausted) status = 'exhausted';
+            else if (promo.isActive && !isExpired && !isExhausted) status = 'active';
+
             return {
                 _id: promo._id,
                 code: promo.code,
-                description: promo.description || '',
                 rewardType: promo.rewardType,
                 rewardValue: promo.rewardValue,
-                currency: promo.currency || 'USD',
-                walletType: promo.walletType || 'main',
-                targetType: promo.targetType || 'all',
-                targetUserIds: promo.targetUserIds || [],
-                targetUserCount: targetUserCount,
-                maxRedemptions: promo.maxRedemptions || null,
-                maxRedemptionsPerUser: promo.maxRedemptionsPerUser || 1,
-                usedCount: promo.usedCount || 0,
+                currency: promo.rewardAsset || 'USD',
+                walletType: 'main',
+                targetType: 'all', // Default, extend if needed
+                targetUserCount: 0,
+                usedCount: usedCount,
+                maxRedemptions: promo.maxUses,
+                maxRedemptionsPerUser: 1,
+                status: status,
                 expiresAt: promo.expiresAt,
-                status: promo.status || 'active',
-                createdBy: promo.createdBy || null,
                 createdAt: promo.createdAt,
-                updatedAt: promo.updatedAt
+                createdBy: promo.createdBy || { name: 'System' },
+                totalRewarded: promo.rewardType === 'crypto' ? usedCount * promo.rewardValue : usedCount * promo.rewardValue
             };
         });
 
@@ -49329,10 +49415,12 @@ app.get('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), async
             status: 'success',
             data: {
                 promos: formattedPromos,
-                totalPages: totalPages,
-                totalItems: total,
-                currentPage: page,
-                itemsPerPage: limit
+                pagination: {
+                    currentPage: page,
+                    totalPages: Math.ceil(total / limit),
+                    totalItems: total,
+                    itemsPerPage: limit
+                }
             }
         });
 
@@ -49340,84 +49428,42 @@ app.get('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), async
         console.error('Error fetching promos:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to fetch promo codes'
+            message: err.message || 'Failed to fetch promos'
         });
     }
 });
 
-app.get('/api/admin/promos/stats', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-    try {
-        const now = new Date();
-        const thirtyDaysFromNow = new Date();
-        thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-
-        const activeCodes = await Promo.countDocuments({
-            status: 'active',
-            expiresAt: { $gt: now }
-        });
-
-        const totalRedemptions = await RedeemedPromo.countDocuments();
-
-        const totalRewardedAgg = await RedeemedPromo.aggregate([
-            {
-                $group: {
-                    _id: null,
-                    total: { $sum: '$rewardValue' }
-                }
-            }
-        ]);
-
-        const totalRewarded = totalRewardedAgg[0]?.total || 0;
-
-        const expiringSoon = await Promo.countDocuments({
-            status: 'active',
-            expiresAt: { $gt: now, $lt: thirtyDaysFromNow }
-        });
-
-        res.status(200).json({
-            status: 'success',
-            data: {
-                activeCodes: activeCodes,
-                totalRedemptions: totalRedemptions,
-                totalRewarded: totalRewarded,
-                expiringSoon: expiringSoon
-            }
-        });
-
-    } catch (err) {
-        console.error('Error fetching promo stats:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch promo statistics'
-        });
-    }
-});
-
-app.post('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+// =============================================
+// 3. POST /api/admin/promos - Create a new promo code
+// =============================================
+app.post('/api/admin/promos', adminProtect, async (req, res) => {
     try {
         const {
             code,
-            description,
+            targetType,
+            userIds,
             rewardType,
             rewardValue,
             currency,
             walletType,
-            targetType,
-            userIds,
             maxRedemptions,
             maxRedemptionsPerUser,
             expiresAt,
             status
         } = req.body;
 
-        if (!code) {
+        // Validation
+        if (!code || code.length < 3) {
             return res.status(400).json({
                 status: 'fail',
-                message: 'Promo code is required'
+                message: 'Promo code must be at least 3 characters'
             });
         }
 
-        const existingPromo = await Promo.findOne({ code: code.toUpperCase() });
+        const codeUpper = code.toUpperCase();
+
+        // Check if code already exists
+        const existingPromo = await Promo.findOne({ code: codeUpper });
         if (existingPromo) {
             return res.status(409).json({
                 status: 'fail',
@@ -49425,56 +49471,46 @@ app.post('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), asyn
             });
         }
 
-        if (!rewardType || !['percentage', 'fixed', 'bonus', 'crypto', 'discount'].includes(rewardType)) {
+        if (!rewardType || rewardValue === undefined || rewardValue <= 0) {
             return res.status(400).json({
                 status: 'fail',
-                message: 'Valid reward type is required'
+                message: 'Valid reward type and value are required'
             });
         }
 
-        if (!rewardValue || rewardValue <= 0) {
+        if (rewardType === 'percentage' && rewardValue > 100) {
             return res.status(400).json({
                 status: 'fail',
-                message: 'Valid reward value is required'
+                message: 'Percentage reward cannot exceed 100%'
             });
         }
 
         if (targetType === 'specific' && (!userIds || userIds.length === 0)) {
             return res.status(400).json({
                 status: 'fail',
-                message: 'At least one user must be selected for specific target type'
+                message: 'Please select at least one user for specific targeting'
             });
         }
 
-        if (targetType === 'specific' && userIds) {
-            const validUsers = await User.find({ _id: { $in: userIds } }).select('_id');
-            if (validUsers.length !== userIds.length) {
-                return res.status(400).json({
-                    status: 'fail',
-                    message: 'One or more selected users do not exist'
-                });
-            }
-        }
+        // Determine if promo is active
+        const isActive = status === 'active';
+        const maxUses = maxRedemptions || 0;
 
-        const promoData = {
-            code: code.toUpperCase(),
-            description: description || `${rewardType} promo: ${rewardValue}`,
+        // Create promo
+        const promo = await Promo.create({
+            code: codeUpper,
+            description: `${rewardType} reward of ${rewardValue}${rewardType === 'percentage' ? '%' : ` ${currency}`}`,
             rewardType: rewardType,
             rewardValue: rewardValue,
-            currency: currency || 'USD',
-            walletType: walletType || 'main',
-            targetType: targetType || 'all',
-            targetUserIds: targetType === 'specific' ? userIds : [],
-            maxRedemptions: maxRedemptions || null,
-            maxRedemptionsPerUser: maxRedemptionsPerUser || 1,
-            expiresAt: expiresAt ? new Date(expiresAt) : null,
-            status: status || 'active',
+            rewardAsset: currency || 'usd',
+            maxUses: maxUses,
             usedCount: 0,
+            expiresAt: expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            isActive: isActive,
             createdBy: req.admin._id
-        };
+        });
 
-        const promo = await Promo.create(promoData);
-
+        // Log activity
         await SystemLog.create({
             action: 'promo_code_created',
             entity: 'Promo',
@@ -49488,8 +49524,9 @@ app.post('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), asyn
                 code: promo.code,
                 rewardType: promo.rewardType,
                 rewardValue: promo.rewardValue,
-                targetType: promo.targetType,
-                targetUserCount: promo.targetUserIds?.length || 0
+                targetType: targetType,
+                userIds: userIds || [],
+                maxRedemptions: maxUses
             }
         });
 
@@ -49500,18 +49537,12 @@ app.post('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), asyn
                 promo: {
                     _id: promo._id,
                     code: promo.code,
-                    description: promo.description,
                     rewardType: promo.rewardType,
                     rewardValue: promo.rewardValue,
-                    currency: promo.currency,
-                    walletType: promo.walletType,
-                    targetType: promo.targetType,
-                    targetUserIds: promo.targetUserIds || [],
-                    maxRedemptions: promo.maxRedemptions,
-                    maxRedemptionsPerUser: promo.maxRedemptionsPerUser,
-                    usedCount: promo.usedCount,
+                    currency: promo.rewardAsset,
+                    maxRedemptions: promo.maxUses,
+                    status: promo.isActive ? 'active' : 'draft',
                     expiresAt: promo.expiresAt,
-                    status: promo.status,
                     createdAt: promo.createdAt
                 }
             }
@@ -49526,7 +49557,50 @@ app.post('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), asyn
     }
 });
 
-app.get('/api/admin/promos/:id', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+// =============================================
+// 4. POST /api/admin/promos/generate-code - Generate a random promo code
+// =============================================
+app.post('/api/admin/promos/generate-code', adminProtect, async (req, res) => {
+    try {
+        let code;
+        let attempts = 0;
+        const maxAttempts = 50;
+
+        do {
+            // Generate format: PREFIX + 8 random alphanumeric
+            const timestamp = Date.now().toString(36).substring(4, 8).toUpperCase();
+            const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
+            code = `${timestamp}-${randomPart}`;
+            attempts++;
+        } while (attempts < maxAttempts && await Promo.findOne({ code: code }));
+
+        if (attempts >= maxAttempts) {
+            return res.status(500).json({
+                status: 'error',
+                message: 'Failed to generate unique code'
+            });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                code: code
+            }
+        });
+
+    } catch (err) {
+        console.error('Error generating promo code:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to generate promo code'
+        });
+    }
+});
+
+// =============================================
+// 5. GET /api/admin/promos/:id - Get a single promo by ID
+// =============================================
+app.get('/api/admin/promos/:id', adminProtect, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -49548,39 +49622,37 @@ app.get('/api/admin/promos/:id', adminProtect, restrictTo('super', 'finance'), a
             });
         }
 
-        let targetUsers = [];
-        if (promo.targetType === 'specific' && promo.targetUserIds && promo.targetUserIds.length > 0) {
-            targetUsers = await User.find(
-                { _id: { $in: promo.targetUserIds } },
-                'firstName lastName email'
-            ).lean();
-        }
+        const now = new Date();
+        const usedCount = await RedeemedPromo.countDocuments({ promoId: promo._id });
+        const isExpired = promo.expiresAt && new Date(promo.expiresAt) <= now;
+        const isExhausted = usedCount >= promo.maxUses && promo.maxUses > 0;
 
-        const formattedPromo = {
-            _id: promo._id,
-            code: promo.code,
-            description: promo.description || '',
-            rewardType: promo.rewardType,
-            rewardValue: promo.rewardValue,
-            currency: promo.currency || 'USD',
-            walletType: promo.walletType || 'main',
-            targetType: promo.targetType || 'all',
-            targetUserIds: promo.targetUserIds || [],
-            targetUsers: targetUsers,
-            maxRedemptions: promo.maxRedemptions || null,
-            maxRedemptionsPerUser: promo.maxRedemptionsPerUser || 1,
-            usedCount: promo.usedCount || 0,
-            expiresAt: promo.expiresAt,
-            status: promo.status || 'active',
-            createdBy: promo.createdBy || null,
-            createdAt: promo.createdAt,
-            updatedAt: promo.updatedAt
-        };
+        let status = 'active';
+        if (!promo.isActive && usedCount === 0 && !isExpired) status = 'draft';
+        else if (!promo.isActive && !isExpired) status = 'paused';
+        else if (!promo.isActive || (promo.isActive && isExpired)) status = 'disabled';
+        else if (isExpired) status = 'expired';
+        else if (isExhausted) status = 'exhausted';
+        else if (promo.isActive && !isExpired && !isExhausted) status = 'active';
 
         res.status(200).json({
             status: 'success',
             data: {
-                promo: formattedPromo
+                promo: {
+                    _id: promo._id,
+                    code: promo.code,
+                    description: promo.description,
+                    rewardType: promo.rewardType,
+                    rewardValue: promo.rewardValue,
+                    currency: promo.rewardAsset || 'USD',
+                    maxRedemptions: promo.maxUses,
+                    usedCount: usedCount,
+                    status: status,
+                    expiresAt: promo.expiresAt,
+                    createdAt: promo.createdAt,
+                    createdBy: promo.createdBy || { name: 'System' },
+                    isActive: promo.isActive
+                }
             }
         });
 
@@ -49588,12 +49660,15 @@ app.get('/api/admin/promos/:id', adminProtect, restrictTo('super', 'finance'), a
         console.error('Error fetching promo:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to fetch promo code'
+            message: err.message || 'Failed to fetch promo'
         });
     }
 });
 
-app.post('/api/admin/promos/:id/pause', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+// =============================================
+// 6. POST /api/admin/promos/:id/activate - Activate a promo
+// =============================================
+app.post('/api/admin/promos/:id/activate', adminProtect, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -49612,89 +49687,25 @@ app.post('/api/admin/promos/:id/pause', adminProtect, restrictTo('super', 'finan
             });
         }
 
-        if (promo.status !== 'active') {
-            return res.status(400).json({
-                status: 'fail',
-                message: `Cannot pause promo with status: ${promo.status}`
-            });
-        }
-
-        promo.status = 'paused';
-        await promo.save();
-
-        await SystemLog.create({
-            action: 'promo_code_paused',
-            entity: 'Promo',
-            entityId: promo._id,
-            performedBy: req.admin._id,
-            performedByModel: 'Admin',
-            performedByEmail: req.admin.email,
-            performedByName: req.admin.name,
-            status: 'success',
-            metadata: {
-                code: promo.code,
-                previousStatus: 'active',
-                newStatus: 'paused'
-            }
-        });
-
-        res.status(200).json({
-            status: 'success',
-            message: 'Promo code paused successfully',
-            data: {
-                promo: {
-                    _id: promo._id,
-                    code: promo.code,
-                    status: promo.status
-                }
-            }
-        });
-
-    } catch (err) {
-        console.error('Error pausing promo:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to pause promo code'
-        });
-    }
-});
-
-app.post('/api/admin/promos/:id/activate', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Invalid promo ID'
-            });
-        }
-
-        const promo = await Promo.findById(id);
-        if (!promo) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'Promo code not found'
-            });
-        }
-
-        if (promo.status !== 'paused' && promo.status !== 'draft') {
-            return res.status(400).json({
-                status: 'fail',
-                message: `Cannot activate promo with status: ${promo.status}`
-            });
-        }
-
-        if (promo.expiresAt && promo.expiresAt <= new Date()) {
+        const now = new Date();
+        if (promo.expiresAt && promo.expiresAt <= now) {
             return res.status(400).json({
                 status: 'fail',
                 message: 'Cannot activate expired promo code'
             });
         }
 
-        promo.status = 'active';
+        if (promo.usedCount >= promo.maxUses && promo.maxUses > 0) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Cannot activate exhausted promo code'
+            });
+        }
+
+        promo.isActive = true;
         await promo.save();
 
+        // Log activity
         await SystemLog.create({
             action: 'promo_code_activated',
             entity: 'Promo',
@@ -49705,34 +49716,28 @@ app.post('/api/admin/promos/:id/activate', adminProtect, restrictTo('super', 'fi
             performedByName: req.admin.name,
             status: 'success',
             metadata: {
-                code: promo.code,
-                previousStatus: 'paused',
-                newStatus: 'active'
+                code: promo.code
             }
         });
 
         res.status(200).json({
             status: 'success',
-            message: 'Promo code activated successfully',
-            data: {
-                promo: {
-                    _id: promo._id,
-                    code: promo.code,
-                    status: promo.status
-                }
-            }
+            message: 'Promo code activated successfully'
         });
 
     } catch (err) {
         console.error('Error activating promo:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to activate promo code'
+            message: err.message || 'Failed to activate promo'
         });
     }
 });
 
-app.post('/api/admin/promos/:id/disable', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+// =============================================
+// 7. POST /api/admin/promos/:id/pause - Pause a promo
+// =============================================
+app.post('/api/admin/promos/:id/pause', adminProtect, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -49751,16 +49756,71 @@ app.post('/api/admin/promos/:id/disable', adminProtect, restrictTo('super', 'fin
             });
         }
 
-        if (promo.status === 'disabled') {
+        if (!promo.isActive) {
             return res.status(400).json({
                 status: 'fail',
-                message: 'Promo code is already disabled'
+                message: 'Promo code is already paused'
             });
         }
 
-        promo.status = 'disabled';
+        promo.isActive = false;
         await promo.save();
 
+        // Log activity
+        await SystemLog.create({
+            action: 'promo_code_paused',
+            entity: 'Promo',
+            entityId: promo._id,
+            performedBy: req.admin._id,
+            performedByModel: 'Admin',
+            performedByEmail: req.admin.email,
+            performedByName: req.admin.name,
+            status: 'success',
+            metadata: {
+                code: promo.code
+            }
+        });
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Promo code paused successfully'
+        });
+
+    } catch (err) {
+        console.error('Error pausing promo:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to pause promo'
+        });
+    }
+});
+
+// =============================================
+// 8. POST /api/admin/promos/:id/disable - Disable a promo
+// =============================================
+app.post('/api/admin/promos/:id/disable', adminProtect, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid promo ID'
+            });
+        }
+
+        const promo = await Promo.findById(id);
+        if (!promo) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Promo code not found'
+            });
+        }
+
+        promo.isActive = false;
+        await promo.save();
+
+        // Log activity
         await SystemLog.create({
             action: 'promo_code_disabled',
             entity: 'Promo',
@@ -49771,34 +49831,28 @@ app.post('/api/admin/promos/:id/disable', adminProtect, restrictTo('super', 'fin
             performedByName: req.admin.name,
             status: 'success',
             metadata: {
-                code: promo.code,
-                previousStatus: promo.status,
-                newStatus: 'disabled'
+                code: promo.code
             }
         });
 
         res.status(200).json({
             status: 'success',
-            message: 'Promo code disabled successfully',
-            data: {
-                promo: {
-                    _id: promo._id,
-                    code: promo.code,
-                    status: promo.status
-                }
-            }
+            message: 'Promo code disabled successfully'
         });
 
     } catch (err) {
         console.error('Error disabling promo:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to disable promo code'
+            message: err.message || 'Failed to disable promo'
         });
     }
 });
 
-app.post('/api/admin/promos/:id/duplicate', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+// =============================================
+// 9. POST /api/admin/promos/:id/duplicate - Duplicate a promo
+// =============================================
+app.post('/api/admin/promos/:id/duplicate', adminProtect, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -49817,42 +49871,38 @@ app.post('/api/admin/promos/:id/duplicate', adminProtect, restrictTo('super', 'f
             });
         }
 
-        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        let newCode = 'BH-';
-        for (let i = 0; i < 12; i++) {
-            if (i === 4 || i === 8) newCode += '-';
-            newCode += characters.charAt(Math.floor(Math.random() * characters.length));
-        }
-
-        let existing = await Promo.findOne({ code: newCode });
+        // Generate new code
+        let newCode;
         let attempts = 0;
-        while (existing && attempts < 10) {
-            newCode = 'BH-';
-            for (let i = 0; i < 12; i++) {
-                if (i === 4 || i === 8) newCode += '-';
-                newCode += characters.charAt(Math.floor(Math.random() * characters.length));
-            }
-            existing = await Promo.findOne({ code: newCode });
+        const maxAttempts = 50;
+        do {
+            const timestamp = Date.now().toString(36).substring(4, 8).toUpperCase();
+            const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
+            newCode = `${timestamp}-${randomPart}`;
             attempts++;
+        } while (attempts < maxAttempts && await Promo.findOne({ code: newCode }));
+
+        if (attempts >= maxAttempts) {
+            return res.status(500).json({
+                status: 'error',
+                message: 'Failed to generate unique code'
+            });
         }
 
         const duplicated = await Promo.create({
             code: newCode,
-            description: `${original.description} (Copy)`,
+            description: original.description + ' (Copy)',
             rewardType: original.rewardType,
             rewardValue: original.rewardValue,
-            currency: original.currency || 'USD',
-            walletType: original.walletType || 'main',
-            targetType: original.targetType || 'all',
-            targetUserIds: original.targetUserIds || [],
-            maxRedemptions: original.maxRedemptions || null,
-            maxRedemptionsPerUser: original.maxRedemptionsPerUser || 1,
-            expiresAt: original.expiresAt ? new Date(original.expiresAt.getTime() + 30 * 24 * 60 * 60 * 1000) : null,
-            status: 'draft',
+            rewardAsset: original.rewardAsset,
+            maxUses: original.maxUses,
             usedCount: 0,
+            expiresAt: original.expiresAt,
+            isActive: false, // Draft by default
             createdBy: req.admin._id
         });
 
+        // Log activity
         await SystemLog.create({
             action: 'promo_code_duplicated',
             entity: 'Promo',
@@ -49864,8 +49914,7 @@ app.post('/api/admin/promos/:id/duplicate', adminProtect, restrictTo('super', 'f
             status: 'success',
             metadata: {
                 originalCode: original.code,
-                newCode: duplicated.code,
-                originalId: original._id
+                newCode: duplicated.code
             }
         });
 
@@ -49873,19 +49922,16 @@ app.post('/api/admin/promos/:id/duplicate', adminProtect, restrictTo('super', 'f
             status: 'success',
             message: 'Promo code duplicated successfully',
             data: {
+                code: duplicated.code,
                 promo: {
                     _id: duplicated._id,
                     code: duplicated.code,
-                    description: duplicated.description,
                     rewardType: duplicated.rewardType,
                     rewardValue: duplicated.rewardValue,
-                    currency: duplicated.currency,
-                    walletType: duplicated.walletType,
-                    targetType: duplicated.targetType,
-                    maxRedemptions: duplicated.maxRedemptions,
-                    maxRedemptionsPerUser: duplicated.maxRedemptionsPerUser,
+                    currency: duplicated.rewardAsset,
+                    maxRedemptions: duplicated.maxUses,
+                    status: 'draft',
                     expiresAt: duplicated.expiresAt,
-                    status: duplicated.status,
                     createdAt: duplicated.createdAt
                 }
             }
@@ -49895,16 +49941,19 @@ app.post('/api/admin/promos/:id/duplicate', adminProtect, restrictTo('super', 'f
         console.error('Error duplicating promo:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to duplicate promo code'
+            message: err.message || 'Failed to duplicate promo'
         });
     }
 });
 
-app.get('/api/admin/promos/:id/redemptions', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+// =============================================
+// 10. GET /api/admin/promos/:id/redemptions - Get redemptions for a promo
+// =============================================
+app.get('/api/admin/promos/:id/redemptions', adminProtect, async (req, res) => {
     try {
         const { id } = req.params;
         const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
+        const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -49922,6 +49971,7 @@ app.get('/api/admin/promos/:id/redemptions', adminProtect, restrictTo('super', '
             });
         }
 
+        // Get redemptions with user data
         const redemptions = await RedeemedPromo.find({ promoId: id })
             .populate('userId', 'firstName lastName email')
             .populate('transactionId')
@@ -49931,73 +49981,177 @@ app.get('/api/admin/promos/:id/redemptions', adminProtect, restrictTo('super', '
             .lean();
 
         const total = await RedeemedPromo.countDocuments({ promoId: id });
-        const totalPages = Math.ceil(total / limit);
 
-        const formattedRedemptions = redemptions.map(r => ({
-            _id: r._id,
-            user: r.userId ? {
-                _id: r.userId._id,
-                firstName: r.userId.firstName || '',
-                lastName: r.userId.lastName || '',
-                email: r.userId.email || ''
-            } : null,
-            code: r.code,
-            rewardType: r.rewardType,
-            rewardValue: r.rewardValue,
-            rewardAmount: r.rewardValue,
-            currency: r.rewardAsset || 'USD',
-            walletType: r.walletType || 'main',
-            transactionId: r.transactionId?._id || null,
-            transactionReference: r.transactionId?.reference || null,
-            status: r.status || 'completed',
-            redeemedAt: r.redeemedAt || r.createdAt,
-            ipAddress: r.ipAddress || null,
-            userAgent: r.userAgent || null
-        }));
+        const formattedRedemptions = redemptions.map(r => {
+            const user = r.userId || {};
+            const transaction = r.transactionId || {};
+
+            return {
+                _id: r._id,
+                user: {
+                    _id: user._id || null,
+                    firstName: user.firstName || 'Deleted',
+                    lastName: user.lastName || 'User',
+                    email: user.email || 'unknown@deleted.com'
+                },
+                redeemedAt: r.redeemedAt,
+                rewardAmount: r.rewardValue || 0,
+                currency: r.rewardAsset || 'USD',
+                walletType: 'main',
+                status: r.transactionId?.status === 'completed' ? 'completed' : 'pending',
+                transactionId: r.transactionId?._id || null,
+                ipAddress: r.ipAddress || 'Unknown',
+                userAgent: r.userAgent || 'Unknown'
+            };
+        });
 
         res.status(200).json({
             status: 'success',
             data: {
                 redemptions: formattedRedemptions,
-                totalPages: totalPages,
-                totalItems: total,
-                currentPage: page,
-                itemsPerPage: limit,
-                promoCode: promo.code
+                pagination: {
+                    currentPage: page,
+                    totalPages: Math.ceil(total / limit),
+                    totalItems: total,
+                    itemsPerPage: limit
+                },
+                promo: {
+                    code: promo.code,
+                    rewardType: promo.rewardType,
+                    rewardValue: promo.rewardValue,
+                    currency: promo.rewardAsset || 'USD'
+                }
             }
         });
 
     } catch (err) {
-        console.error('Error fetching promo redemptions:', err);
+        console.error('Error fetching redemptions:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to fetch promo redemptions'
+            message: err.message || 'Failed to fetch redemptions'
         });
     }
 });
 
-app.get('/api/admin/users/search', adminProtect, async (req, res) => {
+// =============================================
+// 11. GET /api/admin/promos/export - Export promos as CSV
+// =============================================
+app.get('/api/admin/promos/export', adminProtect, async (req, res) => {
     try {
-        const { q, limit = 20 } = req.query;
+        const format = req.query.format || 'csv';
 
-        if (!q || q.trim().length < 2) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Search query must be at least 2 characters'
+        // Get all promos with redemption counts
+        const promos = await Promo.find({})
+            .populate('createdBy', 'name email')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        const promoIds = promos.map(p => p._id);
+        const redemptionCounts = await RedeemedPromo.aggregate([
+            { $match: { promoId: { $in: promoIds } } },
+            { $group: { _id: '$promoId', count: { $sum: 1 }, totalValue: { $sum: '$rewardValue' } } }
+        ]);
+
+        const redemptionMap = {};
+        redemptionCounts.forEach(r => {
+            redemptionMap[r._id.toString()] = { count: r.count, totalValue: r.totalValue };
+        });
+
+        const now = new Date();
+
+        // Build CSV data
+        const rows = promos.map(promo => {
+            const stats = redemptionMap[promo._id.toString()] || { count: 0, totalValue: 0 };
+            const isExpired = promo.expiresAt && new Date(promo.expiresAt) <= now;
+            const isExhausted = stats.count >= promo.maxUses && promo.maxUses > 0;
+
+            let status = 'active';
+            if (!promo.isActive && stats.count === 0 && !isExpired) status = 'draft';
+            else if (!promo.isActive && !isExpired) status = 'paused';
+            else if (!promo.isActive || (promo.isActive && isExpired)) status = 'disabled';
+            else if (isExpired) status = 'expired';
+            else if (isExhausted) status = 'exhausted';
+            else if (promo.isActive && !isExpired && !isExhausted) status = 'active';
+
+            return {
+                'Code': promo.code,
+                'Reward Type': promo.rewardType,
+                'Reward Value': promo.rewardValue,
+                'Asset': promo.rewardAsset || 'USD',
+                'Max Redemptions': promo.maxUses,
+                'Used Count': stats.count,
+                'Remaining': promo.maxUses > 0 ? Math.max(0, promo.maxUses - stats.count) : '∞',
+                'Status': status,
+                'Expires At': promo.expiresAt ? new Date(promo.expiresAt).toLocaleString() : 'Never',
+                'Created At': new Date(promo.createdAt).toLocaleString(),
+                'Created By': promo.createdBy?.name || 'System',
+                'Total Rewarded': stats.totalValue || 0
+            };
+        });
+
+        if (format === 'json') {
+            return res.status(200).json({
+                status: 'success',
+                data: rows
             });
         }
 
-        const searchTerm = q.trim();
+        // Generate CSV
+        const headers = Object.keys(rows[0] || {});
+        let csv = headers.join(',') + '\n';
+        
+        rows.forEach(row => {
+            const values = headers.map(header => {
+                let value = row[header] || '';
+                if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+                    value = `"${value.replace(/"/g, '""')}"`;
+                }
+                return value;
+            });
+            csv += values.join(',') + '\n';
+        });
 
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=promos-export-${new Date().toISOString().slice(0,10)}.csv`);
+        res.status(200).send(csv);
+
+    } catch (err) {
+        console.error('Error exporting promos:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to export promos'
+        });
+    }
+});
+
+// =============================================
+// 12. GET /api/admin/users/search - Search users for promo targeting
+// =============================================
+app.get('/api/admin/users/search', adminProtect, async (req, res) => {
+    try {
+        const q = req.query.q || '';
+        const limit = parseInt(req.query.limit) || 10;
+
+        if (!q || q.length < 2) {
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    users: []
+                }
+            });
+        }
+
+        // Search users by name or email
         const users = await User.find({
             $or: [
-                { firstName: { $regex: searchTerm, $options: 'i' } },
-                { lastName: { $regex: searchTerm, $options: 'i' } },
-                { email: { $regex: searchTerm, $options: 'i' } }
-            ]
+                { firstName: { $regex: q, $options: 'i' } },
+                { lastName: { $regex: q, $options: 'i' } },
+                { email: { $regex: q, $options: 'i' } }
+            ],
+            status: 'active'
         })
-        .select('_id firstName lastName email status')
-        .limit(parseInt(limit))
+        .select('firstName lastName email _id')
+        .limit(limit)
         .lean();
 
         const formattedUsers = users.map(user => ({
@@ -50005,7 +50159,7 @@ app.get('/api/admin/users/search', adminProtect, async (req, res) => {
             firstName: user.firstName || '',
             lastName: user.lastName || '',
             email: user.email || '',
-            status: user.status || 'active'
+            name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
         }));
 
         res.status(200).json({
@@ -50019,21 +50173,10 @@ app.get('/api/admin/users/search', adminProtect, async (req, res) => {
         console.error('Error searching users:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to search users'
+            message: err.message || 'Failed to search users'
         });
     }
 });
-
-
-
-
-
-
-
-
-
-
-
 
 
 
