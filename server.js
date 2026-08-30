@@ -49226,6 +49226,1165 @@ async function sendAdminKYCNotification(userId, kycRecord) {
 
 
 
+// =============================================
+// ADMIN THEME ENDPOINTS
+// =============================================
+
+app.get('/api/admin/theme', adminProtect, async (req, res) => {
+    try {
+        const admin = await Admin.findById(req.admin._id).select('preferences.theme');
+        
+        if (!admin) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Admin not found'
+            });
+        }
+
+        const theme = admin.preferences?.theme || 'dark';
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                theme: theme
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching admin theme:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch theme preference'
+        });
+    }
+});
+
+app.post('/api/admin/theme', adminProtect, async (req, res) => {
+    try {
+        const { theme } = req.body;
+
+        if (!theme || !['light', 'dark'].includes(theme)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Theme must be either "light" or "dark"'
+            });
+        }
+
+        const admin = await Admin.findByIdAndUpdate(
+            req.admin._id,
+            {
+                $set: {
+                    'preferences.theme': theme
+                }
+            },
+            {
+                new: true,
+                runValidators: true
+            }
+        );
+
+        if (!admin) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Admin not found'
+            });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Theme preference updated successfully',
+            data: {
+                theme: admin.preferences?.theme || theme
+            }
+        });
+
+    } catch (err) {
+        console.error('Error updating admin theme:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to update theme preference'
+        });
+    }
+});
+
+// =============================================
+// ADMIN USER SEARCH ENDPOINT
+// =============================================
+
+app.get('/api/admin/users/search', adminProtect, async (req, res) => {
+    try {
+        const { q, limit = 20, page = 1 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        if (!q || q.trim().length < 2) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Search query must be at least 2 characters'
+            });
+        }
+
+        const searchRegex = new RegExp(q.trim(), 'i');
+
+        const query = {
+            $or: [
+                { firstName: searchRegex },
+                { lastName: searchRegex },
+                { email: searchRegex },
+                { 
+                    $expr: {
+                        $regexMatch: {
+                            input: { $concat: ['$firstName', ' ', '$lastName'] },
+                            regex: q.trim(),
+                            options: 'i'
+                        }
+                    }
+                }
+            ]
+        };
+
+        const users = await User.find(query)
+            .select('_id firstName lastName email status createdAt balances')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit))
+            .lean();
+
+        const total = await User.countDocuments(query);
+
+        const formattedUsers = users.map(user => {
+            let mainUSD = 0;
+            let maturedUSD = 0;
+            let activeUSD = 0;
+
+            if (user.balances) {
+                if (user.balances.main && user.balances.main instanceof Map) {
+                    for (const [asset, balance] of user.balances.main.entries()) {
+                        if (balance > 0 && asset !== 'usd') {
+                            mainUSD += balance;
+                        }
+                    }
+                } else if (user.balances.main && typeof user.balances.main === 'object') {
+                    for (const [asset, balance] of Object.entries(user.balances.main)) {
+                        if (balance > 0 && asset !== 'usd') {
+                            mainUSD += balance;
+                        }
+                    }
+                }
+
+                if (user.balances.matured && user.balances.matured instanceof Map) {
+                    for (const [asset, balance] of user.balances.matured.entries()) {
+                        if (balance > 0 && asset !== 'usd') {
+                            maturedUSD += balance;
+                        }
+                    }
+                } else if (user.balances.matured && typeof user.balances.matured === 'object') {
+                    for (const [asset, balance] of Object.entries(user.balances.matured)) {
+                        if (balance > 0 && asset !== 'usd') {
+                            maturedUSD += balance;
+                        }
+                    }
+                }
+
+                if (user.balances.active && user.balances.active instanceof Map) {
+                    for (const [asset, balance] of user.balances.active.entries()) {
+                        if (balance > 0 && asset !== 'usd') {
+                            activeUSD += balance;
+                        }
+                    }
+                } else if (user.balances.active && typeof user.balances.active === 'object') {
+                    for (const [asset, balance] of Object.entries(user.balances.active)) {
+                        if (balance > 0 && asset !== 'usd') {
+                            activeUSD += balance;
+                        }
+                    }
+                }
+            }
+
+            return {
+                _id: user._id,
+                firstName: user.firstName || '',
+                lastName: user.lastName || '',
+                email: user.email || '',
+                status: user.status || 'active',
+                createdAt: user.createdAt,
+                fullName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+                balances: {
+                    main: mainUSD,
+                    active: activeUSD,
+                    matured: maturedUSD
+                }
+            };
+        });
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                users: formattedUsers,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(total / parseInt(limit)),
+                    totalItems: total,
+                    itemsPerPage: parseInt(limit),
+                    hasNextPage: skip + parseInt(limit) < total,
+                    hasPrevPage: parseInt(page) > 1
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error searching users:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to search users'
+        });
+    }
+});
+
+// =============================================
+// PROMO CODE MANAGEMENT ENDPOINTS
+// =============================================
+
+app.post('/api/admin/promos/generate-code', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let code = 'BH-';
+        for (let i = 0; i < 12; i++) {
+            if (i === 4 || i === 8) code += '-';
+            code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+
+        let existing = await Promo.findOne({ code: code });
+        let attempts = 0;
+        while (existing && attempts < 10) {
+            code = 'BH-';
+            for (let i = 0; i < 12; i++) {
+                if (i === 4 || i === 8) code += '-';
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            existing = await Promo.findOne({ code: code });
+            attempts++;
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                code: code
+            }
+        });
+
+    } catch (err) {
+        console.error('Error generating promo code:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to generate promo code'
+        });
+    }
+});
+
+app.get('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 25;
+        const skip = (page - 1) * limit;
+        const search = req.query.search || '';
+        const status = req.query.status || 'all';
+        const rewardType = req.query.rewardType || 'all';
+
+        let query = {};
+
+        if (search) {
+            query.code = { $regex: search, $options: 'i' };
+        }
+
+        if (status !== 'all') {
+            query.status = status;
+        }
+
+        if (rewardType !== 'all') {
+            query.rewardType = rewardType;
+        }
+
+        const promos = await Promo.find(query)
+            .populate('createdBy', 'name email')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        const total = await Promo.countDocuments(query);
+
+        const formattedPromos = promos.map(promo => {
+            let targetUserCount = 0;
+            if (promo.targetType === 'specific' && promo.userIds) {
+                targetUserCount = promo.userIds.length;
+            }
+
+            return {
+                _id: promo._id,
+                code: promo.code,
+                description: promo.description || '',
+                rewardType: promo.rewardType,
+                rewardValue: promo.rewardValue,
+                currency: promo.currency || 'USD',
+                walletType: promo.walletType || 'main',
+                targetType: promo.targetType || 'all',
+                targetUserCount: targetUserCount,
+                userIds: promo.userIds || [],
+                maxRedemptions: promo.maxRedemptions || null,
+                maxRedemptionsPerUser: promo.maxRedemptionsPerUser || 1,
+                usedCount: promo.usedCount || 0,
+                expiresAt: promo.expiresAt,
+                status: promo.status || 'active',
+                createdBy: promo.createdBy || null,
+                createdAt: promo.createdAt,
+                updatedAt: promo.updatedAt
+            };
+        });
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                promos: formattedPromos,
+                totalPages: Math.ceil(total / limit),
+                totalItems: total,
+                currentPage: page
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching promos:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch promo codes'
+        });
+    }
+});
+
+app.get('/api/admin/promos/stats', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const now = new Date();
+        const sevenDaysFromNow = new Date();
+        sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+
+        const [activeCodes, totalRedemptions, totalRewarded, expiringSoon] = await Promise.all([
+            Promo.countDocuments({
+                status: 'active',
+                expiresAt: { $gt: now }
+            }),
+            RedeemedPromo.countDocuments(),
+            RedeemedPromo.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: '$rewardValue' }
+                    }
+                }
+            ]),
+            Promo.countDocuments({
+                status: 'active',
+                expiresAt: { $gte: now, $lte: sevenDaysFromNow }
+            })
+        ]);
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                activeCodes: activeCodes,
+                totalRedemptions: totalRedemptions,
+                totalRewarded: totalRewarded[0]?.total || 0,
+                expiringSoon: expiringSoon
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching promo stats:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch promo statistics'
+        });
+    }
+});
+
+app.post('/api/admin/promos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const {
+            code,
+            description,
+            rewardType,
+            rewardValue,
+            currency,
+            walletType,
+            targetType,
+            userIds,
+            maxRedemptions,
+            maxRedemptionsPerUser,
+            expiresAt,
+            status
+        } = req.body;
+
+        if (!code || !code.trim()) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Promo code is required'
+            });
+        }
+
+        if (!/^[A-Z0-9\-_]+$/i.test(code)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Code can only contain letters, numbers, hyphens, and underscores'
+            });
+        }
+
+        const existingPromo = await Promo.findOne({ code: code.toUpperCase() });
+        if (existingPromo) {
+            return res.status(409).json({
+                status: 'fail',
+                message: 'Promo code already exists'
+            });
+        }
+
+        if (!rewardType || !['percentage', 'fixed'].includes(rewardType)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Reward type must be "percentage" or "fixed"'
+            });
+        }
+
+        if (!rewardValue || rewardValue <= 0) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Valid reward value is required'
+            });
+        }
+
+        if (rewardType === 'percentage' && rewardValue > 100) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Percentage cannot exceed 100%'
+            });
+        }
+
+        if (targetType === 'specific' && (!userIds || userIds.length === 0)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'At least one user must be selected for specific target type'
+            });
+        }
+
+        if (targetType === 'specific' && userIds) {
+            const validUsers = await User.find({ _id: { $in: userIds } }).select('_id');
+            if (validUsers.length !== userIds.length) {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'One or more selected users do not exist'
+                });
+            }
+        }
+
+        const promoData = {
+            code: code.toUpperCase().trim(),
+            description: description || `${code.toUpperCase()} promo code`,
+            rewardType: rewardType,
+            rewardValue: parseFloat(rewardValue),
+            currency: currency || 'USD',
+            walletType: walletType || 'main',
+            targetType: targetType || 'all',
+            userIds: targetType === 'specific' ? userIds : [],
+            maxRedemptions: maxRedemptions ? parseInt(maxRedemptions) : null,
+            maxRedemptionsPerUser: parseInt(maxRedemptionsPerUser) || 1,
+            expiresAt: expiresAt ? new Date(expiresAt) : null,
+            status: status || 'active',
+            createdBy: req.admin._id,
+            usedCount: 0
+        };
+
+        const promo = await Promo.create(promoData);
+
+        const formattedPromo = {
+            _id: promo._id,
+            code: promo.code,
+            description: promo.description,
+            rewardType: promo.rewardType,
+            rewardValue: promo.rewardValue,
+            currency: promo.currency,
+            walletType: promo.walletType,
+            targetType: promo.targetType,
+            targetUserCount: promo.userIds ? promo.userIds.length : 0,
+            maxRedemptions: promo.maxRedemptions,
+            maxRedemptionsPerUser: promo.maxRedemptionsPerUser,
+            usedCount: promo.usedCount || 0,
+            expiresAt: promo.expiresAt,
+            status: promo.status,
+            createdBy: promo.createdBy,
+            createdAt: promo.createdAt
+        };
+
+        await logActivity(
+            'promo_code_created',
+            'Promo',
+            promo._id,
+            req.admin._id,
+            'Admin',
+            req,
+            {
+                code: promo.code,
+                rewardType: promo.rewardType,
+                rewardValue: promo.rewardValue,
+                targetType: promo.targetType
+            }
+        );
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Promo code created successfully',
+            data: {
+                promo: formattedPromo
+            }
+        });
+
+    } catch (err) {
+        console.error('Error creating promo code:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to create promo code'
+        });
+    }
+});
+
+app.get('/api/admin/promos/:id', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid promo ID'
+            });
+        }
+
+        const promo = await Promo.findById(id)
+            .populate('createdBy', 'name email')
+            .lean();
+
+        if (!promo) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Promo code not found'
+            });
+        }
+
+        let targetUsers = [];
+        if (promo.targetType === 'specific' && promo.userIds && promo.userIds.length > 0) {
+            targetUsers = await User.find({ _id: { $in: promo.userIds } })
+                .select('_id firstName lastName email')
+                .lean();
+        }
+
+        const formattedPromo = {
+            _id: promo._id,
+            code: promo.code,
+            description: promo.description || '',
+            rewardType: promo.rewardType,
+            rewardValue: promo.rewardValue,
+            currency: promo.currency || 'USD',
+            walletType: promo.walletType || 'main',
+            targetType: promo.targetType || 'all',
+            targetUsers: targetUsers.map(u => ({
+                _id: u._id,
+                firstName: u.firstName || '',
+                lastName: u.lastName || '',
+                email: u.email || ''
+            })),
+            maxRedemptions: promo.maxRedemptions || null,
+            maxRedemptionsPerUser: promo.maxRedemptionsPerUser || 1,
+            usedCount: promo.usedCount || 0,
+            expiresAt: promo.expiresAt,
+            status: promo.status || 'active',
+            createdBy: promo.createdBy || null,
+            createdAt: promo.createdAt,
+            updatedAt: promo.updatedAt
+        };
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                promo: formattedPromo
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching promo:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch promo code'
+        });
+    }
+});
+
+app.post('/api/admin/promos/:id/pause', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid promo ID'
+            });
+        }
+
+        const promo = await Promo.findById(id);
+        if (!promo) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Promo code not found'
+            });
+        }
+
+        if (promo.status !== 'active') {
+            return res.status(400).json({
+                status: 'fail',
+                message: `Cannot pause promo with status: ${promo.status}`
+            });
+        }
+
+        promo.status = 'paused';
+        await promo.save();
+
+        await logActivity(
+            'promo_code_paused',
+            'Promo',
+            promo._id,
+            req.admin._id,
+            'Admin',
+            req,
+            {
+                code: promo.code,
+                previousStatus: 'active',
+                newStatus: 'paused'
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Promo code paused successfully',
+            data: {
+                promo: {
+                    _id: promo._id,
+                    code: promo.code,
+                    status: promo.status
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error pausing promo:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to pause promo code'
+        });
+    }
+});
+
+app.post('/api/admin/promos/:id/activate', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid promo ID'
+            });
+        }
+
+        const promo = await Promo.findById(id);
+        if (!promo) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Promo code not found'
+            });
+        }
+
+        if (promo.status !== 'paused' && promo.status !== 'draft') {
+            return res.status(400).json({
+                status: 'fail',
+                message: `Cannot activate promo with status: ${promo.status}`
+            });
+        }
+
+        if (promo.expiresAt && promo.expiresAt <= new Date()) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Cannot activate expired promo code'
+            });
+        }
+
+        promo.status = 'active';
+        await promo.save();
+
+        await logActivity(
+            'promo_code_activated',
+            'Promo',
+            promo._id,
+            req.admin._id,
+            'Admin',
+            req,
+            {
+                code: promo.code,
+                previousStatus: 'paused',
+                newStatus: 'active'
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Promo code activated successfully',
+            data: {
+                promo: {
+                    _id: promo._id,
+                    code: promo.code,
+                    status: promo.status
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error activating promo:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to activate promo code'
+        });
+    }
+});
+
+app.post('/api/admin/promos/:id/disable', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid promo ID'
+            });
+        }
+
+        const promo = await Promo.findById(id);
+        if (!promo) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Promo code not found'
+            });
+        }
+
+        if (promo.status === 'disabled') {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Promo code is already disabled'
+            });
+        }
+
+        promo.status = 'disabled';
+        await promo.save();
+
+        await logActivity(
+            'promo_code_disabled',
+            'Promo',
+            promo._id,
+            req.admin._id,
+            'Admin',
+            req,
+            {
+                code: promo.code,
+                previousStatus: promo.status,
+                newStatus: 'disabled'
+            }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Promo code disabled successfully',
+            data: {
+                promo: {
+                    _id: promo._id,
+                    code: promo.code,
+                    status: promo.status
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error disabling promo:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to disable promo code'
+        });
+    }
+});
+
+app.post('/api/admin/promos/:id/duplicate', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid promo ID'
+            });
+        }
+
+        const originalPromo = await Promo.findById(id);
+        if (!originalPromo) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Promo code not found'
+            });
+        }
+
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let newCode = 'BH-';
+        for (let i = 0; i < 12; i++) {
+            if (i === 4 || i === 8) newCode += '-';
+            newCode += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+
+        let existing = await Promo.findOne({ code: newCode });
+        let attempts = 0;
+        while (existing && attempts < 10) {
+            newCode = 'BH-';
+            for (let i = 0; i < 12; i++) {
+                if (i === 4 || i === 8) newCode += '-';
+                newCode += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            existing = await Promo.findOne({ code: newCode });
+            attempts++;
+        }
+
+        const duplicatedPromo = await Promo.create({
+            code: newCode,
+            description: `${originalPromo.description} (Copy)`,
+            rewardType: originalPromo.rewardType,
+            rewardValue: originalPromo.rewardValue,
+            currency: originalPromo.currency || 'USD',
+            walletType: originalPromo.walletType || 'main',
+            targetType: originalPromo.targetType || 'all',
+            userIds: originalPromo.userIds || [],
+            maxRedemptions: originalPromo.maxRedemptions,
+            maxRedemptionsPerUser: originalPromo.maxRedemptionsPerUser || 1,
+            expiresAt: originalPromo.expiresAt,
+            status: 'draft',
+            createdBy: req.admin._id,
+            usedCount: 0
+        });
+
+        await logActivity(
+            'promo_code_duplicated',
+            'Promo',
+            duplicatedPromo._id,
+            req.admin._id,
+            'Admin',
+            req,
+            {
+                originalCode: originalPromo.code,
+                newCode: duplicatedPromo.code,
+                originalId: originalPromo._id
+            }
+        );
+
+        const formattedPromo = {
+            _id: duplicatedPromo._id,
+            code: duplicatedPromo.code,
+            description: duplicatedPromo.description,
+            rewardType: duplicatedPromo.rewardType,
+            rewardValue: duplicatedPromo.rewardValue,
+            currency: duplicatedPromo.currency,
+            walletType: duplicatedPromo.walletType,
+            targetType: duplicatedPromo.targetType,
+            targetUserCount: duplicatedPromo.userIds ? duplicatedPromo.userIds.length : 0,
+            maxRedemptions: duplicatedPromo.maxRedemptions,
+            maxRedemptionsPerUser: duplicatedPromo.maxRedemptionsPerUser,
+            usedCount: duplicatedPromo.usedCount || 0,
+            expiresAt: duplicatedPromo.expiresAt,
+            status: duplicatedPromo.status,
+            createdBy: duplicatedPromo.createdBy,
+            createdAt: duplicatedPromo.createdAt
+        };
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Promo code duplicated successfully',
+            data: {
+                promo: formattedPromo
+            }
+        });
+
+    } catch (err) {
+        console.error('Error duplicating promo:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to duplicate promo code'
+        });
+    }
+});
+
+app.get('/api/admin/promos/:id/redemptions', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid promo ID'
+            });
+        }
+
+        const promo = await Promo.findById(id);
+        if (!promo) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Promo code not found'
+            });
+        }
+
+        const redemptions = await RedeemedPromo.find({ promoId: id })
+            .populate('userId', 'firstName lastName email')
+            .populate('transactionId')
+            .sort({ redeemedAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        const total = await RedeemedPromo.countDocuments({ promoId: id });
+
+        const formattedRedemptions = redemptions.map(r => ({
+            _id: r._id,
+            user: r.userId ? {
+                _id: r.userId._id,
+                firstName: r.userId.firstName || '',
+                lastName: r.userId.lastName || '',
+                email: r.userId.email || ''
+            } : null,
+            code: r.code,
+            rewardType: r.rewardType,
+            rewardValue: r.rewardValue,
+            rewardAmount: r.rewardValue,
+            currency: r.rewardAsset || 'USD',
+            walletType: r.walletType || 'main',
+            transactionId: r.transactionId ? r.transactionId._id : null,
+            transactionReference: r.transactionId ? r.transactionId.reference : null,
+            status: r.status || 'completed',
+            redeemedAt: r.redeemedAt || r.createdAt,
+            ipAddress: r.ipAddress || null,
+            userAgent: r.userAgent || null
+        }));
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                redemptions: formattedRedemptions,
+                pagination: {
+                    currentPage: page,
+                    totalPages: Math.ceil(total / limit),
+                    totalItems: total,
+                    itemsPerPage: limit,
+                    hasNextPage: skip + limit < total,
+                    hasPrevPage: page > 1
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching promo redemptions:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch promo redemptions'
+        });
+    }
+});
+
+// =============================================
+// EMAIL TEMPLATE MANAGEMENT ENDPOINTS
+// =============================================
+
+app.post('/api/admin/email-templates', adminProtect, restrictTo('super', 'finance', 'support'), async (req, res) => {
+    try {
+        const { name, subject, content, type } = req.body;
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Template name is required'
+            });
+        }
+
+        if (!subject || !subject.trim()) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email subject is required'
+            });
+        }
+
+        if (!content || !content.trim()) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email content is required'
+            });
+        }
+
+        const existingTemplate = await EmailTemplate.findOne({ name: name.trim() });
+        if (existingTemplate) {
+            return res.status(409).json({
+                status: 'fail',
+                message: 'A template with this name already exists'
+            });
+        }
+
+        const template = await EmailTemplate.create({
+            name: name.trim(),
+            subject: subject.trim(),
+            content: content,
+            type: type || 'html',
+            createdBy: req.admin._id,
+            usedCount: 0
+        });
+
+        await logActivity(
+            'email_template_created',
+            'EmailTemplate',
+            template._id,
+            req.admin._id,
+            'Admin',
+            req,
+            {
+                templateName: template.name,
+                templateSubject: template.subject
+            }
+        );
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Email template created successfully',
+            data: {
+                template: {
+                    _id: template._id,
+                    name: template.name,
+                    subject: template.subject,
+                    content: template.content,
+                    type: template.type,
+                    createdBy: template.createdBy,
+                    usedCount: template.usedCount || 0,
+                    createdAt: template.createdAt,
+                    updatedAt: template.updatedAt
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error creating email template:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to create email template'
+        });
+    }
+});
+
+app.delete('/api/admin/email-templates/:id', adminProtect, restrictTo('super', 'finance', 'support'), async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid template ID'
+            });
+        }
+
+        const template = await EmailTemplate.findById(id);
+        if (!template) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Email template not found'
+            });
+        }
+
+        await logActivity(
+            'email_template_deleted',
+            'EmailTemplate',
+            template._id,
+            req.admin._id,
+            'Admin',
+            req,
+            {
+                templateName: template.name,
+                templateSubject: template.subject
+            }
+        );
+
+        await EmailTemplate.findByIdAndDelete(id);
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Email template deleted successfully'
+        });
+
+    } catch (err) {
+        console.error('Error deleting email template:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to delete email template'
+        });
+    }
+});
+
+app.get('/api/admin/email-templates/:id', adminProtect, restrictTo('super', 'finance', 'support'), async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid template ID'
+            });
+        }
+
+        const template = await EmailTemplate.findById(id)
+            .populate('createdBy', 'name email')
+            .lean();
+
+        if (!template) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Email template not found'
+            });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                template: {
+                    _id: template._id,
+                    name: template.name,
+                    subject: template.subject,
+                    content: template.content,
+                    type: template.type || 'html',
+                    createdBy: template.createdBy || null,
+                    usedCount: template.usedCount || 0,
+                    createdAt: template.createdAt,
+                    updatedAt: template.updatedAt
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching email template:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch email template'
+        });
+    }
+});
 
 
 
