@@ -19947,7 +19947,6 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-
 // =============================================
 // CLOUD MINING HASHRATE PLANS ENDPOINT
 // =============================================
@@ -19955,7 +19954,7 @@ app.delete('/api/admin/two-factor', adminProtect, [
 app.get('/api/plans', async (req, res) => {
     try {
         // =============================================
-        // 1. FETCH ACTIVE MINING PLANS FROM DATABASE
+        // 1. FETCH MINING CONTRACTS FROM DATABASE
         // =============================================
         const plans = await Plan.find({ isActive: true }).lean();
         
@@ -19963,7 +19962,7 @@ app.get('/api/plans', async (req, res) => {
             return res.status(200).json({
                 status: 'success',
                 data: {
-                    miningPlans: [],
+                    plans: [],
                     marketContext: null,
                     userContext: null
                 }
@@ -19990,7 +19989,6 @@ app.get('/api/plans', async (req, res) => {
         let maturedBalanceUSD = 0;
         let kycVerified = false;
         let hasRecentTransaction = false;
-        let userPlan = null;
 
         const token = req.headers.authorization?.split(' ')[1] || req.cookies.jwt;
         
@@ -20013,24 +20011,6 @@ app.get('/api/plans', async (req, res) => {
                     mainBalanceUSD = balances.mainUSD || 0;
                     maturedBalanceUSD = balances.maturedUSD || 0;
                     
-                    // Check if user has any active mining contract
-                    const activeContract = await Investment.findOne({
-                        user: user._id,
-                        status: 'active'
-                    }).populate('plan');
-                    
-                    if (activeContract) {
-                        userPlan = {
-                            id: activeContract._id,
-                            planName: activeContract.plan?.name || 'Active Contract',
-                            hashrate: activeContract.plan?.hashrate || 0,
-                            startDate: activeContract.startDate,
-                            endDate: activeContract.endDate,
-                            amount: activeContract.amount,
-                            expectedReturn: activeContract.expectedReturn
-                        };
-                    }
-                    
                     const thirtyDaysAgo = new Date();
                     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                     const recentTx = await Transaction.findOne({
@@ -20049,20 +20029,16 @@ app.get('/api/plans', async (req, res) => {
                         isVerified: user.isVerified || false,
                         kycVerified: kycVerified,
                         mainBalance: {
-                            usd: mainBalanceUSD,
-                            btc: btcPrice > 0 ? mainBalanceUSD / btcPrice : 0
+                            usd: mainBalanceUSD
                         },
                         maturedBalance: {
-                            usd: maturedBalanceUSD,
-                            btc: btcPrice > 0 ? maturedBalanceUSD / btcPrice : 0
+                            usd: maturedBalanceUSD
                         },
                         totalPortfolio: {
-                            usd: mainBalanceUSD + maturedBalanceUSD,
-                            btc: btcPrice > 0 ? (mainBalanceUSD + maturedBalanceUSD) / btcPrice : 0
+                            usd: mainBalanceUSD + maturedBalanceUSD
                         },
                         hasRecentTransaction: hasRecentTransaction,
-                        activeMiningContract: userPlan,
-                        canRentHashrate: true
+                        canRent: true
                     };
                 }
             } catch (authErr) {
@@ -20073,20 +20049,19 @@ app.get('/api/plans', async (req, res) => {
         if (!userContext) {
             userContext = {
                 isLoggedIn: false,
-                canRentHashrate: false,
+                canRent: false,
                 kycVerified: false,
                 hasRecentTransaction: false,
-                activeMiningContract: null,
-                mainBalance: { usd: 0, btc: 0 },
-                maturedBalance: { usd: 0, btc: 0 },
-                totalPortfolio: { usd: 0, btc: 0 }
+                mainBalance: { usd: 0 },
+                maturedBalance: { usd: 0 },
+                totalPortfolio: { usd: 0 }
             };
         }
 
         // =============================================
-        // 4. BUILD MINING PLAN DATA
+        // 4. BUILD CONTRACT DATA
         // =============================================
-        const miningPlans = plans.map((plan) => {
+        const enhancedPlans = plans.map((plan) => {
             const minAmountUSD = plan.minAmount || 0;
             const maxAmountUSD = plan.maxAmount || 0;
             const percentage = plan.percentage || 0;
@@ -20095,31 +20070,21 @@ app.get('/api/plans', async (req, res) => {
             const planName = plan.name || 'Mining Contract';
             const planDescription = plan.description || `${planName} SHA-256 ASIC mining contract`;
             
-            // BTC equivalents
             const minAmountBTC = btcPrice > 0 ? minAmountUSD / btcPrice : 0;
             const maxAmountBTC = btcPrice > 0 ? maxAmountUSD / btcPrice : 0;
             
-            // Duration in days/hours
             const durationDays = durationHours / 24;
+            const dailyMiningPercentage = durationDays > 0 ? percentage / durationDays : percentage;
             
-            // Daily mining yield percentage
-            const dailyYieldPercentage = durationDays > 0 ? percentage / durationDays : percentage;
+            const dailyMiningMin = minAmountUSD * (dailyMiningPercentage / 100);
+            const dailyMiningMax = maxAmountUSD * (dailyMiningPercentage / 100);
+            const monthlyMiningMin = dailyMiningMin * 30;
+            const monthlyMiningMax = dailyMiningMax * 30;
+            const annualMiningMin = dailyMiningMin * 365;
+            const annualMiningMax = dailyMiningMax * 365;
             
-            // Estimated mining rewards (daily, monthly, annually)
-            const dailyRewardMin = minAmountUSD * (dailyYieldPercentage / 100);
-            const dailyRewardMax = maxAmountUSD * (dailyYieldPercentage / 100);
-            const monthlyRewardMin = dailyRewardMin * 30;
-            const monthlyRewardMax = dailyRewardMax * 30;
+            const dailyMiningBTC = btcPrice > 0 ? dailyMiningMin / btcPrice : 0;
             
-            // Mining rewards in BTC
-            const dailyRewardBTC = btcPrice > 0 ? dailyRewardMin / btcPrice : 0;
-            const monthlyRewardBTC = btcPrice > 0 ? monthlyRewardMin / btcPrice : 0;
-            
-            // Calculate mining capacity based on hashrate
-            const miningCapacity = hashrate > 0 ? hashrate : 0;
-            const capacityUnit = 'TH/s';
-            
-            // Check if user can rent this hashrate
             let canRent = false;
             let buttonState = 'login';
             let buttonText = 'Login to Rent Hashrate';
@@ -20128,19 +20093,19 @@ app.get('/api/plans', async (req, res) => {
             if (isLoggedIn && userContext) {
                 if (!kycVerified) {
                     buttonState = 'kyc_required';
-                    buttonText = 'Complete KYC First';
+                    buttonText = 'Complete KYC';
                     buttonTooltip = 'KYC verification required to rent hashrate';
                 } else if (!hasRecentTransaction) {
                     buttonState = 'transaction_required';
-                    buttonText = 'Make a Deposit First';
+                    buttonText = 'Make a Deposit';
                     buttonTooltip = 'A recent deposit or withdrawal is required';
                 } else {
                     const totalUserBalance = userContext.mainBalance.usd + userContext.maturedBalance.usd;
                     if (totalUserBalance >= plan.minAmount) {
                         canRent = true;
                         buttonState = 'rent';
-                        buttonText = 'Rent Hashrate Now';
-                        buttonTooltip = `Rent ${hashrate} TH/s for ${durationHours} hours`;
+                        buttonText = 'Rent Hashrate';
+                        buttonTooltip = `Rent ${hashrate} TH/s mining capacity`;
                     } else {
                         buttonState = 'insufficient';
                         buttonText = 'Insufficient Balance';
@@ -20149,7 +20114,6 @@ app.get('/api/plans', async (req, res) => {
                 }
             }
             
-            // Determine tier from plan name for styling
             const planNameLower = planName.toLowerCase();
             let tierKey = 'standard';
             let badge = 'Standard';
@@ -20195,49 +20159,33 @@ app.get('/api/plans', async (req, res) => {
                 borderColor = 'rgba(46, 204, 113, 0.3)';
             }
             
-            // Mining features (descriptive)
             const features = [
-                `SHA-256 ASIC mining`,
-                `${hashrate > 0 ? hashrate + ' TH/s dedicated hashrate' : 'Premium mining capacity'}`,
-                `${durationHours} hour mining contract`,
-                `${dailyYieldPercentage.toFixed(2)}% estimated daily yield`,
-                `24/7 performance monitoring`,
-                `Automatic mining rewards distribution`
+                'SHA-256 ASIC mining',
+                '24/7 performance monitoring',
+                'Automatic daily mining rewards',
+                `${hashrate > 0 ? hashrate + ' TH/s hashrate' : 'Premium mining capacity'}`
             ];
             
-            // Add tier-specific features
             if (tierKey === 'gold' || tierKey === 'enterprise' || tierKey === 'ultimate') {
-                features.push('Priority mining pool access');
+                features.push('Priority support');
             }
             if (tierKey === 'enterprise' || tierKey === 'ultimate') {
-                features.push('Dedicated mining hardware');
+                features.push('Dedicated mining capacity');
             }
             if (tierKey === 'ultimate') {
-                features.push('Exclusive mining bonuses');
+                features.push('Exclusive bonuses');
             }
             
             return {
-                // Core plan identification
                 id: plan._id,
                 name: planName,
                 tier: tierKey,
                 badge: badge,
-                
-                // Visual styling
                 color: color,
                 lightColor: lightColor,
                 bgColor: bgColor,
                 borderColor: borderColor,
-                
-                // Description
                 description: planDescription,
-                
-                // Mining capacity
-                hashrate: hashrate,
-                hashrateUnit: 'TH/s',
-                miningAlgorithm: 'SHA-256',
-                
-                // Pricing (USD and BTC)
                 minAmount: {
                     usd: minAmountUSD,
                     btc: minAmountBTC
@@ -20246,115 +20194,61 @@ app.get('/api/plans', async (req, res) => {
                     usd: maxAmountUSD,
                     btc: maxAmountBTC
                 },
-                
-                // Mining contract duration
+                percentage: percentage,
                 duration: {
                     hours: durationHours,
                     days: durationDays
                 },
-                
-                // Mining yield
-                totalYieldPercentage: percentage,
-                dailyYieldPercentage: parseFloat(dailyYieldPercentage.toFixed(2)),
-                
-                // Estimated mining rewards
-                estimatedRewards: {
+                hashrate: hashrate,
+                features: features,
+                estimatedMining: {
                     daily: {
-                        usd: {
-                            min: dailyRewardMin,
-                            max: dailyRewardMax
-                        },
-                        btc: dailyRewardBTC,
-                        display: `<span style="color: #2ECC71;">$${dailyRewardMin.toFixed(2)} - $${dailyRewardMax.toFixed(2)}</span>`
+                        min: dailyMiningMin,
+                        max: dailyMiningMax,
+                        minBTC: dailyMiningBTC,
+                        display: `<span style="color: #2ECC71;">$${dailyMiningMin.toFixed(2)} - $${dailyMiningMax.toFixed(2)}</span>`
                     },
                     monthly: {
-                        usd: {
-                            min: monthlyRewardMin,
-                            max: monthlyRewardMax
-                        },
-                        btc: monthlyRewardBTC,
-                        display: `<span style="color: #2ECC71;">$${monthlyRewardMin.toFixed(2)} - $${monthlyRewardMax.toFixed(2)}</span>`
+                        min: monthlyMiningMin,
+                        max: monthlyMiningMax,
+                        display: `<span style="color: #2ECC71;">$${monthlyMiningMin.toFixed(2)} - $${monthlyMiningMax.toFixed(2)}</span>`
+                    },
+                    annual: {
+                        min: annualMiningMin,
+                        max: annualMiningMax,
+                        display: `<span style="color: #2ECC71;">$${annualMiningMin.toFixed(2)} - $${annualMiningMax.toFixed(2)}</span>`
                     }
                 },
-                
-                // Features list
-                features: features,
-                
-                // User action state
                 buttonState: buttonState,
                 buttonText: buttonText,
                 buttonTooltip: buttonTooltip,
                 canRent: canRent,
-                
-                // Marketing flags
                 isPopular: tierKey === 'gold',
                 isBestValue: tierKey === 'standard'
             };
         });
 
         // =============================================
-        // 5. BUILD RESPONSE WITH CORRECT TERMINOLOGY
+        // 5. BUILD RESPONSE
         // =============================================
         const response = {
             status: 'success',
             data: {
-                // Renamed from "plans" to "miningPlans" to be clear
-                miningPlans: miningPlans,
-                
-                // Market context with BTC price
+                plans: enhancedPlans,
                 marketContext: {
                     btcPrice: btcPrice,
-                    btcPriceFormatted: btcPrice ? `$${btcPrice.toLocaleString()}` : 'Unavailable',
                     timestamp: new Date().toISOString()
                 },
-                
-                // User-specific context
-                userContext: {
-                    isLoggedIn: userContext.isLoggedIn,
-                    hasActiveMiningContract: !!userContext.activeMiningContract,
-                    activeMiningContract: userContext.activeMiningContract,
-                    canRentHashrate: userContext.canRentHashrate,
-                    kycVerified: userContext.kycVerified,
-                    hasRecentTransaction: userContext.hasRecentTransaction,
-                    balances: {
-                        main: {
-                            usd: userContext.mainBalance?.usd || 0,
-                            btc: userContext.mainBalance?.btc || 0
-                        },
-                        matured: {
-                            usd: userContext.maturedBalance?.usd || 0,
-                            btc: userContext.maturedBalance?.btc || 0
-                        },
-                        total: {
-                            usd: userContext.totalPortfolio?.usd || 0,
-                            btc: userContext.totalPortfolio?.btc || 0
-                        }
-                    }
-                },
-                
-                // Metadata
-                totalPlans: miningPlans.length,
-                timestamp: new Date().toISOString(),
-                
-                // Helpful messages
-                messages: {
-                    title: 'Rent Cloud Mining Hashrate',
-                    subtitle: 'Start mining Bitcoin with our professional ASIC miners',
-                    cta: 'Rent Hashrate',
-                    noPlanMessage: 'No mining contracts available at the moment. Please check back later.',
-                    loginRequired: 'Please login to rent hashrate',
-                    kycRequired: 'Complete KYC verification to rent hashrate',
-                    transactionRequired: 'Make your first deposit to rent hashrate'
-                }
+                userContext: userContext,
+                totalPlans: enhancedPlans.length
             }
         };
 
-        // Cache the response for 60 seconds
         res.set('Cache-Control', 'public, max-age=60');
         res.status(200).json(response);
 
     } catch (err) {
-        console.error('Mining plans endpoint error:', err);
+        console.error('Plans endpoint error:', err);
         res.status(500).json({
             status: 'error',
             message: 'Failed to load mining contracts',
@@ -20362,8 +20256,6 @@ app.get('/api/plans', async (req, res) => {
         });
     }
 });
-
-
 
 
 
