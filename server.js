@@ -100,26 +100,45 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: [
-    'https://www.bithashcapital.live', 'https://bithash-backend-kg7j.onrender.com', 'https://bithash-backend-ycuf.onrender.com',
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
-    'X-CSRF-Token',
-    'X-Rate-Limit',
-    'X-Requested-With',
-    'Accept',
-    'Origin',
-    'X-2FA-Verified'
-  ],
-  exposedHeaders: [
-    'X-Rate-Limit-Limit',
-    'X-Rate-Limit-Remaining',
-    'X-Rate-Limit-Reset'
-  ]
+    origin: [
+        'https://www.bithashcapital.live',
+
+        // Backend domains
+        'https://bithash-backend-kg7j.onrender.com',
+        'https://bithash-backend-ycuf.onrender.com',
+
+        // Local development
+        'http://127.0.0.1:8080',
+        'http://localhost:8080'
+    ],
+
+    credentials: true,
+
+    methods: [
+        'GET',
+        'POST',
+        'PUT',
+        'DELETE',
+        'OPTIONS',
+        'PATCH'
+    ],
+
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-CSRF-Token',
+        'X-Rate-Limit',
+        'X-Requested-With',
+        'Accept',
+        'Origin',
+        'X-2FA-Verified'
+    ],
+
+    exposedHeaders: [
+        'X-Rate-Limit-Limit',
+        'X-Rate-Limit-Remaining',
+        'X-Rate-Limit-Reset'
+    ]
 }));
 
 app.use((req, res, next) => {
