@@ -49976,7 +49976,53 @@ app.get('/api/admin/promos/:id/redemptions', adminProtect, restrictTo('super', '
     }
 });
 
+app.get('/api/admin/users/search', adminProtect, async (req, res) => {
+    try {
+        const { q, limit = 20 } = req.query;
 
+        if (!q || q.trim().length < 2) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Search query must be at least 2 characters'
+            });
+        }
+
+        const searchTerm = q.trim();
+
+        const users = await User.find({
+            $or: [
+                { firstName: { $regex: searchTerm, $options: 'i' } },
+                { lastName: { $regex: searchTerm, $options: 'i' } },
+                { email: { $regex: searchTerm, $options: 'i' } }
+            ]
+        })
+        .select('_id firstName lastName email status')
+        .limit(parseInt(limit))
+        .lean();
+
+        const formattedUsers = users.map(user => ({
+            _id: user._id,
+            firstName: user.firstName || '',
+            lastName: user.lastName || '',
+            email: user.email || '',
+            status: user.status || 'active'
+        }));
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                users: formattedUsers
+            }
+        });
+
+    } catch (err) {
+        console.error('Error searching users:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to search users'
+        });
+    }
+});
 
 
 
