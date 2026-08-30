@@ -4770,7 +4770,7 @@ const SystemLogSchema = new mongoose.Schema({
     enum: [
       'user', 'admin', 'transaction','FinancialStatement', 'investment', 'kyc',  'Treasury','plan', 'loan',
       'withdrawal', 'deposit', 'referral', 'notification', 'system', 'security',
-      'authentication', 'api', 'settings', 'support', 'audit', 'maintenance',
+      'authentication', 'api', 'settings', 'support', 'promo',   'audit', 'maintenance',
       'card_payment', 'deposit_asset', 'buy', 'sell', 'conversion', 'transfer',
       'balance', 'commission', 'downline', 'withdrawal_request', 'deposit_request',
       'kyc_document', 'kyc_verification', 'two_factor', 'password_reset', 'email',
