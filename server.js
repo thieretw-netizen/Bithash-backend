@@ -226,14 +226,6 @@ app.use(
 );
 
 
-// ============================================================
-// CACHE CONTROL
-// ============================================================
-// IMPORTANT:
-// Do NOT manually set Access-Control-Allow-Origin here.
-// The cors() middleware above is responsible for CORS headers.
-// Setting "*" here would break requests using credentials: "include".
-
 app.use((req, res, next) => {
   if (
     req.url.includes("/api/plans") ||
@@ -280,28 +272,7 @@ redis.on('connect', () => {
   if (process.env.NODE_ENV !== 'production') console.log('Redis connected successfully');
 });
 
-const getRealClientIP = (req) => {
-  const forwardedFor = req.headers['x-forwarded-for'];
-  if (forwardedFor) {
-    return forwardedFor.split(',')[0].trim();
-  }
-  
-  const cfConnectingIp = req.headers['cf-connecting-ip'];
-  if (cfConnectingIp) {
-    return cfConnectingIp;
-  }
-  
-  const realIp = req.headers['x-real-ip'];
-  if (realIp) {
-    return realIp;
-  }
-  
-  return req.ip || 
-         req.connection?.remoteAddress || 
-         req.socket?.remoteAddress || 
-         req.connection?.socket?.remoteAddress ||
-         '0.0.0.0';
-};
+
 
 const apiLimiter = rateLimit({
   store: new RedisStore({
@@ -420,6 +391,19 @@ const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083;
 
 
 
+
+
+
+if (process.env.NODE_ENV === 'production') {
+    // In production with Cloudflare, we trust the proxy
+    // The actual proxy IPs should be configured based on your infrastructure
+    app.set('trust proxy', true);
+    console.log('✅ Trust proxy enabled for production');
+} else {
+    // In development, we only trust local proxies
+    app.set('trust proxy', false);
+    console.log('🔧 Trust proxy disabled for development');
+}
 
 
 const UserSchema = new mongoose.Schema({
@@ -6669,296 +6653,6 @@ const sendEmail = async (options) => {
   }
 };
 
-const getComprehensiveDeviceInfo = (req) => {
-  const userAgent = req.headers['user-agent'] || '';
-  const ip = getRealClientIP(req);
-  
-  const result = deviceDetector.detect(userAgent);
-  
-  const botInfo = deviceDetector.parseBot(userAgent);
-  
-  const clientInfo = result.client || {};
-  const osInfo = result.os || {};
-  const deviceInfo = result.device || {};
-  
-  const comprehensiveInfo = {
-    type: deviceInfo.type || 'unknown',
-    brand: deviceInfo.brand || '',
-    model: deviceInfo.model || '',
-    os: {
-      name: osInfo.name || 'Unknown',
-      version: osInfo.version || '',
-      platform: osInfo.platform || '',
-      family: osInfo.family || ''
-    },
-    browser: {
-      name: clientInfo.name || 'Unknown',
-      version: clientInfo.version || '',
-      type: clientInfo.type || '',
-      engine: clientInfo.engine || '',
-      engineVersion: clientInfo.engineVersion || ''
-    },
-    isBot: !!botInfo,
-    botInfo: botInfo ? {
-      name: botInfo.name,
-      category: botInfo.category,
-      url: botInfo.url,
-      producer: botInfo.producer
-    } : null,
-    characteristics: {
-      isMobile: deviceInfo.type === 'smartphone' || deviceInfo.type === 'feature phone',
-      isTablet: deviceInfo.type === 'tablet',
-      isDesktop: deviceInfo.type === 'desktop',
-      isTV: deviceInfo.type === 'tv',
-      isConsole: deviceInfo.type === 'console',
-      isWearable: deviceInfo.type === 'wearable',
-      isCarBrowser: deviceInfo.type === 'car browser',
-      isBot: !!botInfo
-    },
-    userAgent: userAgent,
-    ip: ip,
-    detectedAt: new Date().toISOString()
-  };
-  
-  return comprehensiveInfo;
-};
-
-const getUserDeviceInfo = async (req) => {
-  try {
-    let ip = getRealClientIP(req);
-
-    let location = 'Unknown Location';
-    let exactLocation = false;
-    let isPublicIP = true;
-    let locationDetails = {
-      country: 'Unknown',
-      city: 'Unknown',
-      region: 'Unknown',
-      street: 'Unknown',
-      postalCode: 'Unknown',
-      timezone: 'Unknown',
-      latitude: null,
-      longitude: null
-    };
-
-    const privateIPRanges = [
-      /^10\./,
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
-      /^192\.168\./,
-      /^127\./,
-      /^169\.254\./,
-      /^::1$/,
-      /^fc00::/,
-      /^fd00::/,
-      /^fe80::/
-    ];
-
-    for (const range of privateIPRanges) {
-      if (range.test(ip)) {
-        isPublicIP = false;
-        location = 'Local Network';
-        break;
-      }
-    }
-
-    if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
-      try {
-        console.log(`Looking up exact location for IP: ${ip}`);
-        
-        const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-        
-        try {
-          const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, {
-            timeout: 5000
-          });
-          
-          if (response.data) {
-            const { city, region, country, loc, org, timezone, postal } = response.data;
-            
-            let latitude = null;
-            let longitude = null;
-            if (loc && loc.includes(',')) {
-              const coords = loc.split(',');
-              latitude = parseFloat(coords[0]);
-              longitude = parseFloat(coords[1]);
-              exactLocation = true;
-            }
-            
-            locationDetails = {
-              country: country || 'Unknown',
-              city: city || 'Unknown',
-              region: region || 'Unknown',
-              street: response.data.street || 'Unknown',
-              postalCode: postal || 'Unknown',
-              timezone: timezone || 'Unknown',
-              latitude: latitude,
-              longitude: longitude
-            };
-            
-            location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
-            
-            console.log(`Exact location from ipinfo.io: ${location} (lat: ${latitude}, lng: ${longitude})`);
-          }
-        } catch (ipinfoError) {
-          console.log('ipinfo.io failed for exact location, trying fallback services...');
-          
-          try {
-            const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
-              timeout: 5000
-            });
-            
-            if (response.data && !response.data.error) {
-              const { city, region, country_name, country_code, latitude, longitude, timezone, postal } = response.data;
-              
-              if (latitude && longitude) {
-                exactLocation = true;
-              }
-              
-              locationDetails = {
-                country: country_name || country_code || 'Unknown',
-                city: city || 'Unknown',
-                region: region || 'Unknown',
-                street: 'Unknown',
-                postalCode: postal || 'Unknown',
-                timezone: timezone || 'Unknown',
-                latitude: latitude || null,
-                longitude: longitude || null
-              };
-              
-              location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
-              console.log(`Exact location from ipapi.co: ${location}`);
-            }
-          } catch (ipapiError) {
-            try {
-              const response = await axios.get(`https://freeipapi.com/api/json/${ip}`, {
-                timeout: 5000
-              });
-              
-              if (response.data) {
-                const { cityName, regionName, countryName, latitude, longitude, timeZone } = response.data;
-                
-                if (latitude && longitude) {
-                  exactLocation = true;
-                }
-                
-                locationDetails = {
-                  country: countryName || 'Unknown',
-                  city: cityName || 'Unknown',
-                  region: regionName || 'Unknown',
-                  street: 'Unknown',
-                  postalCode: 'Unknown',
-                  timezone: timeZone || 'Unknown',
-                  latitude: latitude || null,
-                  longitude: longitude || null
-                };
-                
-                location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
-                console.log(`Exact location from freeipapi.com: ${location}`);
-              }
-            } catch (freeipapiError) {
-              try {
-                const response = await axios.get(`http://ip-api.com/json/${ip}`, {
-                  timeout: 5000
-                });
-                
-                if (response.data && response.data.status === 'success') {
-                  const { city, regionName, country, lat, lon, timezone, zip } = response.data;
-                  
-                  if (lat && lon) {
-                    exactLocation = true;
-                  }
-                  
-                  locationDetails = {
-                    country: country || 'Unknown',
-                    city: city || 'Unknown',
-                    region: regionName || 'Unknown',
-                    street: 'Unknown',
-                    postalCode: zip || 'Unknown',
-                    timezone: timezone || 'Unknown',
-                    latitude: lat || null,
-                    longitude: lon || null
-                  };
-                  
-                  location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
-                  console.log(`Exact location from ip-api.com: ${location}`);
-                }
-              } catch (ipapiComError) {
-                location = 'Location Unavailable';
-                console.log('All location services failed for exact location');
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.error('All exact location lookup services failed:', err.message);
-        location = 'Location Unavailable';
-      }
-    } else if (!isPublicIP) {
-      console.log(`Private IP detected: ${ip}, using local network location`);
-    }
-
-    const deviceInfo = getComprehensiveDeviceInfo(req);
-
-    return {
-      ip: ip || 'Unknown',
-      device: req.headers['user-agent'] || 'Unknown',
-      location: location,
-      isPublicIP: isPublicIP,
-      exactLocation: exactLocation,
-      locationDetails: locationDetails,
-      deviceDetails: {
-        type: deviceInfo.type,
-        brand: deviceInfo.brand,
-        model: deviceInfo.model,
-        os: deviceInfo.os,
-        browser: deviceInfo.browser,
-        isBot: deviceInfo.isBot,
-        botInfo: deviceInfo.botInfo,
-        characteristics: deviceInfo.characteristics,
-        userAgent: deviceInfo.userAgent
-      }
-    };
-  } catch (err) {
-    console.error('Error getting device info:', err);
-    return {
-      ip: req.ip || 'Unknown',
-      device: req.headers['user-agent'] || 'Unknown',
-      location: 'Unknown',
-      isPublicIP: false,
-      exactLocation: false,
-      locationDetails: {
-        country: 'Unknown',
-        city: 'Unknown',
-        region: 'Unknown',
-        street: 'Unknown',
-        postalCode: 'Unknown',
-        timezone: 'Unknown',
-        latitude: null,
-        longitude: null
-      },
-      deviceDetails: {
-        type: 'unknown',
-        brand: '',
-        model: '',
-        os: { name: 'Unknown', version: '' },
-        browser: { name: 'Unknown', version: '' },
-        isBot: false,
-        botInfo: null,
-        characteristics: {
-          isMobile: false,
-          isTablet: false,
-          isDesktop: false,
-          isTV: false,
-          isConsole: false,
-          isWearable: false,
-          isCarBrowser: false,
-          isBot: false
-        },
-        userAgent: req.headers['user-agent'] || ''
-      }
-    };
-  }
-};
 
 // =============================================
 // ACTIVITY LOGGING - ALL ACTIVITIES GO TO SYSTEMLOG ONLY
@@ -7915,6 +7609,1372 @@ console.log('🏦 Bank-like financial statement cron job scheduled (runs daily a
 
 
 
+ */
+const getRealClientIP = (req) => {
+    // Express's req.ip is the most reliable when trust proxy is configured
+    // This is the PRIMARY source - all other headers are fallbacks
+    if (req.ip) {
+        return req.ip;
+    }
+
+    // FALLBACK: Only if req.ip is unavailable (should not happen with Express)
+    // These are only used as last resort and should be logged as warnings
+    const forwardedFor = req.headers['x-forwarded-for'];
+    if (forwardedFor && typeof forwardedFor === 'string') {
+        // In case trust proxy is not set, but we have a header
+        // Extract the first IP (client origin) 
+        const ips = forwardedFor.split(',').map(ip => ip.trim());
+        // In a properly configured system with trust proxy, this is handled by Express
+        // This is just a safety net
+        console.warn('Using X-Forwarded-For header directly - ensure trust proxy is configured');
+        return ips[0];
+    }
+
+    const realIp = req.headers['x-real-ip'];
+    if (realIp) {
+        console.warn('Using X-Real-IP header directly - ensure trust proxy is configured');
+        return realIp;
+    }
+
+    const cfConnectingIp = req.headers['cf-connecting-ip'];
+    if (cfConnectingIp) {
+        console.warn('Using CF-Connecting-IP header directly - ensure trust proxy is configured');
+        return cfConnectingIp;
+    }
+
+    // Final fallback
+    return req.connection?.remoteAddress || 
+           req.socket?.remoteAddress || 
+           req.connection?.socket?.remoteAddress || 
+           '0.0.0.0';
+};
+
+/**
+ * Normalize IP address for consistent comparison
+ * Converts IPv4-mapped IPv6 to IPv4 format
+ * Handles various IP formats
+ */
+const normalizeIPAddress = (ip) => {
+    if (!ip || typeof ip !== 'string') {
+        return '0.0.0.0';
+    }
+
+    let normalized = ip.trim();
+
+    // Remove IPv6 prefix for IPv4-mapped addresses
+    // ::ffff:192.168.1.10 -> 192.168.1.10
+    const ipv4MappedMatch = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (ipv4MappedMatch) {
+        return ipv4MappedMatch[1];
+    }
+
+    // Handle IPv6 loopback
+    if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') {
+        return '127.0.0.1';
+    }
+
+    // Handle IPv6 unspecified
+    if (normalized === '::' || normalized === '0:0:0:0:0:0:0:0') {
+        return '0.0.0.0';
+    }
+
+    // Strip IPv6 zone index (e.g., fe80::1%eth0 -> fe80::1)
+    if (normalized.includes('%')) {
+        normalized = normalized.split('%')[0];
+    }
+
+    return normalized;
+};
+
+/**
+ * Check if an IP address is public (not private/local)
+ */
+const isPublicIPAddress = (ip) => {
+    const privateIPRanges = [
+        /^10\./,                          // 10.0.0.0/8
+        /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+        /^192\.168\./,                    // 192.168.0.0/16
+        /^127\./,                         // 127.0.0.0/8
+        /^169\.254\./,                    // 169.254.0.0/16
+        /^::1$/,                          // IPv6 loopback
+        /^fc00::/,                        // IPv6 unique local
+        /^fd00::/,                        // IPv6 unique local
+        /^fe80::/,                        // IPv6 link-local
+        /^0\.0\.0\.0$/,                   // Unspecified
+        /^::$/                            // IPv6 unspecified
+    ];
+
+    // Normalize IP first
+    const normalizedIP = normalizeIPAddress(ip);
+
+    for (const range of privateIPRanges) {
+        if (range.test(normalizedIP)) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+/**
+ * Location providers configuration - SINGLE SOURCE OF TRUTH
+ * Add/remove providers here
+ */
+const LOCATION_PROVIDERS = [
+    {
+        name: 'ipinfo',
+        enabled: true,
+        priority: 1,
+        timeout: 5000,
+        fetch: async (ip) => {
+            const token = process.env.IPINFO_TOKEN;
+            if (!token) {
+                throw new Error('IPINFO_TOKEN is not configured');
+            }
+            const response = await axios.get(`https://ipinfo.io/${ip}?token=${token}`, {
+                timeout: 5000
+            });
+            if (response.data) {
+                const { city, region, country, loc, timezone, postal, org } = response.data;
+                let latitude = null;
+                let longitude = null;
+                if (loc && loc.includes(',')) {
+                    const coords = loc.split(',');
+                    latitude = parseFloat(coords[0]);
+                    longitude = parseFloat(coords[1]);
+                }
+                return {
+                    success: true,
+                    provider: 'ipinfo',
+                    country: country || 'Unknown',
+                    city: city || 'Unknown',
+                    region: region || 'Unknown',
+                    postalCode: postal || 'Unknown',
+                    timezone: timezone || 'Unknown',
+                    latitude: latitude,
+                    longitude: longitude,
+                    isp: org || 'Unknown',
+                    source: 'ip',
+                    accuracy: latitude && longitude ? 'approximate' : 'country',
+                    precision: latitude && longitude ? 'city' : 'country'
+                };
+            }
+            throw new Error('No data from ipinfo');
+        }
+    },
+    {
+        name: 'ipapi',
+        enabled: true,
+        priority: 2,
+        timeout: 5000,
+        fetch: async (ip) => {
+            const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
+                timeout: 5000
+            });
+            if (response.data && !response.data.error) {
+                const { city, region, country_name, country_code, latitude, longitude, timezone, postal, org } = response.data;
+                return {
+                    success: true,
+                    provider: 'ipapi',
+                    country: country_name || country_code || 'Unknown',
+                    city: city || 'Unknown',
+                    region: region || 'Unknown',
+                    postalCode: postal || 'Unknown',
+                    timezone: timezone || 'Unknown',
+                    latitude: latitude || null,
+                    longitude: longitude || null,
+                    isp: org || 'Unknown',
+                    source: 'ip',
+                    accuracy: latitude && longitude ? 'approximate' : 'country',
+                    precision: latitude && longitude ? 'city' : 'country'
+                };
+            }
+            throw new Error('No data from ipapi');
+        }
+    },
+    {
+        name: 'freeipapi',
+        enabled: true,
+        priority: 3,
+        timeout: 5000,
+        fetch: async (ip) => {
+            const response = await axios.get(`https://freeipapi.com/api/json/${ip}`, {
+                timeout: 5000
+            });
+            if (response.data) {
+                const { cityName, regionName, countryName, latitude, longitude, timeZone, isp } = response.data;
+                return {
+                    success: true,
+                    provider: 'freeipapi',
+                    country: countryName || 'Unknown',
+                    city: cityName || 'Unknown',
+                    region: regionName || 'Unknown',
+                    postalCode: 'Unknown',
+                    timezone: timeZone || 'Unknown',
+                    latitude: latitude || null,
+                    longitude: longitude || null,
+                    isp: isp || 'Unknown',
+                    source: 'ip',
+                    accuracy: latitude && longitude ? 'approximate' : 'country',
+                    precision: latitude && longitude ? 'city' : 'country'
+                };
+            }
+            throw new Error('No data from freeipapi');
+        }
+    },
+    {
+        name: 'ip-api',
+        enabled: true,
+        priority: 4,
+        timeout: 5000,
+        fetch: async (ip) => {
+            const response = await axios.get(`http://ip-api.com/json/${ip}`, {
+                timeout: 5000
+            });
+            if (response.data && response.data.status === 'success') {
+                const { city, regionName, country, lat, lon, timezone, zip, org } = response.data;
+                return {
+                    success: true,
+                    provider: 'ip-api',
+                    country: country || 'Unknown',
+                    city: city || 'Unknown',
+                    region: regionName || 'Unknown',
+                    postalCode: zip || 'Unknown',
+                    timezone: timezone || 'Unknown',
+                    latitude: lat || null,
+                    longitude: lon || null,
+                    isp: org || 'Unknown',
+                    source: 'ip',
+                    accuracy: lat && lon ? 'approximate' : 'country',
+                    precision: lat && lon ? 'city' : 'country'
+                };
+            }
+            throw new Error('No data from ip-api');
+        }
+    }
+];
+
+/**
+ * IP Location cache - REDIS based
+ */
+const getIPLocationCacheKey = (ip) => `ip-location:${normalizeIPAddress(ip)}`;
+const IP_LOCATION_CACHE_TTL = 12 * 60 * 60; // 12 hours
+
+/**
+ * Look up IP location using configured providers
+ * Returns location data with accuracy metadata
+ */
+const lookupIPLocation = async (ip) => {
+    const normalizedIP = normalizeIPAddress(ip);
+    
+    // Check cache first
+    try {
+        const cacheKey = getIPLocationCacheKey(normalizedIP);
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            // Refresh cache TTL on access
+            await redis.expire(cacheKey, IP_LOCATION_CACHE_TTL);
+            return parsed;
+        }
+    } catch (cacheError) {
+        console.warn('IP location cache error:', cacheError.message);
+    }
+
+    // If IP is private, return local network location
+    if (!isPublicIPAddress(normalizedIP)) {
+        return {
+            country: 'Local Network',
+            city: 'Local Network',
+            region: 'Local Network',
+            postalCode: 'Unknown',
+            timezone: 'UTC',
+            latitude: null,
+            longitude: null,
+            isp: 'Local Network',
+            source: 'network',
+            accuracy: 'local',
+            precision: 'network',
+            isPublic: false,
+            provider: 'local'
+        };
+    }
+
+    // Try providers in priority order
+    const sortedProviders = LOCATION_PROVIDERS
+        .filter(p => p.enabled)
+        .sort((a, b) => a.priority - b.priority);
+
+    let lastError = null;
+
+    for (const provider of sortedProviders) {
+        try {
+            const result = await provider.fetch(normalizedIP);
+            if (result && result.success) {
+                // Add isPublic flag
+                result.isPublic = true;
+                
+                // Cache the result
+                try {
+                    const cacheKey = getIPLocationCacheKey(normalizedIP);
+                    await redis.setex(cacheKey, IP_LOCATION_CACHE_TTL, JSON.stringify(result));
+                } catch (cacheError) {
+                    console.warn('Failed to cache IP location:', cacheError.message);
+                }
+                
+                return result;
+            }
+        } catch (error) {
+            lastError = error;
+            console.warn(`Location provider ${provider.name} failed:`, error.message);
+        }
+    }
+
+    // All providers failed
+    console.error('All location providers failed. Last error:', lastError?.message);
+    return {
+        country: 'Unknown',
+        city: 'Unknown',
+        region: 'Unknown',
+        postalCode: 'Unknown',
+        timezone: 'Unknown',
+        latitude: null,
+        longitude: null,
+        isp: 'Unknown',
+        source: 'unknown',
+        accuracy: 'unknown',
+        precision: 'unknown',
+        isPublic: isPublicIPAddress(normalizedIP),
+        provider: 'none'
+    };
+};
+
+/**
+ * Get comprehensive device information
+ * Separated into display and security signals
+ */
+const getComprehensiveDeviceInfo = (req) => {
+    const userAgent = req.headers['user-agent'] || '';
+    const ip = getRealClientIP(req);
+    const normalizedIP = normalizeIPAddress(ip);
+    
+    const result = deviceDetector.detect(userAgent);
+    const botInfo = deviceDetector.parseBot(userAgent);
+    const clientInfo = result.client || {};
+    const osInfo = result.os || {};
+    const deviceInfo = result.device || {};
+
+    // Category A: Display information (for showing to users)
+    const displayInfo = {
+        type: deviceInfo.type || 'unknown',
+        brand: deviceInfo.brand || '',
+        model: deviceInfo.model || '',
+        os: {
+            name: osInfo.name || 'Unknown',
+            version: osInfo.version || '',
+            platform: osInfo.platform || '',
+            family: osInfo.family || ''
+        },
+        browser: {
+            name: clientInfo.name || 'Unknown',
+            version: clientInfo.version || '',
+            type: clientInfo.type || '',
+            engine: clientInfo.engine || '',
+            engineVersion: clientInfo.engineVersion || ''
+        },
+        userAgent: userAgent
+    };
+
+    // Category B: Security signals (for internal risk scoring)
+    const securitySignals = {
+        isBot: !!botInfo,
+        botInfo: botInfo ? {
+            name: botInfo.name || null,
+            category: botInfo.category || null,
+            url: botInfo.url || null,
+            producer: botInfo.producer || null
+        } : null,
+        isMobile: deviceInfo.type === 'smartphone' || deviceInfo.type === 'feature phone',
+        isTablet: deviceInfo.type === 'tablet',
+        isDesktop: deviceInfo.type === 'desktop',
+        isTV: deviceInfo.type === 'tv',
+        isConsole: deviceInfo.type === 'console',
+        isWearable: deviceInfo.type === 'wearable',
+        isCarBrowser: deviceInfo.type === 'car browser',
+        userAgent: userAgent,
+        ip: normalizedIP,
+        userAgentHash: userAgent ? require('crypto').createHash('sha256').update(userAgent).digest('hex').substring(0, 16) : null,
+        browserVersion: clientInfo.version || null,
+        operatingSystem: osInfo.name || null,
+        detectedAt: new Date().toISOString()
+    };
+
+    return {
+        display: displayInfo,
+        security: securitySignals
+    };
+};
+
+/**
+ * Generate a cryptographically secure device ID
+ * This is the PRIMARY device identity mechanism
+ */
+const generateSecureDeviceId = () => {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return Array.from(array)
+        .map(byte => byte.toString(16).padStart(2, '0'))
+        .join('');
+};
+
+/**
+ * Hash a device ID for storage
+ * Never store raw device IDs in the database
+ */
+const hashDeviceId = (deviceId) => {
+    return crypto.createHash('sha256')
+        .update(deviceId)
+        .digest('hex');
+};
+
+/**
+ * Get device identity from request
+ * Returns deviceIdHash (hashed) and deviceId (raw for verification)
+ */
+const getDeviceIdentity = (req) => {
+    // Check for device ID in headers (sent from client)
+    const rawDeviceId = req.headers['x-device-id'] || req.headers['device-id'] || null;
+    
+    if (rawDeviceId) {
+        return {
+            deviceId: rawDeviceId,
+            deviceIdHash: hashDeviceId(rawDeviceId),
+            source: 'header'
+        };
+    }
+    
+    // No device ID provided
+    return {
+        deviceId: null,
+        deviceIdHash: null,
+        source: 'none'
+    };
+};
+
+/**
+ * Calculate login risk score
+ */
+const calculateLoginRisk = (signals) => {
+    let score = 0;
+    let factors = [];
+
+    // Known device check
+    if (!signals.knownDevice) {
+        score += 40;
+        factors.push('NEW_DEVICE');
+    }
+
+    // IP changes
+    if (signals.ipChanged) {
+        score += 10;
+        factors.push('IP_CHANGED');
+    }
+
+    // Country changes
+    if (signals.countryChanged) {
+        score += 30;
+        factors.push('COUNTRY_CHANGED');
+    }
+
+    // City changes
+    if (signals.cityChanged) {
+        score += 10;
+        factors.push('CITY_CHANGED');
+    }
+
+    // VPN/Proxy detection (if available)
+    if (signals.vpnDetected) {
+        score += 25;
+        factors.push('VPN_DETECTED');
+    }
+
+    if (signals.proxyDetected) {
+        score += 20;
+        factors.push('PROXY_DETECTED');
+    }
+
+    // Impossible travel
+    if (signals.impossibleTravel) {
+        score += 50;
+        factors.push('IMPOSSIBLE_TRAVEL');
+    }
+
+    // Suspicious user agent
+    if (signals.suspiciousUserAgent) {
+        score += 30;
+        factors.push('SUSPICIOUS_USER_AGENT');
+    }
+
+    // Failed attempts
+    if (signals.failedAttempts > 5) {
+        score += 40;
+        factors.push('HIGH_FAILED_ATTEMPTS');
+    } else if (signals.failedAttempts > 3) {
+        score += 20;
+        factors.push('MODERATE_FAILED_ATTEMPTS');
+    }
+
+    // Bot detection
+    if (signals.isBot) {
+        score += 20;
+        factors.push('BOT_DETECTED');
+    }
+
+    // IP public status
+    if (!signals.isPublicIP) {
+        score += 5;
+        factors.push('PRIVATE_IP');
+    }
+
+    return {
+        score: Math.min(score, 100),
+        factors: factors,
+        riskLevel: score < 30 ? 'low' : 
+                   score < 60 ? 'medium' : 
+                   score < 80 ? 'high' : 'critical'
+    };
+};
+
+/**
+ * Calculate distance between two coordinates (Haversine formula)
+ * For impossible travel detection
+ */
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (lat1 === null || lon1 === null || lat2 === null || lon2 === null) {
+        return Infinity;
+    }
+
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+};
+
+/**
+ * Calculate travel speed between two location events
+ * Returns km/h
+ */
+const calculateTravelSpeed = (lat1, lon1, lat2, lon2, time1, time2) => {
+    const distance = calculateDistance(lat1, lon1, lat2, lon2);
+    const timeDiffHours = Math.abs(time2 - time1) / (1000 * 60 * 60);
+    if (timeDiffHours === 0) return Infinity;
+    return distance / timeDiffHours;
+};
+
+/**
+ * Enhanced getUserDeviceInfo - Main entry point
+ * Combines all security signals
+ */
+const getUserDeviceInfo = async (req) => {
+    try {
+        // 1. Get real client IP (with proper proxy trust)
+        const rawIP = getRealClientIP(req);
+        const normalizedIP = normalizeIPAddress(rawIP);
+        const isPublic = isPublicIPAddress(normalizedIP);
+
+        // 2. Get device identity from request
+        const deviceIdentity = getDeviceIdentity(req);
+
+        // 3. Get comprehensive device info (display + security)
+        const deviceInfo = getComprehensiveDeviceInfo(req);
+
+        // 4. Look up IP location (with caching)
+        let locationData = {
+            country: 'Unknown',
+            city: 'Unknown',
+            region: 'Unknown',
+            postalCode: 'Unknown',
+            timezone: 'Unknown',
+            latitude: null,
+            longitude: null,
+            isp: 'Unknown',
+            source: 'ip',
+            accuracy: isPublic ? 'approximate' : 'local',
+            precision: isPublic ? 'country' : 'network',
+            isPublic: isPublic,
+            provider: 'unknown'
+        };
+
+        if (isPublic) {
+            locationData = await lookupIPLocation(normalizedIP);
+        }
+
+        // 5. Build security context
+        const securityContext = {
+            ip: {
+                raw: rawIP,
+                normalized: normalizedIP,
+                isPublic: isPublic
+            },
+            device: {
+                identity: deviceIdentity,
+                display: deviceInfo.display,
+                security: deviceInfo.security
+            },
+            location: locationData,
+            detectedAt: new Date().toISOString()
+        };
+
+        // 6. Return in the format expected by existing code
+        // (Backward compatibility with existing server.js)
+        return {
+            ip: normalizedIP,
+            device: req.headers['user-agent'] || 'Unknown',
+            location: locationData.city && locationData.region && locationData.country
+                ? `${locationData.city}, ${locationData.region}, ${locationData.country}`
+                : locationData.country !== 'Unknown'
+                ? locationData.country
+                : 'Unknown Location',
+            isPublicIP: isPublic,
+            // We no longer use "exactLocation" - replaced with accuracy metadata
+            exactLocation: false, // Kept for compatibility but deprecated
+            locationDetails: {
+                country: locationData.country,
+                city: locationData.city,
+                region: locationData.region,
+                street: 'Unknown', // Not available from IP
+                postalCode: locationData.postalCode,
+                timezone: locationData.timezone,
+                latitude: locationData.latitude,
+                longitude: locationData.longitude,
+                // New fields for accuracy
+                source: locationData.source || 'ip',
+                accuracy: locationData.accuracy || 'approximate',
+                precision: locationData.precision || 'country',
+                isPublic: isPublic,
+                provider: locationData.provider || 'unknown',
+                isp: locationData.isp || 'Unknown'
+            },
+            deviceDetails: {
+                type: deviceInfo.display.type,
+                brand: deviceInfo.display.brand,
+                model: deviceInfo.display.model,
+                os: deviceInfo.display.os,
+                browser: deviceInfo.display.browser,
+                isBot: deviceInfo.security.isBot,
+                botInfo: deviceInfo.security.botInfo,
+                characteristics: {
+                    isMobile: deviceInfo.security.isMobile,
+                    isTablet: deviceInfo.security.isTablet,
+                    isDesktop: deviceInfo.security.isDesktop,
+                    isTV: deviceInfo.security.isTV,
+                    isConsole: deviceInfo.security.isConsole,
+                    isWearable: deviceInfo.security.isWearable,
+                    isCarBrowser: deviceInfo.security.isCarBrowser,
+                    isBot: deviceInfo.security.isBot
+                },
+                userAgent: deviceInfo.security.userAgent,
+                deviceIdHash: deviceIdentity.deviceIdHash,
+                hasDeviceId: !!deviceIdentity.deviceId
+            },
+            // Security signals for risk assessment
+            _security: {
+                deviceIdHash: deviceIdentity.deviceIdHash,
+                userAgentHash: deviceInfo.security.userAgentHash,
+                locationAccuracy: locationData.accuracy,
+                locationPrecision: locationData.precision,
+                isPublicIP: isPublic,
+                isBot: deviceInfo.security.isBot,
+                detectedAt: securityContext.detectedAt
+            }
+        };
+
+    } catch (err) {
+        console.error('Error getting device info:', err);
+        // Return safe fallback
+        return {
+            ip: req.ip || 'Unknown',
+            device: req.headers['user-agent'] || 'Unknown',
+            location: 'Unknown',
+            isPublicIP: false,
+            exactLocation: false,
+            locationDetails: {
+                country: 'Unknown',
+                city: 'Unknown',
+                region: 'Unknown',
+                street: 'Unknown',
+                postalCode: 'Unknown',
+                timezone: 'Unknown',
+                latitude: null,
+                longitude: null,
+                source: 'unknown',
+                accuracy: 'unknown',
+                precision: 'unknown',
+                isPublic: false,
+                provider: 'unknown',
+                isp: 'Unknown'
+            },
+            deviceDetails: {
+                type: 'unknown',
+                brand: '',
+                model: '',
+                os: { name: 'Unknown', version: '' },
+                browser: { name: 'Unknown', version: '' },
+                isBot: false,
+                botInfo: null,
+                characteristics: {
+                    isMobile: false,
+                    isTablet: false,
+                    isDesktop: false,
+                    isTV: false,
+                    isConsole: false,
+                    isWearable: false,
+                    isCarBrowser: false,
+                    isBot: false
+                },
+                userAgent: req.headers['user-agent'] || '',
+                deviceIdHash: null,
+                hasDeviceId: false
+            },
+            _security: {
+                deviceIdHash: null,
+                userAgentHash: null,
+                locationAccuracy: 'unknown',
+                locationPrecision: 'unknown',
+                isPublicIP: false,
+                isBot: false,
+                detectedAt: new Date().toISOString()
+            }
+        };
+    }
+};
+
+// =============================================
+// SECURITY: Trusted Devices Database Schema
+// =============================================
+const TrustedDeviceSchema = new mongoose.Schema({
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+        index: true
+    },
+    deviceIdHash: {
+        type: String,
+        required: true,
+        index: true
+    },
+    deviceName: {
+        type: String,
+        default: 'Unknown Device'
+    },
+    deviceType: {
+        type: String,
+        default: 'unknown'
+    },
+    brand: {
+        type: String,
+        default: ''
+    },
+    model: {
+        type: String,
+        default: ''
+    },
+    operatingSystem: {
+        name: { type: String, default: 'Unknown' },
+        version: { type: String, default: '' }
+    },
+    browser: {
+        name: { type: String, default: 'Unknown' },
+        version: { type: String, default: '' }
+    },
+    userAgent: {
+        type: String,
+        default: ''
+    },
+    firstIp: {
+        type: String,
+        default: ''
+    },
+    lastIp: {
+        type: String,
+        default: ''
+    },
+    firstLocation: {
+        country: { type: String, default: '' },
+        city: { type: String, default: '' },
+        region: { type: String, default: '' },
+        latitude: { type: Number, default: null },
+        longitude: { type: Number, default: null },
+        source: { type: String, default: 'ip' },
+        accuracy: { type: String, default: 'approximate' }
+    },
+    lastLocation: {
+        country: { type: String, default: '' },
+        city: { type: String, default: '' },
+        region: { type: String, default: '' },
+        latitude: { type: Number, default: null },
+        longitude: { type: Number, default: null },
+        accuracyMeters: { type: Number, default: null },
+        source: { type: String, default: 'ip' }
+    },
+    firstSeenAt: {
+        type: Date,
+        default: Date.now
+    },
+    lastSeenAt: {
+        type: Date,
+        default: Date.now
+    },
+    trusted: {
+        type: Boolean,
+        default: false
+    },
+    revoked: {
+        type: Boolean,
+        default: false
+    },
+    revokedAt: {
+        type: Date,
+        default: null
+    },
+    lastVerificationAt: {
+        type: Date,
+        default: null
+    },
+    loginCount: {
+        type: Number,
+        default: 0
+    },
+    // Risk signals
+    riskSignals: {
+        vpnDetected: { type: Boolean, default: false },
+        proxyDetected: { type: Boolean, default: false },
+        botDetected: { type: Boolean, default: false },
+        suspiciousUserAgent: { type: Boolean, default: false }
+    }
+}, {
+    timestamps: true
+});
+
+// Indexes for performance
+TrustedDeviceSchema.index({ userId: 1, deviceIdHash: 1 });
+TrustedDeviceSchema.index({ userId: 1, trusted: 1 });
+TrustedDeviceSchema.index({ lastSeenAt: -1 });
+
+// Compile the model
+const TrustedDevice = mongoose.model('TrustedDevice', TrustedDeviceSchema);
+
+// =============================================
+// SECURITY: Active Session Schema
+// =============================================
+const ActiveSessionSchema = new mongoose.Schema({
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+        index: true
+    },
+    deviceIdHash: {
+        type: String,
+        required: true,
+        index: true
+    },
+    sessionIdHash: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true
+    },
+    ipAddress: {
+        type: String,
+        default: ''
+    },
+    location: {
+        country: { type: String, default: '' },
+        city: { type: String, default: '' },
+        region: { type: String, default: '' }
+    },
+    userAgent: {
+        type: String,
+        default: ''
+    },
+    deviceInfo: {
+        type: {
+            name: { type: String, default: 'Unknown Device' },
+            type: { type: String, default: 'unknown' },
+            os: { type: String, default: 'Unknown' },
+            browser: { type: String, default: 'Unknown' }
+        },
+        default: {}
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
+    },
+    lastActiveAt: {
+        type: Date,
+        default: Date.now
+    },
+    expiresAt: {
+        type: Date,
+        required: true
+    },
+    revoked: {
+        type: Boolean,
+        default: false
+    },
+    revokedAt: {
+        type: Date,
+        default: null
+    },
+    revokeReason: {
+        type: String,
+        default: ''
+    }
+}, {
+    timestamps: true
+});
+
+ActiveSessionSchema.index({ userId: 1, lastActiveAt: -1 });
+ActiveSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+const ActiveSession = mongoose.model('ActiveSession', ActiveSessionSchema);
+
+// =============================================
+// SECURITY: Security Log Schema (Immutable)
+// =============================================
+const SecurityLogSchema = new mongoose.Schema({
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+        index: true
+    },
+    eventType: {
+        type: String,
+        required: true,
+        enum: [
+            'LOGIN_SUCCESS',
+            'LOGIN_FAILED',
+            'LOGIN_BLOCKED',
+            'NEW_DEVICE_DETECTED',
+            'DEVICE_TRUSTED',
+            'DEVICE_REMOVED',
+            'SESSION_REVOKED',
+            'PASSWORD_CHANGED',
+            'MFA_ENABLED',
+            'MFA_DISABLED',
+            'WITHDRAWAL_ATTEMPT',
+            'WITHDRAWAL_BLOCKED',
+            'SUSPICIOUS_ACTIVITY',
+            'ACCOUNT_LOCKED',
+            'ACCOUNT_UNLOCKED'
+        ],
+        index: true
+    },
+    timestamp: {
+        type: Date,
+        default: Date.now,
+        index: true
+    },
+    ipAddress: {
+        type: String,
+        default: ''
+    },
+    deviceIdHash: {
+        type: String,
+        default: ''
+    },
+    device: {
+        type: { type: String, default: '' },
+        os: { type: String, default: '' },
+        browser: { type: String, default: '' }
+    },
+    location: {
+        country: { type: String, default: '' },
+        city: { type: String, default: '' },
+        region: { type: String, default: '' },
+        source: { type: String, default: 'ip' },
+        accuracy: { type: String, default: 'approximate' }
+    },
+    riskScore: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+    },
+    riskFactors: [{
+        type: String
+    }],
+    riskLevel: {
+        type: String,
+        enum: ['low', 'medium', 'high', 'critical'],
+        default: 'low'
+    },
+    authenticationMethod: {
+        type: String,
+        default: 'password'
+    },
+    success: {
+        type: Boolean,
+        default: true
+    },
+    metadata: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {}
+    }
+}, {
+    // Immutable: no updates allowed
+    timestamps: { createdAt: true, updatedAt: false },
+    // Prevent updates via schema options
+    strict: 'throw'
+});
+
+// Disable updates on security logs
+SecurityLogSchema.pre('save', function(next) {
+    // Allow first creation only
+    if (this.isNew) {
+        return next();
+    }
+    // Prevent updates to existing documents
+    const err = new Error('Security logs are immutable and cannot be updated');
+    err.status = 403;
+    next(err);
+});
+
+// Disable findOneAndUpdate and update operations
+SecurityLogSchema.pre('findOneAndUpdate', function(next) {
+    const err = new Error('Security logs are immutable and cannot be updated');
+    err.status = 403;
+    next(err);
+});
+
+SecurityLogSchema.index({ userId: 1, timestamp: -1 });
+SecurityLogSchema.index({ eventType: 1, timestamp: -1 });
+SecurityLogSchema.index({ riskLevel: 1, timestamp: -1 });
+
+const SecurityLog = mongoose.model('SecurityLog', SecurityLogSchema);
+
+// =============================================
+// SECURITY HELPERS: Risk Scoring
+// =============================================
+
+/**
+ * Check if a device is trusted for a user
+ */
+const isDeviceTrusted = async (userId, deviceIdHash) => {
+    if (!deviceIdHash) return false;
+    
+    const trustedDevice = await TrustedDevice.findOne({
+        userId: userId,
+        deviceIdHash: deviceIdHash,
+        trusted: true,
+        revoked: false
+    });
+    
+    return !!trustedDevice;
+};
+
+/**
+ * Check if a device is known (any status)
+ */
+const isDeviceKnown = async (userId, deviceIdHash) => {
+    if (!deviceIdHash) return false;
+    
+    const device = await TrustedDevice.findOne({
+        userId: userId,
+        deviceIdHash: deviceIdHash,
+        revoked: false
+    });
+    
+    return !!device;
+};
+
+/**
+ * Get or create device record
+ */
+const getOrCreateDevice = async (userId, deviceIdHash, deviceInfo, location, ip) => {
+    let device = await TrustedDevice.findOne({
+        userId: userId,
+        deviceIdHash: deviceIdHash
+    });
+
+    if (!device) {
+        device = new TrustedDevice({
+            userId: userId,
+            deviceIdHash: deviceIdHash,
+            deviceName: deviceInfo.display?.browser?.name && deviceInfo.display?.os?.name
+                ? `${deviceInfo.display.browser.name} on ${deviceInfo.display.os.name}`
+                : 'Unknown Device',
+            deviceType: deviceInfo.display?.type || 'unknown',
+            brand: deviceInfo.display?.brand || '',
+            model: deviceInfo.display?.model || '',
+            operatingSystem: {
+                name: deviceInfo.display?.os?.name || 'Unknown',
+                version: deviceInfo.display?.os?.version || ''
+            },
+            browser: {
+                name: deviceInfo.display?.browser?.name || 'Unknown',
+                version: deviceInfo.display?.browser?.version || ''
+            },
+            userAgent: deviceInfo.display?.userAgent || '',
+            firstIp: ip,
+            lastIp: ip,
+            firstLocation: {
+                country: location?.country || '',
+                city: location?.city || '',
+                region: location?.region || '',
+                latitude: location?.latitude || null,
+                longitude: location?.longitude || null,
+                source: location?.source || 'ip',
+                accuracy: location?.accuracy || 'approximate'
+            },
+            lastLocation: {
+                country: location?.country || '',
+                city: location?.city || '',
+                region: location?.region || '',
+                latitude: location?.latitude || null,
+                longitude: location?.longitude || null,
+                accuracyMeters: null,
+                source: location?.source || 'ip'
+            },
+            firstSeenAt: new Date(),
+            lastSeenAt: new Date(),
+            trusted: false,
+            loginCount: 1,
+            riskSignals: {
+                vpnDetected: false,
+                proxyDetected: false,
+                botDetected: deviceInfo.security?.isBot || false,
+                suspiciousUserAgent: false
+            }
+        });
+        await device.save();
+    } else {
+        // Update existing device
+        device.lastSeenAt = new Date();
+        device.lastIp = ip;
+        device.loginCount = (device.loginCount || 0) + 1;
+        if (location) {
+            device.lastLocation = {
+                country: location.country || device.lastLocation?.country || '',
+                city: location.city || device.lastLocation?.city || '',
+                region: location.region || device.lastLocation?.region || '',
+                latitude: location.latitude || device.lastLocation?.latitude || null,
+                longitude: location.longitude || device.lastLocation?.longitude || null,
+                accuracyMeters: null,
+                source: location.source || 'ip'
+            };
+        }
+        // Update bot detection
+        if (deviceInfo.security?.isBot) {
+            device.riskSignals.botDetected = true;
+        }
+        await device.save();
+    }
+
+    return device;
+};
+
+/**
+ * Log a security event
+ */
+const logSecurityEvent = async (data) => {
+    try {
+        const log = new SecurityLog({
+            userId: data.userId,
+            eventType: data.eventType,
+            timestamp: data.timestamp || new Date(),
+            ipAddress: data.ipAddress || '',
+            deviceIdHash: data.deviceIdHash || '',
+            device: data.device || {},
+            location: data.location || {},
+            riskScore: data.riskScore || 0,
+            riskFactors: data.riskFactors || [],
+            riskLevel: data.riskLevel || 'low',
+            authenticationMethod: data.authenticationMethod || 'password',
+            success: data.success !== undefined ? data.success : true,
+            metadata: data.metadata || {}
+        });
+        await log.save();
+        return log;
+    } catch (err) {
+        console.error('Failed to log security event:', err);
+        // Don't throw - security logging should not break the main flow
+        return null;
+    }
+};
+
+/**
+ * Calculate login risk and determine required action
+ */
+const assessLoginRisk = async (userId, deviceIdHash, deviceInfo, location, ip, previousLocation = null) => {
+    const signals = {
+        knownDevice: await isDeviceKnown(userId, deviceIdHash),
+        trustedDevice: await isDeviceTrusted(userId, deviceIdHash),
+        ipChanged: false,
+        countryChanged: false,
+        cityChanged: false,
+        vpnDetected: false,
+        proxyDetected: false,
+        impossibleTravel: false,
+        suspiciousUserAgent: false,
+        failedAttempts: 0,
+        isBot: deviceInfo?.security?.isBot || false,
+        isPublicIP: location?.isPublic !== false
+    };
+
+    // Check failed login attempts
+    const failedLogins = await SecurityLog.countDocuments({
+        userId: userId,
+        eventType: 'LOGIN_FAILED',
+        success: false,
+        timestamp: { $gte: new Date(Date.now() - 30 * 60 * 1000) } // Last 30 minutes
+    });
+    signals.failedAttempts = failedLogins;
+
+    // Check if device is known and has previous location
+    if (deviceIdHash) {
+        const device = await TrustedDevice.findOne({
+            userId: userId,
+            deviceIdHash: deviceIdHash,
+            revoked: false
+        });
+        
+        if (device && device.firstLocation) {
+            const prevLoc = device.firstLocation;
+            if (prevLoc.country && location?.country && prevLoc.country !== location.country) {
+                signals.countryChanged = true;
+            }
+            if (prevLoc.city && location?.city && prevLoc.city !== location.city) {
+                signals.cityChanged = true;
+            }
+            
+            // Check impossible travel
+            if (prevLoc.latitude && prevLoc.longitude && location?.latitude && location?.longitude) {
+                const speed = calculateTravelSpeed(
+                    prevLoc.latitude, prevLoc.longitude,
+                    location.latitude, location.longitude,
+                    device.firstSeenAt?.getTime() || Date.now(),
+                    Date.now()
+                );
+                // Travel speed > 800 km/h is impossible for commercial travel
+                if (speed > 800) {
+                    signals.impossibleTravel = true;
+                }
+            }
+        }
+    }
+
+    // IP change detection
+    if (deviceInfo?.security?.ip) {
+        // Check if this IP is different from the device's first IP
+        const device = await TrustedDevice.findOne({
+            userId: userId,
+            deviceIdHash: deviceIdHash
+        });
+        if (device && device.firstIp && device.firstIp !== deviceInfo.security.ip) {
+            signals.ipChanged = true;
+        }
+    }
+
+    // Suspicious user agent
+    if (deviceInfo?.security?.isBot) {
+        signals.suspiciousUserAgent = true;
+    }
+
+    // Calculate risk score
+    const riskResult = calculateLoginRisk(signals);
+    
+    // Determine required action
+    let action = 'allow';
+    let requiresMFA = false;
+    let requiresVerification = false;
+    let requiresBlocking = false;
+
+    if (riskResult.riskLevel === 'critical') {
+        requiresBlocking = true;
+        action = 'block';
+    } else if (riskResult.riskLevel === 'high') {
+        if (!signals.trustedDevice) {
+            requiresMFA = true;
+            requiresVerification = true;
+            action = 'mfa';
+        } else {
+            requiresMFA = true;
+            action = 'mfa';
+        }
+    } else if (riskResult.riskLevel === 'medium') {
+        if (!signals.trustedDevice && !signals.knownDevice) {
+            requiresVerification = true;
+            action = 'verify';
+        } else if (signals.ipChanged && !signals.trustedDevice) {
+            requiresVerification = true;
+            action = 'verify';
+        } else {
+            action = 'allow';
+        }
+    } else {
+        if (!signals.knownDevice) {
+            requiresVerification = true;
+            action = 'verify';
+        } else {
+            action = 'allow';
+        }
+    }
+
+    return {
+        riskScore: riskResult.score,
+        riskLevel: riskResult.riskLevel,
+        riskFactors: riskResult.factors,
+        signals: signals,
+        action: action,
+        requiresMFA: requiresMFA,
+        requiresVerification: requiresVerification,
+        requiresBlocking: requiresBlocking,
+        requiresTrustDevice: !signals.trustedDevice && !signals.knownDevice
+    };
+};
+
+// =============================================
+// EXPORT ALL SECURITY FUNCTIONS AND MODELS
+// =============================================
+module.exports = {
+    // Core IP & device detection
+    getRealClientIP,
+    normalizeIPAddress,
+    isPublicIPAddress,
+    lookupIPLocation,
+    getComprehensiveDeviceInfo,
+    getDeviceIdentity,
+    getUserDeviceInfo,
+    generateSecureDeviceId,
+    hashDeviceId,
+    
+    // Risk assessment
+    calculateLoginRisk,
+    calculateDistance,
+    calculateTravelSpeed,
+    assessLoginRisk,
+    
+    // Device management
+    isDeviceTrusted,
+    isDeviceKnown,
+    getOrCreateDevice,
+    
+    // Security logging
+    logSecurityEvent,
+    
+    // Models
+    TrustedDevice,
+    ActiveSession,
+    SecurityLog
+};
 
 
 
