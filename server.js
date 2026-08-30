@@ -78,79 +78,177 @@ const deviceDetector = new DeviceDetector({
   deviceAliasCode: false
 });
 
-// Update your helmet configuration to allow framing from your frontend
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://apis.google.com"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "data:", "https:", "blob:"],
-      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com", "https://bithash-backend-1.onrender.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      objectSrc: ["'none'"],
-      frameSrc: ["'self'", "https://bithash-backend-ycuf.onrender.com", "https://www.bithashcapital.live", "chrome-error://chromewebdata/"],
-      frameAncestors: ["'self'", "https://www.bithashcapital.live", "https://bithhash.vercel.app"],
-      upgradeInsecureRequests: null
+
+// ============================================================
+// SECURITY HEADERS / HELMET
+// ============================================================
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "https://apis.google.com"
+        ],
+
+        styleSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "https://fonts.googleapis.com"
+        ],
+
+        imgSrc: [
+          "'self'",
+          "data:",
+          "https:",
+          "blob:"
+        ],
+
+        connectSrc: [
+          "'self'",
+          "https://api.ipinfo.io",
+          "https://website-backendd-1.onrender.com",
+          "https://api.coingecko.com",
+          "https://bithash-backend-1.onrender.com",
+          "https://bithash-backend-kg7j.onrender.com",
+          "https://bithash-backend-ycuf.onrender.com",
+          "https://www.bithashcapital.live",
+          "http://127.0.0.1:8080",
+          "http://localhost:8080"
+        ],
+
+        fontSrc: [
+          "'self'",
+          "https://fonts.gstatic.com"
+        ],
+
+        objectSrc: ["'none'"],
+
+        frameSrc: [
+          "'self'",
+          "https://bithash-backend-ycuf.onrender.com",
+          "https://www.bithashcapital.live",
+          "chrome-error://chromewebdata/"
+        ],
+
+        frameAncestors: [
+          "'self'",
+          "https://www.bithashcapital.live",
+          "https://bithhash.vercel.app"
+        ],
+
+        upgradeInsecureRequests: null
+      }
+    },
+
+    crossOriginResourcePolicy: {
+      policy: "cross-origin"
+    },
+
+    crossOriginEmbedderPolicy: false,
+
+    crossOriginOpenerPolicy: {
+      policy: "unsafe-none"
     }
-  },
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-  crossOriginEmbedderPolicy: false,
-  crossOriginOpenerPolicy: { policy: "unsafe-none" }
-}));
+  })
+);
 
-app.use(cors({
-    origin: [
-        'https://www.bithashcapital.live',
 
-        // Backend domains
-        'https://bithash-backend-kg7j.onrender.com',
-        'https://bithash-backend-ycuf.onrender.com',
+// ============================================================
+// CORS
+// ============================================================
 
-        // Local development
-        'http://127.0.0.1:8080',
-        'http://localhost:8080'
-    ],
+const allowedOrigins = [
+  // Production frontend
+  "https://www.bithashcapital.live",
+
+  // Backend domains
+  "https://bithash-backend-kg7j.onrender.com",
+  "https://bithash-backend-ycuf.onrender.com",
+
+  // Local development
+  "http://127.0.0.1:8080",
+  "http://localhost:8080"
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Allow requests that do not contain an Origin header.
+      // This covers server-to-server requests and some non-browser clients.
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(
+        new Error(`CORS policy blocked origin: ${origin}`)
+      );
+    },
 
     credentials: true,
 
     methods: [
-        'GET',
-        'POST',
-        'PUT',
-        'DELETE',
-        'OPTIONS',
-        'PATCH'
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "OPTIONS",
+      "PATCH"
     ],
 
     allowedHeaders: [
-        'Content-Type',
-        'Authorization',
-        'X-CSRF-Token',
-        'X-Rate-Limit',
-        'X-Requested-With',
-        'Accept',
-        'Origin',
-        'X-2FA-Verified'
+      "Content-Type",
+      "Authorization",
+      "X-CSRF-Token",
+      "X-Rate-Limit",
+      "X-Requested-With",
+      "Accept",
+      "Origin",
+      "X-2FA-Verified"
     ],
 
     exposedHeaders: [
-        'X-Rate-Limit-Limit',
-        'X-Rate-Limit-Remaining',
-        'X-Rate-Limit-Reset'
-    ]
-}));
+      "X-Rate-Limit-Limit",
+      "X-Rate-Limit-Remaining",
+      "X-Rate-Limit-Reset"
+    ],
+
+    optionsSuccessStatus: 204
+  })
+);
+
+
+// ============================================================
+// CACHE CONTROL
+// ============================================================
+// IMPORTANT:
+// Do NOT manually set Access-Control-Allow-Origin here.
+// The cors() middleware above is responsible for CORS headers.
+// Setting "*" here would break requests using credentials: "include".
 
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
-    res.setHeader('Cache-Control', 'public, max-age=300');
+  if (
+    req.url.includes("/api/plans") ||
+    req.url.includes("/api/stats")
+  ) {
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=300"
+    );
   }
+
   next();
 });
+
+
 
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
