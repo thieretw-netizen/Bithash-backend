@@ -17317,7 +17317,59 @@ app.get('/api/fiat-currencies', async (req, res) => {
 
 
 
+// =============================================
+// 12. GET /api/admin/users/search - Search users for promo targeting
+// =============================================
+app.get('/api/admin/users/search', adminProtect, async (req, res) => {
+    try {
+        const q = req.query.q || '';
+        const limit = parseInt(req.query.limit) || 10;
 
+        // Return empty results for short queries (not an error)
+        if (!q || q.length < 2) {
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    users: []
+                }
+            });
+        }
+
+        const users = await User.find({
+            $or: [
+                { firstName: { $regex: q, $options: 'i' } },
+                { lastName: { $regex: q, $options: 'i' } },
+                { email: { $regex: q, $options: 'i' } }
+            ],
+            status: 'active'
+        })
+        .select('firstName lastName email _id')
+        .limit(limit)
+        .lean();
+
+        const formattedUsers = users.map(user => ({
+            _id: user._id,
+            firstName: user.firstName || '',
+            lastName: user.lastName || '',
+            email: user.email || '',
+            name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
+        }));
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                users: formattedUsers
+            }
+        });
+
+    } catch (err) {
+        console.error('Error searching users:', err);
+        res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to search users'
+        });
+    }
+});
 
 
 
@@ -49237,6 +49289,7 @@ async function sendAdminKYCNotification(userId, kycRecord) {
 
 
 
+
 // =============================================
 // PROMO CODES ENDPOINTS - COMPLETE IMPLEMENTATION
 // =============================================
@@ -49250,31 +49303,21 @@ app.get('/api/admin/promos/stats', adminProtect, async (req, res) => {
         const sevenDaysFromNow = new Date(now);
         sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
 
-        // Get all promos
         const allPromos = await Promo.find({}).lean();
         
-        // Calculate stats
         let activeCodes = 0;
         let totalRedemptions = 0;
         let totalRewarded = 0;
         let expiringSoon = 0;
 
         for (const promo of allPromos) {
-            // Check if active
             const isActive = promo.isActive && promo.usedCount < promo.maxUses && promo.expiresAt > now;
-            if (isActive) {
-                activeCodes++;
-            }
+            if (isActive) activeCodes++;
 
-            // Count redemptions from RedeemedPromo
             const redemptionCount = await RedeemedPromo.countDocuments({ promoId: promo._id });
             totalRedemptions += redemptionCount;
 
-            // Calculate total rewarded value
-            const redeemed = await RedeemedPromo.find({ 
-                promoId: promo._id,
-                rewardType: { $ne: 'discount' }
-            });
+            const redeemed = await RedeemedPromo.find({ promoId: promo._id });
             for (const r of redeemed) {
                 if (r.rewardType === 'crypto') {
                     const price = await getCryptoPrice(r.rewardAsset || 'USDT');
@@ -49284,13 +49327,12 @@ app.get('/api/admin/promos/stats', adminProtect, async (req, res) => {
                 }
             }
 
-            // Check if expiring soon (within 7 days)
             if (promo.isActive && promo.expiresAt && promo.expiresAt <= sevenDaysFromNow && promo.expiresAt > now) {
                 expiringSoon++;
             }
         }
 
-        res.status(200).json({
+        res.json({
             status: 'success',
             data: {
                 stats: {
@@ -49322,14 +49364,11 @@ app.get('/api/admin/promos', adminProtect, async (req, res) => {
         const search = req.query.search || '';
         const statusFilter = req.query.status || 'all';
 
-        // Build query
         const query = {};
-        
         if (search) {
             query.code = { $regex: search, $options: 'i' };
         }
 
-        // Status filter
         const now = new Date();
         if (statusFilter !== 'all') {
             if (statusFilter === 'active') {
@@ -49355,7 +49394,6 @@ app.get('/api/admin/promos', adminProtect, async (req, res) => {
             }
         }
 
-        // Get promos with pagination
         const promos = await Promo.find(query)
             .populate('createdBy', 'name email')
             .sort({ createdAt: -1 })
@@ -49365,7 +49403,6 @@ app.get('/api/admin/promos', adminProtect, async (req, res) => {
 
         const total = await Promo.countDocuments(query);
 
-        // Get redemption counts for each promo
         const promoIds = promos.map(p => p._id);
         const redemptionCounts = await RedeemedPromo.aggregate([
             { $match: { promoId: { $in: promoIds } } },
@@ -49377,7 +49414,6 @@ app.get('/api/admin/promos', adminProtect, async (req, res) => {
             redemptionMap[r._id.toString()] = r.count;
         });
 
-        // Format promos
         const formattedPromos = promos.map(promo => {
             const usedCount = redemptionMap[promo._id.toString()] || 0;
             const isExpired = promo.expiresAt && new Date(promo.expiresAt) <= now;
@@ -49398,7 +49434,7 @@ app.get('/api/admin/promos', adminProtect, async (req, res) => {
                 rewardValue: promo.rewardValue,
                 currency: promo.rewardAsset || 'USD',
                 walletType: 'main',
-                targetType: 'all', // Default, extend if needed
+                targetType: 'all',
                 targetUserCount: 0,
                 usedCount: usedCount,
                 maxRedemptions: promo.maxUses,
@@ -49411,7 +49447,7 @@ app.get('/api/admin/promos', adminProtect, async (req, res) => {
             };
         });
 
-        res.status(200).json({
+        res.json({
             status: 'success',
             data: {
                 promos: formattedPromos,
@@ -49452,7 +49488,6 @@ app.post('/api/admin/promos', adminProtect, async (req, res) => {
             status
         } = req.body;
 
-        // Validation
         if (!code || code.length < 3) {
             return res.status(400).json({
                 status: 'fail',
@@ -49462,7 +49497,6 @@ app.post('/api/admin/promos', adminProtect, async (req, res) => {
 
         const codeUpper = code.toUpperCase();
 
-        // Check if code already exists
         const existingPromo = await Promo.findOne({ code: codeUpper });
         if (existingPromo) {
             return res.status(409).json({
@@ -49492,11 +49526,9 @@ app.post('/api/admin/promos', adminProtect, async (req, res) => {
             });
         }
 
-        // Determine if promo is active
         const isActive = status === 'active';
         const maxUses = maxRedemptions || 0;
 
-        // Create promo
         const promo = await Promo.create({
             code: codeUpper,
             description: `${rewardType} reward of ${rewardValue}${rewardType === 'percentage' ? '%' : ` ${currency}`}`,
@@ -49510,7 +49542,6 @@ app.post('/api/admin/promos', adminProtect, async (req, res) => {
             createdBy: req.admin._id
         });
 
-        // Log activity
         await SystemLog.create({
             action: 'promo_code_created',
             entity: 'Promo',
@@ -49534,6 +49565,7 @@ app.post('/api/admin/promos', adminProtect, async (req, res) => {
             status: 'success',
             message: 'Promo code created successfully',
             data: {
+                code: promo.code,
                 promo: {
                     _id: promo._id,
                     code: promo.code,
@@ -49567,7 +49599,6 @@ app.post('/api/admin/promos/generate-code', adminProtect, async (req, res) => {
         const maxAttempts = 50;
 
         do {
-            // Generate format: PREFIX + 8 random alphanumeric
             const timestamp = Date.now().toString(36).substring(4, 8).toUpperCase();
             const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
             code = `${timestamp}-${randomPart}`;
@@ -49581,7 +49612,7 @@ app.post('/api/admin/promos/generate-code', adminProtect, async (req, res) => {
             });
         }
 
-        res.status(200).json({
+        res.json({
             status: 'success',
             data: {
                 code: code
@@ -49635,7 +49666,7 @@ app.get('/api/admin/promos/:id', adminProtect, async (req, res) => {
         else if (isExhausted) status = 'exhausted';
         else if (promo.isActive && !isExpired && !isExhausted) status = 'active';
 
-        res.status(200).json({
+        res.json({
             status: 'success',
             data: {
                 promo: {
@@ -49705,7 +49736,6 @@ app.post('/api/admin/promos/:id/activate', adminProtect, async (req, res) => {
         promo.isActive = true;
         await promo.save();
 
-        // Log activity
         await SystemLog.create({
             action: 'promo_code_activated',
             entity: 'Promo',
@@ -49720,7 +49750,7 @@ app.post('/api/admin/promos/:id/activate', adminProtect, async (req, res) => {
             }
         });
 
-        res.status(200).json({
+        res.json({
             status: 'success',
             message: 'Promo code activated successfully'
         });
@@ -49766,7 +49796,6 @@ app.post('/api/admin/promos/:id/pause', adminProtect, async (req, res) => {
         promo.isActive = false;
         await promo.save();
 
-        // Log activity
         await SystemLog.create({
             action: 'promo_code_paused',
             entity: 'Promo',
@@ -49781,7 +49810,7 @@ app.post('/api/admin/promos/:id/pause', adminProtect, async (req, res) => {
             }
         });
 
-        res.status(200).json({
+        res.json({
             status: 'success',
             message: 'Promo code paused successfully'
         });
@@ -49820,7 +49849,6 @@ app.post('/api/admin/promos/:id/disable', adminProtect, async (req, res) => {
         promo.isActive = false;
         await promo.save();
 
-        // Log activity
         await SystemLog.create({
             action: 'promo_code_disabled',
             entity: 'Promo',
@@ -49835,7 +49863,7 @@ app.post('/api/admin/promos/:id/disable', adminProtect, async (req, res) => {
             }
         });
 
-        res.status(200).json({
+        res.json({
             status: 'success',
             message: 'Promo code disabled successfully'
         });
@@ -49871,7 +49899,6 @@ app.post('/api/admin/promos/:id/duplicate', adminProtect, async (req, res) => {
             });
         }
 
-        // Generate new code
         let newCode;
         let attempts = 0;
         const maxAttempts = 50;
@@ -49898,11 +49925,10 @@ app.post('/api/admin/promos/:id/duplicate', adminProtect, async (req, res) => {
             maxUses: original.maxUses,
             usedCount: 0,
             expiresAt: original.expiresAt,
-            isActive: false, // Draft by default
+            isActive: false,
             createdBy: req.admin._id
         });
 
-        // Log activity
         await SystemLog.create({
             action: 'promo_code_duplicated',
             entity: 'Promo',
@@ -49971,7 +49997,6 @@ app.get('/api/admin/promos/:id/redemptions', adminProtect, async (req, res) => {
             });
         }
 
-        // Get redemptions with user data
         const redemptions = await RedeemedPromo.find({ promoId: id })
             .populate('userId', 'firstName lastName email')
             .populate('transactionId')
@@ -49998,14 +50023,12 @@ app.get('/api/admin/promos/:id/redemptions', adminProtect, async (req, res) => {
                 rewardAmount: r.rewardValue || 0,
                 currency: r.rewardAsset || 'USD',
                 walletType: 'main',
-                status: r.transactionId?.status === 'completed' ? 'completed' : 'pending',
-                transactionId: r.transactionId?._id || null,
-                ipAddress: r.ipAddress || 'Unknown',
-                userAgent: r.userAgent || 'Unknown'
+                status: transaction?.status === 'completed' ? 'completed' : 'pending',
+                transactionId: transaction?._id || null
             };
         });
 
-        res.status(200).json({
+        res.json({
             status: 'success',
             data: {
                 redemptions: formattedRedemptions,
@@ -50038,9 +50061,6 @@ app.get('/api/admin/promos/:id/redemptions', adminProtect, async (req, res) => {
 // =============================================
 app.get('/api/admin/promos/export', adminProtect, async (req, res) => {
     try {
-        const format = req.query.format || 'csv';
-
-        // Get all promos with redemption counts
         const promos = await Promo.find({})
             .populate('createdBy', 'name email')
             .sort({ createdAt: -1 })
@@ -50059,7 +50079,6 @@ app.get('/api/admin/promos/export', adminProtect, async (req, res) => {
 
         const now = new Date();
 
-        // Build CSV data
         const rows = promos.map(promo => {
             const stats = redemptionMap[promo._id.toString()] || { count: 0, totalValue: 0 };
             const isExpired = promo.expiresAt && new Date(promo.expiresAt) <= now;
@@ -50089,14 +50108,6 @@ app.get('/api/admin/promos/export', adminProtect, async (req, res) => {
             };
         });
 
-        if (format === 'json') {
-            return res.status(200).json({
-                status: 'success',
-                data: rows
-            });
-        }
-
-        // Generate CSV
         const headers = Object.keys(rows[0] || {});
         let csv = headers.join(',') + '\n';
         
@@ -50123,62 +50134,6 @@ app.get('/api/admin/promos/export', adminProtect, async (req, res) => {
         });
     }
 });
-
-// =============================================
-// 12. GET /api/admin/users/search - Search users for promo targeting
-// =============================================
-app.get('/api/admin/users/search', adminProtect, async (req, res) => {
-    try {
-        const q = req.query.q || '';
-        const limit = parseInt(req.query.limit) || 10;
-
-        if (!q || q.length < 2) {
-            return res.status(200).json({
-                status: 'success',
-                data: {
-                    users: []
-                }
-            });
-        }
-
-        // Search users by name or email
-        const users = await User.find({
-            $or: [
-                { firstName: { $regex: q, $options: 'i' } },
-                { lastName: { $regex: q, $options: 'i' } },
-                { email: { $regex: q, $options: 'i' } }
-            ],
-            status: 'active'
-        })
-        .select('firstName lastName email _id')
-        .limit(limit)
-        .lean();
-
-        const formattedUsers = users.map(user => ({
-            _id: user._id,
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
-            email: user.email || '',
-            name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
-        }));
-
-        res.status(200).json({
-            status: 'success',
-            data: {
-                users: formattedUsers
-            }
-        });
-
-    } catch (err) {
-        console.error('Error searching users:', err);
-        res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to search users'
-        });
-    }
-});
-
-
 
 
 
