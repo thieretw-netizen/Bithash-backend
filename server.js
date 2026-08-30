@@ -1733,7 +1733,7 @@ const PromoSchema = new mongoose.Schema({
   },
   rewardType: {
     type: String,
-    enum: ['bonus', 'crypto', 'percentage',  'discount'],
+    enum: ['bonus', 'crypto', 'percentage', 'fixed', 'discount'],
     required: true
   },
   rewardValue: {
