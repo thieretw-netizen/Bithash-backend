@@ -48605,11 +48605,12 @@ app.get('/api/users/kyc', protect, async (req, res) => {
 
 
 
-
-
+// =============================================
+// FIXED: PROMO CODE REDEMPTION ENDPOINT - CRYPTO ONLY
+// =============================================
 app.post('/api/promos/redeem', protect, async (req, res) => {
   try {
-    const { code } = req.body;
+    const { code, cryptoAmount, asset } = req.body;
     const userId = req.user._id;
     
     // 1. VALIDATE INPUT
@@ -48621,6 +48622,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
+    // If percentage-based bonus, we need the crypto amount and asset
     const promoCode = code.trim().toUpperCase();
     
     // 2. FIND VALID PROMO CODE
@@ -48673,6 +48675,29 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
+    // 6. VALIDATE CRYPTO AMOUNT FOR PERCENTAGE BONUS
+    const isPercentageBonus = promo.rewardType === 'percentage' || promo.rewardType === 'bonus';
+    
+    if (isPercentageBonus) {
+      if (!cryptoAmount || cryptoAmount <= 0) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Crypto amount is required for percentage-based promo codes.',
+          success: false,
+          requiresCryptoAmount: true
+        });
+      }
+      
+      if (!asset || typeof asset !== 'string') {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Asset type is required for percentage-based promo codes.',
+          success: false,
+          requiresAsset: true
+        });
+      }
+    }
+
     // Initialize balances
     if (!user.balances) {
       user.balances = { main: new Map(), active: new Map(), matured: new Map() };
@@ -48689,9 +48714,11 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     const targetWallet = user.balances[walletType];
 
     let rewardDescription = '';
-    let rewardValue = promo.rewardValue;
+    let rewardValue = 0;
     let rewardAsset = promo.rewardAsset || 'USDT';
     let successMessage = 'Promo code redeemed successfully!';
+    let bonusCryptoAmount = 0;
+    let bonusUSDValue = 0;
 
     const assetLower = rewardAsset.toLowerCase();
     const assetUpper = rewardAsset.toUpperCase();
@@ -48705,64 +48732,91 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     const finalAsset = validAssets.includes(assetUpper) ? assetUpper : 'USDT';
     const finalAssetLower = finalAsset.toLowerCase();
 
-    // 6. APPLY REWARD BASED ON TYPE
+    // Get current price for USD display (fiat is only for display)
+    let currentPrice = 0;
+    try {
+      currentPrice = await getCryptoPrice(finalAsset);
+    } catch (priceErr) {
+      console.warn(`Could not fetch price for ${finalAsset}, using fallback for display`);
+      currentPrice = 1; // Fallback for display only
+    }
+
+    // 7. APPLY REWARD BASED ON TYPE
     switch (promo.rewardType) {
       case 'bonus':
       case 'percentage': {
-        // Percentage bonus
-        const depositAmount = req.body.depositAmount || 0;
+        // =============================================
+        // CRYPTO-ONLY: Calculate bonus based on crypto amount
+        // =============================================
+        const percentageValue = promo.rewardValue; // e.g., 20 for 20%
         
-        let bonusAmount;
-        if (depositAmount > 0) {
-          // Calculate percentage bonus on deposit
-          bonusAmount = (depositAmount * rewardValue) / 100;
-        } else {
-          // Fallback: use rewardValue as fixed amount
-          bonusAmount = rewardValue;
+        // The user provides the crypto amount they deposited/invested
+        const sourceCryptoAmount = parseFloat(cryptoAmount);
+        const sourceAsset = asset.toLowerCase();
+        
+        // Calculate bonus in the SAME crypto asset as the source
+        // For example: User deposits 0.5 BTC, 20% bonus = 0.1 BTC
+        bonusCryptoAmount = sourceCryptoAmount * (percentageValue / 100);
+        
+        if (bonusCryptoAmount <= 0) {
+          return res.status(400).json({
+            status: 'fail',
+            message: `Invalid bonus calculation. Crypto amount: ${sourceCryptoAmount} ${sourceAsset.toUpperCase()}, Percentage: ${percentageValue}%`,
+            success: false
+          });
         }
         
-        const currentBalance = targetWallet.get(finalAssetLower) || 0;
-        targetWallet.set(finalAssetLower, currentBalance + bonusAmount);
+        // IMPORTANT: The bonus is credited in the SAME asset as the source
+        // For display purposes, we convert to USD
+        bonusUSDValue = bonusCryptoAmount * currentPrice;
         
-        // Update USD equivalent
-        const price = await getCryptoPrice(finalAsset);
-        const usdValue = bonusAmount * (price || 1);
+        // Credit the bonus in the SAME crypto asset to the user's wallet
+        const currentBalance = targetWallet.get(sourceAsset) || 0;
+        targetWallet.set(sourceAsset, currentBalance + bonusCryptoAmount);
+        
+        // Update USD equivalent for display (fiat is display only)
         const currentUSD = targetWallet.get('usd') || 0;
-        targetWallet.set('usd', currentUSD + usdValue);
+        targetWallet.set('usd', currentUSD + bonusUSDValue);
         
-        rewardDescription = `${rewardValue}% bonus (${bonusAmount.toFixed(8)} ${finalAsset})`;
-        successMessage = `🎉 ${rewardValue}% bonus credited! ${bonusAmount.toFixed(8)} ${finalAsset} added to your ${walletType} wallet.`;
+        rewardDescription = `${percentageValue}% bonus on ${sourceCryptoAmount.toFixed(8)} ${sourceAsset.toUpperCase()} = +${bonusCryptoAmount.toFixed(8)} ${sourceAsset.toUpperCase()} (≈ $${bonusUSDValue.toFixed(2)} USD)`;
+        successMessage = `🎉 ${percentageValue}% bonus credited! +${bonusCryptoAmount.toFixed(8)} ${sourceAsset.toUpperCase()} added to your ${walletType} wallet.`;
+        rewardValue = bonusCryptoAmount;
+        rewardAsset = sourceAsset.toUpperCase();
         break;
       }
 
       case 'fixed': {
-        // Fixed amount in the specified asset
-        const currentBalance = targetWallet.get(finalAssetLower) || 0;
-        targetWallet.set(finalAssetLower, currentBalance + rewardValue);
+        // Fixed amount in the specified asset (crypto)
+        const fixedAmount = promo.rewardValue;
         
-        // Update USD equivalent
-        const price = await getCryptoPrice(finalAsset);
-        const usdValue = rewardValue * (price || 1);
+        const currentBalance = targetWallet.get(finalAssetLower) || 0;
+        targetWallet.set(finalAssetLower, currentBalance + fixedAmount);
+        
+        // Update USD equivalent for display
+        const usdValue = fixedAmount * currentPrice;
         const currentUSD = targetWallet.get('usd') || 0;
         targetWallet.set('usd', currentUSD + usdValue);
         
-        rewardDescription = `${rewardValue} ${finalAsset} credited`;
-        successMessage = `💳 ${rewardValue} ${finalAsset} credited to your ${walletType} wallet!`;
+        rewardDescription = `+${fixedAmount} ${finalAsset} (≈ $${usdValue.toFixed(2)} USD)`;
+        successMessage = `💳 +${fixedAmount} ${finalAsset} credited to your ${walletType} wallet!`;
+        rewardValue = fixedAmount;
         break;
       }
 
       case 'crypto': {
         // Crypto reward - add specified crypto amount
-        const currentCryptoBalance = targetWallet.get(finalAssetLower) || 0;
-        targetWallet.set(finalAssetLower, currentCryptoBalance + rewardValue);
+        const cryptoAmountReward = promo.rewardValue;
         
-        const price = await getCryptoPrice(finalAsset);
-        const usdValue = rewardValue * (price || 1);
+        const currentCryptoBalance = targetWallet.get(finalAssetLower) || 0;
+        targetWallet.set(finalAssetLower, currentCryptoBalance + cryptoAmountReward);
+        
+        const usdValue = cryptoAmountReward * currentPrice;
         const currentUSD = targetWallet.get('usd') || 0;
         targetWallet.set('usd', currentUSD + usdValue);
         
-        rewardDescription = `${rewardValue} ${finalAsset} (≈ $${usdValue.toFixed(2)} USD)`;
-        successMessage = `💰 ${rewardValue} ${finalAsset} credited to your ${walletType} wallet!`;
+        rewardDescription = `+${cryptoAmountReward} ${finalAsset} (≈ $${usdValue.toFixed(2)} USD)`;
+        successMessage = `💰 +${cryptoAmountReward} ${finalAsset} credited to your ${walletType} wallet!`;
+        rewardValue = cryptoAmountReward;
         break;
       }
 
@@ -48777,12 +48831,11 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     // Save user with updated balances
     await user.save();
 
-    // 7. CREATE TRANSACTION RECORD - USING ADMIN-CHOSEN TRANSACTION TYPE
+    // 8. CREATE TRANSACTION RECORD - USING ADMIN-CHOSEN TRANSACTION TYPE
     const transactionReference = `PROMO-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
-    // Get price for the transaction
-    const assetPrice = await getCryptoPrice(finalAsset) || 1;
-    const transactionAmount = rewardValue * assetPrice;
+    // For transaction amount in USD (display only)
+    const transactionUSDValue = rewardValue * currentPrice;
     
     // USE THE ADMIN-CHOSEN TRANSACTION TYPE
     const transactionType = promo.transactionType || 'deposit';
@@ -48790,35 +48843,42 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     const transaction = await Transaction.create({
       user: userId,
       type: transactionType, // Admin chooses: 'deposit', 'bonus', 'referral', 'interest', 'investment', 'refund'
-      amount: transactionAmount,
-      asset: finalAssetLower,
-      assetAmount: rewardValue,
-      currency: 'USD',
+      amount: transactionUSDValue, // USD value for display only
+      asset: rewardAsset.toLowerCase(),
+      assetAmount: rewardValue, // The actual crypto amount
+      currency: 'USD', // Display currency
       status: 'completed',
-      method: 'PROMO', // Make sure 'PROMO' is in your method enum
+      method: 'PROMO',
       reference: transactionReference,
       details: {
         promoCode: promo.code,
         promoId: promo._id,
         rewardType: promo.rewardType,
-        rewardValue: rewardValue,
-        rewardAsset: finalAssetLower,
+        rewardValue: promo.rewardValue,
+        rewardAsset: rewardAsset.toLowerCase(),
         walletType: walletType,
         description: rewardDescription,
         promoDescription: promo.description,
         isBonus: true,
-        transactionType: transactionType // Store what type it was
+        transactionType: transactionType,
+        // For percentage bonuses, store the source crypto details
+        sourceCryptoAmount: isPercentageBonus ? cryptoAmount : null,
+        sourceAsset: isPercentageBonus ? asset?.toLowerCase() : null,
+        bonusPercentage: isPercentageBonus ? promo.rewardValue : null,
+        bonusCryptoAmount: isPercentageBonus ? bonusCryptoAmount : null,
+        bonusUSDValue: isPercentageBonus ? bonusUSDValue : null,
+        cryptoPriceAtRedemption: currentPrice
       },
       fee: 0,
-      netAmount: transactionAmount,
-      exchangeRateAtTime: assetPrice
+      netAmount: transactionUSDValue,
+      exchangeRateAtTime: currentPrice
     });
 
-    // 8. MARK PROMO AS USED
+    // 9. MARK PROMO AS USED
     promo.usedCount = actualUsedCount + 1;
     await promo.save();
 
-    // 9. RECORD REDEMPTION
+    // 10. RECORD REDEMPTION
     const deviceInfo = await getUserDeviceInfo(req);
     
     await RedeemedPromo.create({
@@ -48827,7 +48887,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       code: promo.code,
       rewardType: promo.rewardType,
       rewardValue: rewardValue,
-      rewardAsset: finalAssetLower,
+      rewardAsset: rewardAsset.toLowerCase(),
       walletType: walletType,
       transactionId: transaction._id,
       redeemedAt: new Date(),
@@ -48835,7 +48895,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       userAgent: deviceInfo.userAgent
     });
 
-    // 10. LOG ACTIVITY
+    // 11. LOG ACTIVITY
     await SystemLog.create({
       action: 'promo_code_redeemed',
       entity: 'Transaction',
@@ -48852,18 +48912,22 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         promoCode: promo.code,
         promoId: promo._id,
         rewardType: promo.rewardType,
-        rewardValue: rewardValue,
-        rewardAsset: finalAssetLower,
+        rewardValue: promo.rewardValue,
+        rewardAsset: rewardAsset.toLowerCase(),
         walletType: walletType,
         transactionType: transactionType,
         rewardDescription: rewardDescription,
         transactionId: transaction._id,
         usedCount: promo.usedCount,
-        isBonus: true
+        isBonus: true,
+        sourceCryptoAmount: isPercentageBonus ? cryptoAmount : null,
+        sourceAsset: isPercentageBonus ? asset?.toLowerCase() : null,
+        bonusCryptoAmount: isPercentageBonus ? bonusCryptoAmount : null,
+        cryptoPriceAtRedemption: currentPrice
       }
     });
 
-    // 11. EMIT REAL-TIME UPDATE
+    // 12. EMIT REAL-TIME UPDATE
     const io = req.app.get('io');
     if (io) {
       const { mainUSD, activeUSD, maturedUSD, mainBreakdown, maturedBreakdown } = 
@@ -48885,7 +48949,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         code: promo.code,
         rewardType: promo.rewardType,
         rewardValue: rewardValue,
-        rewardAsset: finalAssetLower,
+        rewardAsset: rewardAsset.toLowerCase(),
         walletType: walletType,
         transactionType: transactionType,
         description: rewardDescription,
@@ -48894,12 +48958,12 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
-    // 12. SEND EMAIL NOTIFICATION
+    // 13. SEND EMAIL NOTIFICATION (CRYPTO-ONLY DISPLAY)
     const rewardDisplay = promo.rewardType === 'crypto' 
-      ? `${rewardValue} ${finalAsset}`
+      ? `${rewardValue} ${rewardAsset}`
       : promo.rewardType === 'bonus' || promo.rewardType === 'percentage'
-        ? `${rewardValue}% bonus`
-        : `${rewardValue} ${finalAsset}`;
+        ? `${promo.rewardValue}% bonus (+${bonusCryptoAmount.toFixed(8)} ${rewardAsset})`
+        : `${rewardValue} ${rewardAsset}`;
 
     const walletDisplay = walletType === 'main' ? 'Main Wallet' : 
                           walletType === 'matured' ? 'Matured Wallet' : 
@@ -48940,8 +49004,18 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
                 <td style="padding: 8px 0;"><strong>Reward Type:</strong></td>
                 <td style="padding: 8px 0; text-align: right; text-transform: capitalize;">${promo.rewardType}</td>
               </tr>
+              ${promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? `
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Bonus Value:</strong></td>
+                <td style="padding: 8px 0;"><strong>Bonus Percentage:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${promo.rewardValue}%</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Source Crypto Amount:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${parseFloat(cryptoAmount).toFixed(8)} ${asset.toUpperCase()}</td>
+              </tr>
+              ` : ''}
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Bonus Credited:</strong></td>
                 <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${rewardDisplay}</td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
@@ -48961,7 +49035,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           
           <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
             <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Bonus Details</p>
-            <p style="color: #78350F; margin: 0; font-size: 14px;">${rewardDescription}. The bonus has been credited to your ${walletDisplay}.</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">${rewardDescription}</p>
           </div>
           
           <div style="text-align: center; margin: 30px 0;">
@@ -48990,18 +49064,21 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       html: emailHtml
     });
 
-    // 13. RETURN SUCCESS RESPONSE
+    // 14. RETURN SUCCESS RESPONSE
     const response = {
       status: 'success',
       success: true,
       message: successMessage,
       reward: {
         type: promo.rewardType,
-        value: promo.rewardType === 'bonus' || promo.rewardType === 'percentage' ? `${rewardValue}%` : 
-               `${rewardValue} ${finalAsset}`,
-        asset: finalAssetLower,
+        value: promo.rewardType === 'bonus' || promo.rewardType === 'percentage' ? `${promo.rewardValue}%` : 
+               `${rewardValue} ${rewardAsset}`,
+        asset: rewardAsset.toLowerCase(),
         wallet: walletType,
-        transactionType: transactionType
+        transactionType: transactionType,
+        bonusCryptoAmount: isPercentageBonus ? bonusCryptoAmount : null,
+        sourceCryptoAmount: isPercentageBonus ? cryptoAmount : null,
+        sourceAsset: isPercentageBonus ? asset?.toLowerCase() : null
       },
       data: {
         transaction: {
@@ -49055,10 +49132,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
 
 
 
