@@ -1717,7 +1717,6 @@ const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
 
 
 
-
 const PromoSchema = new mongoose.Schema({
   code: {
     type: String,
@@ -1772,15 +1771,33 @@ const PromoSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
+  },
+  // ===== THESE FIELDS ARE NOW INSIDE THE SCHEMA =====
+  targetType: {
+    type: String,
+    enum: ['all', 'specific', 'group'],
+    default: 'all'
+  },
+  userIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  walletType: {
+    type: String,
+    enum: ['main', 'matured', 'both'],
+    default: 'main'
+  },
+  maxRedemptionsPerUser: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+  category: {
+    type: String,
+    enum: ['deposit', 'withdrawal', 'investment', 'general'],
+    default: 'general'
   }
 }, { timestamps: true });
-
-// Add these fields to PromoSchema:
-targetType: { type: String, enum: ['all', 'specific', 'group'], default: 'all' },
-userIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-walletType: { type: String, enum: ['main', 'matured', 'both'], default: 'main' },
-maxRedemptionsPerUser: { type: Number, default: 1, min: 1 },
-category: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'general'], default: 'general' }
 
 // Indexes
 PromoSchema.index({ code: 1, isActive: 1 });
@@ -1800,6 +1817,14 @@ PromoSchema.methods.isValid = function() {
 };
 
 const Promo = mongoose.model('Promo', PromoSchema);
+
+
+
+
+
+
+
+
 
 const RedeemedPromoSchema = new mongoose.Schema({
   userId: {
