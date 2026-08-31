@@ -1772,7 +1772,7 @@ const PromoSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
-  // ===== THESE FIELDS ARE NOW INSIDE THE SCHEMA =====
+  // ===== TARGETING FIELDS =====
   targetType: {
     type: String,
     enum: ['all', 'specific', 'group'],
@@ -1796,6 +1796,12 @@ const PromoSchema = new mongoose.Schema({
     type: String,
     enum: ['deposit', 'withdrawal', 'investment', 'general'],
     default: 'general'
+  },
+  // ===== NEW: Admin chooses the transaction type =====
+  transactionType: {
+    type: String,
+    enum: ['deposit', 'bonus', 'referral', 'interest', 'investment', 'refund'],
+    default: 'deposit'
   }
 }, { timestamps: true });
 
@@ -1825,7 +1831,6 @@ const Promo = mongoose.model('Promo', PromoSchema);
 
 
 
-
 const RedeemedPromoSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1844,7 +1849,11 @@ const RedeemedPromoSchema = new mongoose.Schema({
     required: true,
     uppercase: true
   },
-  rewardType: { type: String, enum: ['bonus', 'crypto', 'discount', 'percentage', 'fixed'], required: true },
+  rewardType: { 
+    type: String, 
+    enum: ['bonus', 'crypto', 'discount', 'percentage', 'fixed'], 
+    required: true 
+  },
   rewardValue: {
     type: Number,
     required: true
@@ -1852,6 +1861,17 @@ const RedeemedPromoSchema = new mongoose.Schema({
   rewardAsset: {
     type: String,
     default: 'usd'
+  },
+  walletType: {
+    type: String,
+    enum: ['main', 'matured', 'both'],
+    default: 'main'
+  },
+  // NEW: Store the transaction type used
+  transactionType: {
+    type: String,
+    enum: ['deposit', 'bonus', 'referral', 'interest', 'investment', 'refund'],
+    default: 'deposit'
   },
   transactionId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1869,8 +1889,6 @@ const RedeemedPromoSchema = new mongoose.Schema({
 RedeemedPromoSchema.index({ userId: 1, promoId: 1 }, { unique: true });
 
 const RedeemedPromo = mongoose.model('RedeemedPromo', RedeemedPromoSchema);
-
-
 
 
 
