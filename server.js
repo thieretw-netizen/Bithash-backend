@@ -1844,7 +1844,7 @@ const RedeemedPromoSchema = new mongoose.Schema({
     required: true,
     uppercase: true
   },
-  rewardType: { type: String, enum: ['bonus', 'crypto', 'discount', 'percentage', 'fixed'], required: true }
+  rewardType: { type: String, enum: ['bonus', 'crypto', 'discount', 'percentage', 'fixed'], required: true },
   rewardValue: {
     type: Number,
     required: true
