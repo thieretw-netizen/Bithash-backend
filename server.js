@@ -4015,7 +4015,7 @@ const TransactionSchema = new mongoose.Schema({
   },
   method: { 
     type: String, 
-    enum: ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'SHIB', 'TRX', 'LTC', 'BANK', 'CARD', 'INTERNAL', 'LOAN'], 
+    enum: ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'SHIB', 'TRX', 'LTC', 'BANK', 'CARD', 'INTERNAL', 'PROMO'], 
     uppercase: true,
     required: [true, 'Payment method is required'] 
   },
@@ -48583,19 +48583,12 @@ app.get('/api/users/kyc', protect, async (req, res) => {
 
 
 
-
-// =============================================
-// PROMO CODE REDEMPTION ENDPOINT - COMPLETE REWRITE
-// POST /api/promos/redeem
-// =============================================
 app.post('/api/promos/redeem', protect, async (req, res) => {
   try {
     const { code } = req.body;
     const userId = req.user._id;
     
-    // =============================================
     // 1. VALIDATE INPUT
-    // =============================================
     if (!code || typeof code !== 'string') {
       return res.status(400).json({
         status: 'fail',
@@ -48606,9 +48599,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
 
     const promoCode = code.trim().toUpperCase();
     
-    // =============================================
-    // 2. FIND VALID PROMO CODE IN THE CORRECT SCHEMA
-    // =============================================
+    // 2. FIND VALID PROMO CODE
     const promo = await Promo.findOne({
       code: promoCode,
       isActive: true,
@@ -48616,20 +48607,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
 
     if (!promo) {
-      await SystemLog.create({
-        action: 'promo_code_invalid',
-        entity: 'Promo',
-        performedBy: userId,
-        performedByModel: 'User',
-        performedByEmail: req.user.email,
-        performedByName: `${req.user.firstName} ${req.user.lastName}`,
-        status: 'failed',
-        metadata: {
-          code: promoCode,
-          reason: 'Invalid or expired promo code'
-        }
-      });
-
       return res.status(404).json({
         status: 'fail',
         message: 'Invalid or expired promo code.',
@@ -48637,29 +48614,10 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
-    // =============================================
     // 3. CHECK USAGE LIMIT
-    // =============================================
-    // Get actual usage count from RedeemedPromo collection
     const actualUsedCount = await RedeemedPromo.countDocuments({ promoId: promo._id });
 
     if (actualUsedCount >= promo.maxUses) {
-      await SystemLog.create({
-        action: 'promo_code_exhausted',
-        entity: 'Promo',
-        entityId: promo._id,
-        performedBy: userId,
-        performedByModel: 'User',
-        performedByEmail: req.user.email,
-        performedByName: `${req.user.firstName} ${req.user.lastName}`,
-        status: 'failed',
-        metadata: {
-          code: promoCode,
-          usedCount: actualUsedCount,
-          maxUses: promo.maxUses
-        }
-      });
-
       return res.status(409).json({
         status: 'fail',
         message: 'This promo code has reached its usage limit.',
@@ -48667,9 +48625,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 4. CHECK IF USER ALREADY REDEEMED THIS PROMO
-    // =============================================
+    // 4. CHECK IF USER ALREADY REDEEMED
     const alreadyRedeemed = await RedeemedPromo.findOne({
       userId: userId,
       promoId: promo._id
@@ -48683,9 +48639,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
-    // =============================================
-    // 5. GET USER AND PREPARE REWARD
-    // =============================================
+    // 5. GET USER
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -48695,7 +48649,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
-    // Initialize balances if needed
+    // Initialize balances
     if (!user.balances) {
       user.balances = { main: new Map(), active: new Map(), matured: new Map() };
     }
@@ -48703,67 +48657,85 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
 
     let rewardDescription = '';
     let rewardValue = promo.rewardValue;
-    let rewardAsset = promo.rewardAsset || 'usd';
-    let transactionType = 'referral';
+    let rewardAsset = promo.rewardAsset || 'USDT';
     let successMessage = 'Promo code redeemed successfully!';
 
-    // =============================================
-    // 6. APPLY REWARD BASED ON TYPE
-    // =============================================
     const assetLower = rewardAsset.toLowerCase();
-    const assetUpper = assetLower.toUpperCase();
+    const assetUpper = rewardAsset.toUpperCase();
 
+    // Valid crypto assets from your schema
+    const validAssets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB',
+                         'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'WBTC', 'LTC', 'NEAR', 'UNI', 'BCH',
+                         'XLM', 'ATOM', 'XMR', 'FLOW', 'VET', 'FIL', 'THETA', 'HBAR', 'FTM', 'XTZ'];
+    
+    // Ensure the asset is valid
+    const finalAsset = validAssets.includes(assetUpper) ? assetUpper : 'USDT';
+    const finalAssetLower = finalAsset.toLowerCase();
+
+    // 6. APPLY REWARD BASED ON TYPE
     switch (promo.rewardType) {
       case 'bonus':
-      case 'percentage':
-        // Percentage bonus - add to main USD balance
-        const currentMainUSD = user.balances.main.get('usd') || 0;
-        const bonusAmount = (currentMainUSD * rewardValue) / 100;
-        user.balances.main.set('usd', currentMainUSD + bonusAmount);
+      case 'percentage': {
+        // Get current balance of the reward asset
+        const currentBalance = user.balances.main.get(finalAssetLower) || 0;
+        const bonusAmount = (currentBalance * rewardValue) / 100;
+        user.balances.main.set(finalAssetLower, currentBalance + bonusAmount);
         
-        rewardDescription = `${rewardValue}% bonus on current main balance ($${bonusAmount.toFixed(2)})`;
-        successMessage = `🎉 ${rewardValue}% bonus credited! $${bonusAmount.toFixed(2)} added to your main wallet.`;
+        // Update USD equivalent
+        const price = await getCryptoPrice(finalAsset);
+        const usdValue = bonusAmount * (price || 1);
+        const currentUSD = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentUSD + usdValue);
+        
+        rewardDescription = `${rewardValue}% bonus on ${finalAsset} balance (${bonusAmount.toFixed(8)} ${finalAsset})`;
+        successMessage = `🎉 ${rewardValue}% bonus credited! ${bonusAmount.toFixed(8)} ${finalAsset} added to your main wallet.`;
         break;
+      }
 
-      case 'fixed':
-        // Fixed amount - add to main USD balance
-        const currentMainUSDFixed = user.balances.main.get('usd') || 0;
-        user.balances.main.set('usd', currentMainUSDFixed + rewardValue);
+      case 'fixed': {
+        // Fixed amount in the specified asset
+        const currentBalance = user.balances.main.get(finalAssetLower) || 0;
+        user.balances.main.set(finalAssetLower, currentBalance + rewardValue);
         
-        rewardDescription = `$${rewardValue.toFixed(2)} USD credited`;
-        successMessage = `💳 $${rewardValue.toFixed(2)} credited to your main wallet!`;
-        break;
-
-      case 'discount':
-        // Discount - add to main USD balance
-        const currentMainUSDDiscount = user.balances.main.get('usd') || 0;
-        user.balances.main.set('usd', currentMainUSDDiscount + rewardValue);
-        
-        rewardDescription = `$${rewardValue.toFixed(2)} USD discount credit`;
-        successMessage = `💳 $${rewardValue.toFixed(2)} discount credited to your main wallet!`;
-        break;
-
-      case 'crypto':
-        // Crypto reward - add specified crypto amount
-        // Get current price for the asset
-        let price = await getCryptoPrice(assetUpper);
-        if (!price || price <= 0) {
-          // Fallback: use exchange rate if available
-          const exchangeRate = await getExchangeRate(assetUpper);
-          price = exchangeRate || 1;
-        }
-        
+        // Update USD equivalent
+        const price = await getCryptoPrice(finalAsset);
         const usdValue = rewardValue * (price || 1);
-        const currentCryptoBalance = user.balances.main.get(assetLower) || 0;
-        user.balances.main.set(assetLower, currentCryptoBalance + rewardValue);
+        const currentUSD = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentUSD + usdValue);
         
-        // Update USD cache
-        const currentMainUSDBefore = user.balances.main.get('usd') || 0;
-        user.balances.main.set('usd', currentMainUSDBefore + usdValue);
-        
-        rewardDescription = `${rewardValue} ${assetUpper} (≈ $${usdValue.toFixed(2)})`;
-        successMessage = `💰 ${rewardValue} ${assetUpper} credited to your main wallet!`;
+        rewardDescription = `${rewardValue} ${finalAsset} credited`;
+        successMessage = `💳 ${rewardValue} ${finalAsset} credited to your main wallet!`;
         break;
+      }
+
+      case 'discount': {
+        const currentBalance = user.balances.main.get(finalAssetLower) || 0;
+        user.balances.main.set(finalAssetLower, currentBalance + rewardValue);
+        
+        const price = await getCryptoPrice(finalAsset);
+        const usdValue = rewardValue * (price || 1);
+        const currentUSD = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentUSD + usdValue);
+        
+        rewardDescription = `${rewardValue} ${finalAsset} discount credit`;
+        successMessage = `💳 ${rewardValue} ${finalAsset} discount credited to your main wallet!`;
+        break;
+      }
+
+      case 'crypto': {
+        // Crypto reward - add specified crypto amount
+        const currentCryptoBalance = user.balances.main.get(finalAssetLower) || 0;
+        user.balances.main.set(finalAssetLower, currentCryptoBalance + rewardValue);
+        
+        const price = await getCryptoPrice(finalAsset);
+        const usdValue = rewardValue * (price || 1);
+        const currentUSD = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentUSD + usdValue);
+        
+        rewardDescription = `${rewardValue} ${finalAsset} (≈ $${usdValue.toFixed(2)} USD)`;
+        successMessage = `💰 ${rewardValue} ${finalAsset} credited to your main wallet!`;
+        break;
+      }
 
       default:
         return res.status(400).json({
@@ -48776,41 +48748,43 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     // Save user with updated balances
     await user.save();
 
-    // =============================================
     // 7. CREATE TRANSACTION RECORD
-    // =============================================
     const transactionReference = `PROMO-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    
+    // Get price for the transaction
+    const assetPrice = await getCryptoPrice(finalAsset) || 1;
+    const transactionAmount = (promo.rewardType === 'crypto' || promo.rewardType === 'fixed') 
+      ? rewardValue * assetPrice 
+      : rewardValue * assetPrice; // For percentage, use the bonus amount
     
     const transaction = await Transaction.create({
       user: userId,
       type: 'referral',
-      amount: promo.rewardType === 'crypto' ? (rewardValue * (await getCryptoPrice(assetUpper) || 1)) : rewardValue,
-      asset: promo.rewardType === 'crypto' ? assetLower : 'usd',
-      assetAmount: promo.rewardType === 'crypto' ? rewardValue : 0,
+      amount: transactionAmount,
+      asset: finalAssetLower, // This is a valid enum value (e.g., 'usdt', 'btc')
+      assetAmount: rewardValue,
       currency: 'USD',
       status: 'completed',
-      method: 'PROMO',
+      method: 'PROMO', // Now valid because we added it to the enum
       reference: transactionReference,
       details: {
         promoCode: promo.code,
         promoId: promo._id,
         rewardType: promo.rewardType,
         rewardValue: rewardValue,
-        rewardAsset: assetLower,
+        rewardAsset: finalAssetLower,
         description: rewardDescription,
         promoDescription: promo.description
       },
       fee: 0,
-      netAmount: promo.rewardType === 'crypto' ? (rewardValue * (await getCryptoPrice(assetUpper) || 1)) : rewardValue,
-      exchangeRateAtTime: await getCryptoPrice(assetUpper) || 1
+      netAmount: transactionAmount,
+      exchangeRateAtTime: assetPrice
     });
 
-    // =============================================
-    // 8. RECORD PLATFORM REVENUE (PROMO COST)
-    // =============================================
+    // 8. RECORD PLATFORM REVENUE
     await PlatformRevenue.create({
       source: 'referral',
-      amount: promo.rewardType === 'crypto' ? (rewardValue * (await getCryptoPrice(assetUpper) || 1)) : rewardValue,
+      amount: transactionAmount,
       currency: 'USD',
       transactionId: transaction._id,
       userId: userId,
@@ -48820,20 +48794,16 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         promoId: promo._id,
         rewardType: promo.rewardType,
         rewardValue: rewardValue,
-        rewardAsset: assetLower,
+        rewardAsset: finalAssetLower,
         usedCount: actualUsedCount + 1
       }
     });
 
-    // =============================================
     // 9. MARK PROMO AS USED
-    // =============================================
     promo.usedCount = actualUsedCount + 1;
     await promo.save();
 
-    // =============================================
     // 10. RECORD REDEMPTION
-    // =============================================
     const deviceInfo = await getUserDeviceInfo(req);
     
     await RedeemedPromo.create({
@@ -48842,16 +48812,14 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       code: promo.code,
       rewardType: promo.rewardType,
       rewardValue: rewardValue,
-      rewardAsset: assetLower,
+      rewardAsset: finalAssetLower,
       transactionId: transaction._id,
       redeemedAt: new Date(),
       ipAddress: deviceInfo.ip,
       userAgent: deviceInfo.userAgent
     });
 
-    // =============================================
     // 11. LOG ACTIVITY
-    // =============================================
     await SystemLog.create({
       action: 'promo_code_redeemed',
       entity: 'Transaction',
@@ -48869,19 +48837,16 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         promoId: promo._id,
         rewardType: promo.rewardType,
         rewardValue: rewardValue,
-        rewardAsset: assetLower,
+        rewardAsset: finalAssetLower,
         rewardDescription: rewardDescription,
         transactionId: transaction._id,
         usedCount: promo.usedCount
       }
     });
 
-    // =============================================
     // 12. EMIT REAL-TIME UPDATE
-    // =============================================
     const io = req.app.get('io');
     if (io) {
-      // Get updated balances for the user
       const { mainUSD, activeUSD, maturedUSD, mainBreakdown, maturedBreakdown } = 
         await calculateRealWalletBalances(user);
       
@@ -48897,26 +48862,23 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         source: 'promo_redemption'
       });
 
-      // Emit promo redemption event
       io.to(`user_${userId}`).emit('promo_redeemed', {
         code: promo.code,
         rewardType: promo.rewardType,
         rewardValue: rewardValue,
-        rewardAsset: assetLower,
+        rewardAsset: finalAssetLower,
         description: rewardDescription,
         transactionId: transaction._id,
         timestamp: Date.now()
       });
     }
 
-    // =============================================
     // 13. SEND EMAIL NOTIFICATION
-    // =============================================
     const rewardDisplay = promo.rewardType === 'crypto' 
-      ? `${rewardValue} ${assetUpper} (≈ $${(rewardValue * (await getCryptoPrice(assetUpper) || 1)).toFixed(2)})`
+      ? `${rewardValue} ${finalAsset}`
       : promo.rewardType === 'bonus' || promo.rewardType === 'percentage'
         ? `${rewardValue}% bonus`
-        : `$${rewardValue.toFixed(2)}`;
+        : `${rewardValue} ${finalAsset}`;
 
     const brandHeader = `
       <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
@@ -48999,9 +48961,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       html: emailHtml
     });
 
-    // =============================================
     // 14. RETURN SUCCESS RESPONSE
-    // =============================================
     const response = {
       status: 'success',
       success: true,
@@ -49009,9 +48969,8 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       reward: {
         type: promo.rewardType,
         value: promo.rewardType === 'bonus' || promo.rewardType === 'percentage' ? `${rewardValue}%` : 
-               promo.rewardType === 'crypto' ? `${rewardValue} ${assetUpper}` :
-               `$${rewardValue.toFixed(2)}`,
-        asset: promo.rewardType === 'crypto' ? assetLower : 'usd'
+               `${rewardValue} ${finalAsset}`,
+        asset: finalAssetLower
       },
       data: {
         transaction: {
@@ -49027,7 +48986,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     };
 
     console.log(`✅ Promo code "${promo.code}" redeemed by user ${user.email}`);
-    console.log(`   Reward: ${rewardDisplay}`);
+    console.log(`   Reward: ${rewardDescription}`);
     console.log(`   Transaction: ${transactionReference}`);
 
     res.status(200).json(response);
@@ -49035,7 +48994,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
   } catch (err) {
     console.error('Promo code redemption error:', err);
     
-    // Log error
     try {
       await SystemLog.create({
         action: 'promo_code_error',
@@ -49063,8 +49021,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
   }
 });
-
-
 
 
 // =============================================
