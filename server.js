@@ -48554,8 +48554,10 @@ app.get('/api/users/kyc', protect, async (req, res) => {
 });
 
 
+
+
 // =============================================
-// PROMO CODE REDEMPTION ENDPOINT
+// PROMO CODE REDEMPTION ENDPOINT - COMPLETE REWRITE
 // POST /api/promos/redeem
 // =============================================
 app.post('/api/promos/redeem', protect, async (req, res) => {
@@ -48563,7 +48565,9 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     const { code } = req.body;
     const userId = req.user._id;
     
-    // Validate input
+    // =============================================
+    // 1. VALIDATE INPUT
+    // =============================================
     if (!code || typeof code !== 'string') {
       return res.status(400).json({
         status: 'fail',
@@ -48575,7 +48579,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     const promoCode = code.trim().toUpperCase();
     
     // =============================================
-    // 1. FIND VALID PROMO CODE
+    // 2. FIND VALID PROMO CODE IN THE CORRECT SCHEMA
     // =============================================
     const promo = await Promo.findOne({
       code: promoCode,
@@ -48586,10 +48590,11 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     if (!promo) {
       await SystemLog.create({
         action: 'promo_code_invalid',
-        entity: 'User',
-        entityId: userId,
+        entity: 'Promo',
         performedBy: userId,
         performedByModel: 'User',
+        performedByEmail: req.user.email,
+        performedByName: `${req.user.firstName} ${req.user.lastName}`,
         status: 'failed',
         metadata: {
           code: promoCode,
@@ -48605,19 +48610,24 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     }
 
     // =============================================
-    // 2. CHECK USAGE LIMIT
+    // 3. CHECK USAGE LIMIT
     // =============================================
-    if (promo.usedCount >= promo.maxUses) {
+    // Get actual usage count from RedeemedPromo collection
+    const actualUsedCount = await RedeemedPromo.countDocuments({ promoId: promo._id });
+
+    if (actualUsedCount >= promo.maxUses) {
       await SystemLog.create({
         action: 'promo_code_exhausted',
-        entity: 'User',
-        entityId: userId,
+        entity: 'Promo',
+        entityId: promo._id,
         performedBy: userId,
         performedByModel: 'User',
+        performedByEmail: req.user.email,
+        performedByName: `${req.user.firstName} ${req.user.lastName}`,
         status: 'failed',
         metadata: {
           code: promoCode,
-          usedCount: promo.usedCount,
+          usedCount: actualUsedCount,
           maxUses: promo.maxUses
         }
       });
@@ -48630,7 +48640,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     }
 
     // =============================================
-    // 3. CHECK IF USER ALREADY REDEEMED THIS PROMO
+    // 4. CHECK IF USER ALREADY REDEEMED THIS PROMO
     // =============================================
     const alreadyRedeemed = await RedeemedPromo.findOne({
       userId: userId,
@@ -48646,7 +48656,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     }
 
     // =============================================
-    // 4. GET USER AND PREPARE REWARD
+    // 5. GET USER AND PREPARE REWARD
     // =============================================
     const user = await User.findById(userId);
     if (!user) {
@@ -48670,21 +48680,39 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     let successMessage = 'Promo code redeemed successfully!';
 
     // =============================================
-    // 5. APPLY REWARD BASED ON TYPE
+    // 6. APPLY REWARD BASED ON TYPE
     // =============================================
     const assetLower = rewardAsset.toLowerCase();
     const assetUpper = assetLower.toUpperCase();
 
     switch (promo.rewardType) {
       case 'bonus':
+      case 'percentage':
         // Percentage bonus - add to main USD balance
-        // rewardValue is percentage (e.g., 5 = 5%)
         const currentMainUSD = user.balances.main.get('usd') || 0;
         const bonusAmount = (currentMainUSD * rewardValue) / 100;
         user.balances.main.set('usd', currentMainUSD + bonusAmount);
         
         rewardDescription = `${rewardValue}% bonus on current main balance ($${bonusAmount.toFixed(2)})`;
         successMessage = `🎉 ${rewardValue}% bonus credited! $${bonusAmount.toFixed(2)} added to your main wallet.`;
+        break;
+
+      case 'fixed':
+        // Fixed amount - add to main USD balance
+        const currentMainUSDFixed = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentMainUSDFixed + rewardValue);
+        
+        rewardDescription = `$${rewardValue.toFixed(2)} USD credited`;
+        successMessage = `💳 $${rewardValue.toFixed(2)} credited to your main wallet!`;
+        break;
+
+      case 'discount':
+        // Discount - add to main USD balance
+        const currentMainUSDDiscount = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentMainUSDDiscount + rewardValue);
+        
+        rewardDescription = `$${rewardValue.toFixed(2)} USD discount credit`;
+        successMessage = `💳 $${rewardValue.toFixed(2)} discount credited to your main wallet!`;
         break;
 
       case 'crypto':
@@ -48709,15 +48737,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         successMessage = `💰 ${rewardValue} ${assetUpper} credited to your main wallet!`;
         break;
 
-      case 'discount':
-        // Discount - add to main USD balance directly (fixed amount)
-        const currentMainUSDDiscount = user.balances.main.get('usd') || 0;
-        user.balances.main.set('usd', currentMainUSDDiscount + rewardValue);
-        
-        rewardDescription = `$${rewardValue.toFixed(2)} USD discount credit`;
-        successMessage = `💳 $${rewardValue.toFixed(2)} discount credited to your main wallet!`;
-        break;
-
       default:
         return res.status(400).json({
           status: 'fail',
@@ -48730,7 +48749,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     await user.save();
 
     // =============================================
-    // 6. CREATE TRANSACTION RECORD
+    // 7. CREATE TRANSACTION RECORD
     // =============================================
     const transactionReference = `PROMO-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
@@ -48759,7 +48778,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
 
     // =============================================
-    // 7. RECORD PLATFORM REVENUE (PROMO COST)
+    // 8. RECORD PLATFORM REVENUE (PROMO COST)
     // =============================================
     await PlatformRevenue.create({
       source: 'referral',
@@ -48774,18 +48793,18 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         rewardType: promo.rewardType,
         rewardValue: rewardValue,
         rewardAsset: assetLower,
-        usedCount: promo.usedCount + 1
+        usedCount: actualUsedCount + 1
       }
     });
 
     // =============================================
-    // 8. MARK PROMO AS USED
+    // 9. MARK PROMO AS USED
     // =============================================
-    promo.usedCount += 1;
+    promo.usedCount = actualUsedCount + 1;
     await promo.save();
 
     // =============================================
-    // 9. RECORD REDEMPTION
+    // 10. RECORD REDEMPTION
     // =============================================
     const deviceInfo = await getUserDeviceInfo(req);
     
@@ -48803,7 +48822,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
 
     // =============================================
-    // 10. LOG ACTIVITY
+    // 11. LOG ACTIVITY
     // =============================================
     await SystemLog.create({
       action: 'promo_code_redeemed',
@@ -48830,7 +48849,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
 
     // =============================================
-    // 11. EMIT REAL-TIME UPDATE
+    // 12. EMIT REAL-TIME UPDATE
     // =============================================
     const io = req.app.get('io');
     if (io) {
@@ -48863,11 +48882,11 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     }
 
     // =============================================
-    // 12. SEND EMAIL NOTIFICATION
+    // 13. SEND EMAIL NOTIFICATION
     // =============================================
     const rewardDisplay = promo.rewardType === 'crypto' 
       ? `${rewardValue} ${assetUpper} (≈ $${(rewardValue * (await getCryptoPrice(assetUpper) || 1)).toFixed(2)})`
-      : promo.rewardType === 'bonus'
+      : promo.rewardType === 'bonus' || promo.rewardType === 'percentage'
         ? `${rewardValue}% bonus`
         : `$${rewardValue.toFixed(2)}`;
 
@@ -48883,6 +48902,10 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
         <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
         <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
       </div>
     `;
 
@@ -48949,7 +48972,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
 
     // =============================================
-    // 13. RETURN SUCCESS RESPONSE
+    // 14. RETURN SUCCESS RESPONSE
     // =============================================
     const response = {
       status: 'success',
@@ -48957,7 +48980,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       message: successMessage,
       reward: {
         type: promo.rewardType,
-        value: promo.rewardType === 'bonus' ? `${rewardValue}%` : 
+        value: promo.rewardType === 'bonus' || promo.rewardType === 'percentage' ? `${rewardValue}%` : 
                promo.rewardType === 'crypto' ? `${rewardValue} ${assetUpper}` :
                `$${rewardValue.toFixed(2)}`,
         asset: promo.rewardType === 'crypto' ? assetLower : 'usd'
@@ -48975,25 +48998,35 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       }
     };
 
+    console.log(`✅ Promo code "${promo.code}" redeemed by user ${user.email}`);
+    console.log(`   Reward: ${rewardDisplay}`);
+    console.log(`   Transaction: ${transactionReference}`);
+
     res.status(200).json(response);
 
   } catch (err) {
     console.error('Promo code redemption error:', err);
     
     // Log error
-    await SystemLog.create({
-      action: 'promo_code_error',
-      entity: 'User',
-      entityId: req.user?._id || null,
-      performedBy: req.user?._id || null,
-      performedByModel: 'User',
-      status: 'failed',
-      errorMessage: err.message,
-      metadata: {
-        code: req.body?.code || 'unknown',
-        error: err.message
-      }
-    });
+    try {
+      await SystemLog.create({
+        action: 'promo_code_error',
+        entity: 'User',
+        entityId: req.user?._id || null,
+        performedBy: req.user?._id || null,
+        performedByModel: 'User',
+        performedByEmail: req.user?.email || 'unknown',
+        performedByName: req.user ? `${req.user.firstName} ${req.user.lastName}` : 'Unknown',
+        status: 'failed',
+        errorMessage: err.message,
+        metadata: {
+          code: req.body?.code || 'unknown',
+          error: err.message
+        }
+      });
+    } catch (logError) {
+      console.error('Failed to log promo error:', logError);
+    }
 
     res.status(500).json({
       status: 'error',
@@ -49002,11 +49035,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
 
 
 
