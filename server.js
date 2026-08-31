@@ -48603,10 +48603,8 @@ app.get('/api/users/kyc', protect, async (req, res) => {
 
 
 
-
-
 // =============================================
-// FIXED: PROMO CODE REDEMPTION ENDPOINT - AUTO-DETECTS DEPOSIT
+// FIXED: PROMO CODE REDEMPTION ENDPOINT
 // =============================================
 app.post('/api/promos/redeem', protect, async (req, res) => {
   try {
@@ -48723,25 +48721,19 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     // =============================================
     // 9. GET DEPOSIT AMOUNT AND ASSET
     // =============================================
-    // The deposit asset (BTC, ETH, USDT, etc.)
     const depositAsset = (recentDeposit.asset || 'BTC').toLowerCase();
-    // The amount in the asset (e.g., 0.5 BTC)
     const depositAssetAmount = recentDeposit.assetAmount || 0;
-    // The USD value of the deposit
     const depositUSDValue = recentDeposit.amount || 0;
 
-    // If assetAmount is 0 but amount > 0, try to calculate asset amount from USD
     let finalDepositAmount = depositAssetAmount;
     let finalDepositAsset = depositAsset;
 
     if (depositAssetAmount <= 0 && depositUSDValue > 0) {
-      // Try to get the price and calculate
       try {
         const price = await getCryptoPrice(depositAsset);
         if (price && price > 0) {
           finalDepositAmount = depositUSDValue / price;
         } else {
-          // If price not available, use a default
           finalDepositAmount = depositUSDValue / 1;
         }
       } catch (e) {
@@ -48749,7 +48741,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       }
     }
 
-    // If both are 0, we can't calculate
     if (finalDepositAmount <= 0 && depositUSDValue <= 0) {
       return res.status(400).json({
         status: 'fail',
@@ -48758,7 +48749,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
-    // If asset is 'usd' or undefined, default to USDT
     if (!finalDepositAsset || finalDepositAsset === 'usd' || finalDepositAsset === 'undefined') {
       finalDepositAsset = 'usdt';
     }
@@ -48776,7 +48766,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     // Determine which wallet to credit (main or matured)
     const walletType = promo.walletType || 'main';
     
-    // Initialize the target wallet if it doesn't exist
     if (!user.balances[walletType]) {
       user.balances[walletType] = new Map();
     }
@@ -48803,12 +48792,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     switch (promo.rewardType) {
       case 'bonus':
       case 'percentage': {
-        // =============================================
-        // PERCENTAGE BONUS ON THE DEPOSIT AMOUNT
-        // =============================================
-        const percentageValue = promo.rewardValue; // e.g., 10 for 10%
-        
-        // Calculate bonus in the SAME crypto asset as the deposit
+        const percentageValue = promo.rewardValue;
         bonusCryptoAmount = finalDepositAmount * (percentageValue / 100);
         
         if (bonusCryptoAmount <= 0) {
@@ -48822,11 +48806,9 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         bonusUSDValue = bonusCryptoAmount * currentPrice;
         rewardAsset = finalDepositAsset.toUpperCase();
         
-        // Credit the bonus in the SAME crypto asset as the deposit
         const currentBalance = targetWallet.get(finalDepositAsset) || 0;
         targetWallet.set(finalDepositAsset, currentBalance + bonusCryptoAmount);
         
-        // Update USD equivalent
         const currentUSD = targetWallet.get('usd') || 0;
         targetWallet.set('usd', currentUSD + bonusUSDValue);
         
@@ -48838,7 +48820,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       }
 
       case 'fixed': {
-        // Fixed amount in the specified asset (crypto)
         const fixedAmount = promo.rewardValue;
         const fixedAsset = (promo.rewardAsset || 'USDT').toLowerCase();
         
@@ -48857,7 +48838,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       }
 
       case 'crypto': {
-        // Crypto reward - add specified crypto amount
         const cryptoAmountReward = promo.rewardValue;
         const cryptoAsset = (promo.rewardAsset || 'USDT').toLowerCase();
         
@@ -48886,20 +48866,22 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     // Save user with updated balances
     await user.save();
 
-    // 11. CREATE TRANSACTION RECORD
+    // =============================================
+    // 11. CREATE TRANSACTION RECORD - FIXED
+    // =============================================
     const transactionReference = `PROMO-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const transactionUSDValue = rewardValue * currentPrice;
-    const transactionType = promo.transactionType || 'deposit';
     
+    // ✅ FIXED: Use the asset as METHOD, and 'Promo' as TYPE
     const transaction = await Transaction.create({
       user: userId,
-      type: transactionType,
+      type: 'Promo',  // ← FIXED: Type is "Promo"
       amount: transactionUSDValue,
-      asset: rewardAsset.toLowerCase(),
+      asset: rewardAsset.toLowerCase(),  // ← The asset paid (BTC, ETH, USDT, etc.)
       assetAmount: rewardValue,
       currency: 'USD',
       status: 'completed',
-      method: 'PROMO',
+      method: rewardAsset,  // ← FIXED: Method is the asset (BTC, ETH, USDT, etc.)
       reference: transactionReference,
       details: {
         promoCode: promo.code,
@@ -48911,13 +48893,11 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         description: rewardDescription,
         promoDescription: promo.description,
         isBonus: true,
-        transactionType: transactionType,
-        // Store deposit details
+        transactionType: 'Promo',  // Added for clarity
         appliedToDeposit: recentDeposit._id,
         depositAsset: finalDepositAsset,
         depositAmount: finalDepositAmount,
         depositUSDValue: depositUSDValue,
-        // For percentage bonuses
         sourceCryptoAmount: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? finalDepositAmount : null,
         sourceAsset: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? finalDepositAsset : null,
         bonusPercentage: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? promo.rewardValue : null,
@@ -48971,7 +48951,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         rewardValue: promo.rewardValue,
         rewardAsset: rewardAsset.toLowerCase(),
         walletType: walletType,
-        transactionType: transactionType,
+        transactionType: 'Promo',
         rewardDescription: rewardDescription,
         transactionId: transaction._id,
         usedCount: promo.usedCount,
@@ -49010,7 +48990,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         rewardValue: rewardValue,
         rewardAsset: rewardAsset.toLowerCase(),
         walletType: walletType,
-        transactionType: transactionType,
+        transactionType: 'Promo',
         description: rewardDescription,
         transactionId: transaction._id,
         depositId: recentDeposit._id,
@@ -49029,8 +49009,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
                           walletType === 'matured' ? 'Matured Wallet' : 
                           walletType.charAt(0).toUpperCase() + walletType.slice(1) + ' Wallet';
 
-    const typeDisplay = transactionType.charAt(0).toUpperCase() + transactionType.slice(1);
-
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
         <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
@@ -49047,7 +49025,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
                 <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </div>
-            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">🎉 ${typeDisplay} BONUS CREDITED!</h2>
+            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">🎉 Promo Bonus Credited!</h2>
             <p style="color: #065F46; font-size: 13px; margin: 0;">${promo.description}</p>
           </div>
           
@@ -49058,7 +49036,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
             <table style="width: 100%; border-collapse: collapse;">
               <tr style="border-bottom: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Transaction Type:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${typeDisplay}</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">Promo</td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Reward Type:</strong></td>
@@ -49120,7 +49098,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     await mailTransporter.sendMail({
       from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
       to: user.email,
-      subject: `🎉 ${typeDisplay} Bonus Credited - ₿itHash Capital`,
+      subject: `🎉 Promo Bonus Credited - ₿itHash Capital`,
       html: emailHtml
     });
 
@@ -49135,7 +49113,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
                `${rewardValue} ${rewardAsset}`,
         asset: rewardAsset.toLowerCase(),
         wallet: walletType,
-        transactionType: transactionType,
+        transactionType: 'Promo',
         bonusCryptoAmount: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? bonusCryptoAmount : null,
         sourceCryptoAmount: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? finalDepositAmount : null,
         sourceAsset: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? finalDepositAsset : null,
@@ -49147,8 +49125,9 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           reference: transactionReference,
           amount: transaction.amount,
           asset: transaction.asset,
-          status: transaction.status,
-          type: transactionType
+          method: transaction.method,
+          type: transaction.type,
+          status: transaction.status
         },
         rewardDescription: rewardDescription,
         promoCode: promo.code,
@@ -49162,7 +49141,8 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     };
 
     console.log(`✅ Promo code "${promo.code}" redeemed by user ${user.email}`);
-    console.log(`   Transaction Type: ${transactionType}`);
+    console.log(`   Transaction Type: Promo`);
+    console.log(`   Method: ${rewardAsset}`);
     console.log(`   Reward: ${rewardDescription}`);
     console.log(`   Wallet: ${walletType}`);
     console.log(`   Applied to Deposit: ${recentDeposit._id}`);
@@ -49200,9 +49180,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
   }
 });
-
-
-
 
 
 
