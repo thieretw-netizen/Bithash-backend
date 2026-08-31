@@ -48601,6 +48601,12 @@ app.get('/api/users/kyc', protect, async (req, res) => {
 
 
 
+
+
+
+
+
+
 app.post('/api/promos/redeem', protect, async (req, res) => {
   try {
     const { code } = req.body;
@@ -48671,7 +48677,16 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     if (!user.balances) {
       user.balances = { main: new Map(), active: new Map(), matured: new Map() };
     }
-    if (!user.balances.main) user.balances.main = new Map();
+
+    // Determine which wallet to credit (main or matured)
+    const walletType = promo.walletType || 'main';
+    
+    // Initialize the target wallet if it doesn't exist
+    if (!user.balances[walletType]) {
+      user.balances[walletType] = new Map();
+    }
+    
+    const targetWallet = user.balances[walletType];
 
     let rewardDescription = '';
     let rewardValue = promo.rewardValue;
@@ -48694,64 +48709,60 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     switch (promo.rewardType) {
       case 'bonus':
       case 'percentage': {
-        // Get current balance of the reward asset
-        const currentBalance = user.balances.main.get(finalAssetLower) || 0;
-        const bonusAmount = (currentBalance * rewardValue) / 100;
-        user.balances.main.set(finalAssetLower, currentBalance + bonusAmount);
+        // Percentage bonus
+        const depositAmount = req.body.depositAmount || 0;
+        
+        let bonusAmount;
+        if (depositAmount > 0) {
+          // Calculate percentage bonus on deposit
+          bonusAmount = (depositAmount * rewardValue) / 100;
+        } else {
+          // Fallback: use rewardValue as fixed amount
+          bonusAmount = rewardValue;
+        }
+        
+        const currentBalance = targetWallet.get(finalAssetLower) || 0;
+        targetWallet.set(finalAssetLower, currentBalance + bonusAmount);
         
         // Update USD equivalent
         const price = await getCryptoPrice(finalAsset);
         const usdValue = bonusAmount * (price || 1);
-        const currentUSD = user.balances.main.get('usd') || 0;
-        user.balances.main.set('usd', currentUSD + usdValue);
+        const currentUSD = targetWallet.get('usd') || 0;
+        targetWallet.set('usd', currentUSD + usdValue);
         
-        rewardDescription = `${rewardValue}% bonus on ${finalAsset} balance (${bonusAmount.toFixed(8)} ${finalAsset})`;
-        successMessage = `🎉 ${rewardValue}% bonus credited! ${bonusAmount.toFixed(8)} ${finalAsset} added to your main wallet.`;
+        rewardDescription = `${rewardValue}% bonus (${bonusAmount.toFixed(8)} ${finalAsset})`;
+        successMessage = `🎉 ${rewardValue}% bonus credited! ${bonusAmount.toFixed(8)} ${finalAsset} added to your ${walletType} wallet.`;
         break;
       }
 
       case 'fixed': {
         // Fixed amount in the specified asset
-        const currentBalance = user.balances.main.get(finalAssetLower) || 0;
-        user.balances.main.set(finalAssetLower, currentBalance + rewardValue);
+        const currentBalance = targetWallet.get(finalAssetLower) || 0;
+        targetWallet.set(finalAssetLower, currentBalance + rewardValue);
         
         // Update USD equivalent
         const price = await getCryptoPrice(finalAsset);
         const usdValue = rewardValue * (price || 1);
-        const currentUSD = user.balances.main.get('usd') || 0;
-        user.balances.main.set('usd', currentUSD + usdValue);
+        const currentUSD = targetWallet.get('usd') || 0;
+        targetWallet.set('usd', currentUSD + usdValue);
         
         rewardDescription = `${rewardValue} ${finalAsset} credited`;
-        successMessage = `💳 ${rewardValue} ${finalAsset} credited to your main wallet!`;
-        break;
-      }
-
-      case 'discount': {
-        const currentBalance = user.balances.main.get(finalAssetLower) || 0;
-        user.balances.main.set(finalAssetLower, currentBalance + rewardValue);
-        
-        const price = await getCryptoPrice(finalAsset);
-        const usdValue = rewardValue * (price || 1);
-        const currentUSD = user.balances.main.get('usd') || 0;
-        user.balances.main.set('usd', currentUSD + usdValue);
-        
-        rewardDescription = `${rewardValue} ${finalAsset} discount credit`;
-        successMessage = `💳 ${rewardValue} ${finalAsset} discount credited to your main wallet!`;
+        successMessage = `💳 ${rewardValue} ${finalAsset} credited to your ${walletType} wallet!`;
         break;
       }
 
       case 'crypto': {
         // Crypto reward - add specified crypto amount
-        const currentCryptoBalance = user.balances.main.get(finalAssetLower) || 0;
-        user.balances.main.set(finalAssetLower, currentCryptoBalance + rewardValue);
+        const currentCryptoBalance = targetWallet.get(finalAssetLower) || 0;
+        targetWallet.set(finalAssetLower, currentCryptoBalance + rewardValue);
         
         const price = await getCryptoPrice(finalAsset);
         const usdValue = rewardValue * (price || 1);
-        const currentUSD = user.balances.main.get('usd') || 0;
-        user.balances.main.set('usd', currentUSD + usdValue);
+        const currentUSD = targetWallet.get('usd') || 0;
+        targetWallet.set('usd', currentUSD + usdValue);
         
         rewardDescription = `${rewardValue} ${finalAsset} (≈ $${usdValue.toFixed(2)} USD)`;
-        successMessage = `💰 ${rewardValue} ${finalAsset} credited to your main wallet!`;
+        successMessage = `💰 ${rewardValue} ${finalAsset} credited to your ${walletType} wallet!`;
         break;
       }
 
@@ -48766,24 +48777,25 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     // Save user with updated balances
     await user.save();
 
-    // 7. CREATE TRANSACTION RECORD
+    // 7. CREATE TRANSACTION RECORD - USING ADMIN-CHOSEN TRANSACTION TYPE
     const transactionReference = `PROMO-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
     // Get price for the transaction
     const assetPrice = await getCryptoPrice(finalAsset) || 1;
-    const transactionAmount = (promo.rewardType === 'crypto' || promo.rewardType === 'fixed') 
-      ? rewardValue * assetPrice 
-      : rewardValue * assetPrice; // For percentage, use the bonus amount
+    const transactionAmount = rewardValue * assetPrice;
+    
+    // USE THE ADMIN-CHOSEN TRANSACTION TYPE
+    const transactionType = promo.transactionType || 'deposit';
     
     const transaction = await Transaction.create({
       user: userId,
-      type: 'referral',
+      type: transactionType, // Admin chooses: 'deposit', 'bonus', 'referral', 'interest', 'investment', 'refund'
       amount: transactionAmount,
-      asset: finalAssetLower, // This is a valid enum value (e.g., 'usdt', 'btc')
+      asset: finalAssetLower,
       assetAmount: rewardValue,
       currency: 'USD',
       status: 'completed',
-      method: 'PROMO', // Now valid because we added it to the enum
+      method: 'PROMO', // Make sure 'PROMO' is in your method enum
       reference: transactionReference,
       details: {
         promoCode: promo.code,
@@ -48791,37 +48803,22 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         rewardType: promo.rewardType,
         rewardValue: rewardValue,
         rewardAsset: finalAssetLower,
+        walletType: walletType,
         description: rewardDescription,
-        promoDescription: promo.description
+        promoDescription: promo.description,
+        isBonus: true,
+        transactionType: transactionType // Store what type it was
       },
       fee: 0,
       netAmount: transactionAmount,
       exchangeRateAtTime: assetPrice
     });
 
-    // 8. RECORD PLATFORM REVENUE
-    await PlatformRevenue.create({
-      source: 'referral',
-      amount: transactionAmount,
-      currency: 'USD',
-      transactionId: transaction._id,
-      userId: userId,
-      description: `Promo code redemption: ${promo.code} - ${rewardDescription}`,
-      metadata: {
-        promoCode: promo.code,
-        promoId: promo._id,
-        rewardType: promo.rewardType,
-        rewardValue: rewardValue,
-        rewardAsset: finalAssetLower,
-        usedCount: actualUsedCount + 1
-      }
-    });
-
-    // 9. MARK PROMO AS USED
+    // 8. MARK PROMO AS USED
     promo.usedCount = actualUsedCount + 1;
     await promo.save();
 
-    // 10. RECORD REDEMPTION
+    // 9. RECORD REDEMPTION
     const deviceInfo = await getUserDeviceInfo(req);
     
     await RedeemedPromo.create({
@@ -48831,13 +48828,14 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       rewardType: promo.rewardType,
       rewardValue: rewardValue,
       rewardAsset: finalAssetLower,
+      walletType: walletType,
       transactionId: transaction._id,
       redeemedAt: new Date(),
       ipAddress: deviceInfo.ip,
       userAgent: deviceInfo.userAgent
     });
 
-    // 11. LOG ACTIVITY
+    // 10. LOG ACTIVITY
     await SystemLog.create({
       action: 'promo_code_redeemed',
       entity: 'Transaction',
@@ -48856,13 +48854,16 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         rewardType: promo.rewardType,
         rewardValue: rewardValue,
         rewardAsset: finalAssetLower,
+        walletType: walletType,
+        transactionType: transactionType,
         rewardDescription: rewardDescription,
         transactionId: transaction._id,
-        usedCount: promo.usedCount
+        usedCount: promo.usedCount,
+        isBonus: true
       }
     });
 
-    // 12. EMIT REAL-TIME UPDATE
+    // 11. EMIT REAL-TIME UPDATE
     const io = req.app.get('io');
     if (io) {
       const { mainUSD, activeUSD, maturedUSD, mainBreakdown, maturedBreakdown } = 
@@ -48885,41 +48886,35 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         rewardType: promo.rewardType,
         rewardValue: rewardValue,
         rewardAsset: finalAssetLower,
+        walletType: walletType,
+        transactionType: transactionType,
         description: rewardDescription,
         transactionId: transaction._id,
         timestamp: Date.now()
       });
     }
 
-    // 13. SEND EMAIL NOTIFICATION
+    // 12. SEND EMAIL NOTIFICATION
     const rewardDisplay = promo.rewardType === 'crypto' 
       ? `${rewardValue} ${finalAsset}`
       : promo.rewardType === 'bonus' || promo.rewardType === 'percentage'
         ? `${rewardValue}% bonus`
         : `${rewardValue} ${finalAsset}`;
 
-    const brandHeader = `
-      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-      </div>
-    `;
+    const walletDisplay = walletType === 'main' ? 'Main Wallet' : 
+                          walletType === 'matured' ? 'Matured Wallet' : 
+                          walletType.charAt(0).toUpperCase() + walletType.slice(1) + ' Wallet';
 
-    const brandFooter = `
-      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-        </p>
-      </div>
-    `;
+    const typeDisplay = transactionType.charAt(0).toUpperCase() + transactionType.slice(1);
 
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-        ${brandHeader}
+        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+        </div>
+        
         <div style="padding: 30px; background: #FFFFFF;">
           <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
@@ -48928,7 +48923,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
                 <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </div>
-            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">PROMO CODE REDEEMED!</h2>
+            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">🎉 ${typeDisplay} BONUS CREDITED!</h2>
             <p style="color: #065F46; font-size: 13px; margin: 0;">${promo.description}</p>
           </div>
           
@@ -48938,12 +48933,20 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
             <table style="width: 100%; border-collapse: collapse;">
               <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Transaction Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${typeDisplay}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Reward Type:</strong></td>
                 <td style="padding: 8px 0; text-align: right; text-transform: capitalize;">${promo.rewardType}</td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Reward Value:</strong></td>
+                <td style="padding: 8px 0;"><strong>Bonus Value:</strong></td>
                 <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${rewardDisplay}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${walletDisplay}</td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Promo Code:</strong></td>
@@ -48957,8 +48960,8 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           </div>
           
           <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Reward Details</p>
-            <p style="color: #78350F; margin: 0; font-size: 14px;">${rewardDescription}. The reward has been credited to your Main Wallet.</p>
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Bonus Details</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">${rewardDescription}. The bonus has been credited to your ${walletDisplay}.</p>
           </div>
           
           <div style="text-align: center; margin: 30px 0;">
@@ -48967,7 +48970,15 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           
           <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
         </div>
-        ${brandFooter}
+        
+        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+          </p>
+        </div>
       </div>
     `;
 
@@ -48975,11 +48986,11 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     await mailTransporter.sendMail({
       from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
       to: user.email,
-      subject: `🎉 Promo Code Redeemed - ₿itHash Capital`,
+      subject: `🎉 ${typeDisplay} Bonus Credited - ₿itHash Capital`,
       html: emailHtml
     });
 
-    // 14. RETURN SUCCESS RESPONSE
+    // 13. RETURN SUCCESS RESPONSE
     const response = {
       status: 'success',
       success: true,
@@ -48988,7 +48999,9 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         type: promo.rewardType,
         value: promo.rewardType === 'bonus' || promo.rewardType === 'percentage' ? `${rewardValue}%` : 
                `${rewardValue} ${finalAsset}`,
-        asset: finalAssetLower
+        asset: finalAssetLower,
+        wallet: walletType,
+        transactionType: transactionType
       },
       data: {
         transaction: {
@@ -48996,7 +49009,8 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           reference: transactionReference,
           amount: transaction.amount,
           asset: transaction.asset,
-          status: transaction.status
+          status: transaction.status,
+          type: transactionType
         },
         rewardDescription: rewardDescription,
         promoCode: promo.code
@@ -49004,7 +49018,9 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     };
 
     console.log(`✅ Promo code "${promo.code}" redeemed by user ${user.email}`);
+    console.log(`   Transaction Type: ${transactionType}`);
     console.log(`   Reward: ${rewardDescription}`);
+    console.log(`   Wallet: ${walletType}`);
     console.log(`   Transaction: ${transactionReference}`);
 
     res.status(200).json(response);
@@ -49039,6 +49055,21 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 // =============================================
