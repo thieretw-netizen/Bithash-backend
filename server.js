@@ -48606,11 +48606,11 @@ app.get('/api/users/kyc', protect, async (req, res) => {
 
 
 // =============================================
-// FIXED: PROMO CODE REDEMPTION ENDPOINT - CRYPTO ONLY
+// FIXED: PROMO CODE REDEMPTION ENDPOINT - AUTO-DETECTS DEPOSIT
 // =============================================
 app.post('/api/promos/redeem', protect, async (req, res) => {
   try {
-    const { code, cryptoAmount, asset } = req.body;
+    const { code } = req.body;
     const userId = req.user._id;
     
     // 1. VALIDATE INPUT
@@ -48622,7 +48622,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
-    // If percentage-based bonus, we need the crypto amount and asset
     const promoCode = code.trim().toUpperCase();
     
     // 2. FIND VALID PROMO CODE
@@ -48675,28 +48674,99 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
-    // 6. VALIDATE CRYPTO AMOUNT FOR PERCENTAGE BONUS
-    const isPercentageBonus = promo.rewardType === 'percentage' || promo.rewardType === 'bonus';
-    
-    if (isPercentageBonus) {
-      if (!cryptoAmount || cryptoAmount <= 0) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Crypto amount is required for percentage-based promo codes.',
-          success: false,
-          requiresCryptoAmount: true
-        });
-      }
-      
-      if (!asset || typeof asset !== 'string') {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Asset type is required for percentage-based promo codes.',
-          success: false,
-          requiresAsset: true
-        });
+    // =============================================
+    // 6. CHECK PROMO PURPOSE - MUST BE DEPOSIT
+    // =============================================
+    if (promo.category !== 'deposit' && promo.category !== 'general') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'This promo code is not valid for deposits.',
+        success: false
+      });
+    }
+
+    // =============================================
+    // 7. FIND USER'S RECENT DEPOSIT (last 30 days)
+    // =============================================
+    const recentDeposit = await Transaction.findOne({
+      user: userId,
+      type: 'deposit',
+      status: 'completed',
+      createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+    }).sort({ createdAt: -1 });
+
+    if (!recentDeposit) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'You need to make a deposit first to redeem this promo code.',
+        success: false,
+        requiresDeposit: true
+      });
+    }
+
+    // =============================================
+    // 8. CHECK IF THIS DEPOSIT ALREADY HAS A PROMO APPLIED
+    // =============================================
+    const existingRedemptionForDeposit = await RedeemedPromo.findOne({
+      userId: userId,
+      transactionId: recentDeposit._id
+    });
+
+    if (existingRedemptionForDeposit) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'This deposit already has a promo code applied.',
+        success: false
+      });
+    }
+
+    // =============================================
+    // 9. GET DEPOSIT AMOUNT AND ASSET
+    // =============================================
+    // The deposit asset (BTC, ETH, USDT, etc.)
+    const depositAsset = (recentDeposit.asset || 'BTC').toLowerCase();
+    // The amount in the asset (e.g., 0.5 BTC)
+    const depositAssetAmount = recentDeposit.assetAmount || 0;
+    // The USD value of the deposit
+    const depositUSDValue = recentDeposit.amount || 0;
+
+    // If assetAmount is 0 but amount > 0, try to calculate asset amount from USD
+    let finalDepositAmount = depositAssetAmount;
+    let finalDepositAsset = depositAsset;
+
+    if (depositAssetAmount <= 0 && depositUSDValue > 0) {
+      // Try to get the price and calculate
+      try {
+        const price = await getCryptoPrice(depositAsset);
+        if (price && price > 0) {
+          finalDepositAmount = depositUSDValue / price;
+        } else {
+          // If price not available, use a default
+          finalDepositAmount = depositUSDValue / 1;
+        }
+      } catch (e) {
+        finalDepositAmount = depositUSDValue / 1;
       }
     }
+
+    // If both are 0, we can't calculate
+    if (finalDepositAmount <= 0 && depositUSDValue <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Unable to determine deposit amount. Please make a valid deposit first.',
+        success: false
+      });
+    }
+
+    // If asset is 'usd' or undefined, default to USDT
+    if (!finalDepositAsset || finalDepositAsset === 'usd' || finalDepositAsset === 'undefined') {
+      finalDepositAsset = 'usdt';
+    }
+
+    console.log(`📊 Found recent deposit for user ${user.email}:`);
+    console.log(`   Asset: ${finalDepositAsset.toUpperCase()}`);
+    console.log(`   Amount: ${finalDepositAmount} ${finalDepositAsset.toUpperCase()}`);
+    console.log(`   USD Value: $${depositUSDValue}`);
 
     // Initialize balances
     if (!user.balances) {
@@ -48720,103 +48790,88 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     let bonusCryptoAmount = 0;
     let bonusUSDValue = 0;
 
-    const assetLower = rewardAsset.toLowerCase();
-    const assetUpper = rewardAsset.toUpperCase();
-
-    // Valid crypto assets from your schema
-    const validAssets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB',
-                         'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'WBTC', 'LTC', 'NEAR', 'UNI', 'BCH',
-                         'XLM', 'ATOM', 'XMR', 'FLOW', 'VET', 'FIL', 'THETA', 'HBAR', 'FTM', 'XTZ'];
-    
-    // Ensure the asset is valid
-    const finalAsset = validAssets.includes(assetUpper) ? assetUpper : 'USDT';
-    const finalAssetLower = finalAsset.toLowerCase();
-
-    // Get current price for USD display (fiat is only for display)
+    // Get current price for USD display
     let currentPrice = 0;
     try {
-      currentPrice = await getCryptoPrice(finalAsset);
+      currentPrice = await getCryptoPrice(finalDepositAsset);
     } catch (priceErr) {
-      console.warn(`Could not fetch price for ${finalAsset}, using fallback for display`);
-      currentPrice = 1; // Fallback for display only
+      console.warn(`Could not fetch price for ${finalDepositAsset}, using fallback`);
+      currentPrice = depositUSDValue > 0 && finalDepositAmount > 0 ? depositUSDValue / finalDepositAmount : 1;
     }
 
-    // 7. APPLY REWARD BASED ON TYPE
+    // 10. APPLY REWARD BASED ON TYPE
     switch (promo.rewardType) {
       case 'bonus':
       case 'percentage': {
         // =============================================
-        // CRYPTO-ONLY: Calculate bonus based on crypto amount
+        // PERCENTAGE BONUS ON THE DEPOSIT AMOUNT
         // =============================================
-        const percentageValue = promo.rewardValue; // e.g., 20 for 20%
+        const percentageValue = promo.rewardValue; // e.g., 10 for 10%
         
-        // The user provides the crypto amount they deposited/invested
-        const sourceCryptoAmount = parseFloat(cryptoAmount);
-        const sourceAsset = asset.toLowerCase();
-        
-        // Calculate bonus in the SAME crypto asset as the source
-        // For example: User deposits 0.5 BTC, 20% bonus = 0.1 BTC
-        bonusCryptoAmount = sourceCryptoAmount * (percentageValue / 100);
+        // Calculate bonus in the SAME crypto asset as the deposit
+        bonusCryptoAmount = finalDepositAmount * (percentageValue / 100);
         
         if (bonusCryptoAmount <= 0) {
           return res.status(400).json({
             status: 'fail',
-            message: `Invalid bonus calculation. Crypto amount: ${sourceCryptoAmount} ${sourceAsset.toUpperCase()}, Percentage: ${percentageValue}%`,
+            message: `Invalid bonus calculation. Deposit: ${finalDepositAmount} ${finalDepositAsset.toUpperCase()}, Percentage: ${percentageValue}%`,
             success: false
           });
         }
         
-        // IMPORTANT: The bonus is credited in the SAME asset as the source
-        // For display purposes, we convert to USD
         bonusUSDValue = bonusCryptoAmount * currentPrice;
+        rewardAsset = finalDepositAsset.toUpperCase();
         
-        // Credit the bonus in the SAME crypto asset to the user's wallet
-        const currentBalance = targetWallet.get(sourceAsset) || 0;
-        targetWallet.set(sourceAsset, currentBalance + bonusCryptoAmount);
+        // Credit the bonus in the SAME crypto asset as the deposit
+        const currentBalance = targetWallet.get(finalDepositAsset) || 0;
+        targetWallet.set(finalDepositAsset, currentBalance + bonusCryptoAmount);
         
-        // Update USD equivalent for display (fiat is display only)
+        // Update USD equivalent
         const currentUSD = targetWallet.get('usd') || 0;
         targetWallet.set('usd', currentUSD + bonusUSDValue);
         
-        rewardDescription = `${percentageValue}% bonus on ${sourceCryptoAmount.toFixed(8)} ${sourceAsset.toUpperCase()} = +${bonusCryptoAmount.toFixed(8)} ${sourceAsset.toUpperCase()} (≈ $${bonusUSDValue.toFixed(2)} USD)`;
-        successMessage = `🎉 ${percentageValue}% bonus credited! +${bonusCryptoAmount.toFixed(8)} ${sourceAsset.toUpperCase()} added to your ${walletType} wallet.`;
+        rewardDescription = `${percentageValue}% bonus on your deposit of ${finalDepositAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()} = +${bonusCryptoAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()} (≈ $${bonusUSDValue.toFixed(2)} USD)`;
+        successMessage = `🎉 ${percentageValue}% bonus credited! +${bonusCryptoAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()} added to your ${walletType} wallet.`;
         rewardValue = bonusCryptoAmount;
-        rewardAsset = sourceAsset.toUpperCase();
+        rewardAsset = finalDepositAsset.toUpperCase();
         break;
       }
 
       case 'fixed': {
         // Fixed amount in the specified asset (crypto)
         const fixedAmount = promo.rewardValue;
+        const fixedAsset = (promo.rewardAsset || 'USDT').toLowerCase();
         
-        const currentBalance = targetWallet.get(finalAssetLower) || 0;
-        targetWallet.set(finalAssetLower, currentBalance + fixedAmount);
+        const currentBalance = targetWallet.get(fixedAsset) || 0;
+        targetWallet.set(fixedAsset, currentBalance + fixedAmount);
         
-        // Update USD equivalent for display
         const usdValue = fixedAmount * currentPrice;
         const currentUSD = targetWallet.get('usd') || 0;
         targetWallet.set('usd', currentUSD + usdValue);
         
-        rewardDescription = `+${fixedAmount} ${finalAsset} (≈ $${usdValue.toFixed(2)} USD)`;
-        successMessage = `💳 +${fixedAmount} ${finalAsset} credited to your ${walletType} wallet!`;
+        rewardDescription = `+${fixedAmount} ${fixedAsset.toUpperCase()} (≈ $${usdValue.toFixed(2)} USD)`;
+        successMessage = `💳 +${fixedAmount} ${fixedAsset.toUpperCase()} credited to your ${walletType} wallet!`;
         rewardValue = fixedAmount;
+        rewardAsset = fixedAsset.toUpperCase();
         break;
       }
 
       case 'crypto': {
         // Crypto reward - add specified crypto amount
         const cryptoAmountReward = promo.rewardValue;
+        const cryptoAsset = (promo.rewardAsset || 'USDT').toLowerCase();
         
-        const currentCryptoBalance = targetWallet.get(finalAssetLower) || 0;
-        targetWallet.set(finalAssetLower, currentCryptoBalance + cryptoAmountReward);
+        const currentCryptoBalance = targetWallet.get(cryptoAsset) || 0;
+        targetWallet.set(cryptoAsset, currentCryptoBalance + cryptoAmountReward);
         
         const usdValue = cryptoAmountReward * currentPrice;
         const currentUSD = targetWallet.get('usd') || 0;
         targetWallet.set('usd', currentUSD + usdValue);
         
-        rewardDescription = `+${cryptoAmountReward} ${finalAsset} (≈ $${usdValue.toFixed(2)} USD)`;
-        successMessage = `💰 +${cryptoAmountReward} ${finalAsset} credited to your ${walletType} wallet!`;
+        rewardDescription = `+${cryptoAmountReward} ${cryptoAsset.toUpperCase()} (≈ $${usdValue.toFixed(2)} USD)`;
+        successMessage = `💰 +${cryptoAmountReward} ${cryptoAsset.toUpperCase()} credited to your ${walletType} wallet!`;
         rewardValue = cryptoAmountReward;
+        rewardAsset = cryptoAsset.toUpperCase();
         break;
       }
 
@@ -48831,22 +48886,18 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     // Save user with updated balances
     await user.save();
 
-    // 8. CREATE TRANSACTION RECORD - USING ADMIN-CHOSEN TRANSACTION TYPE
+    // 11. CREATE TRANSACTION RECORD
     const transactionReference = `PROMO-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    
-    // For transaction amount in USD (display only)
     const transactionUSDValue = rewardValue * currentPrice;
-    
-    // USE THE ADMIN-CHOSEN TRANSACTION TYPE
     const transactionType = promo.transactionType || 'deposit';
     
     const transaction = await Transaction.create({
       user: userId,
-      type: transactionType, // Admin chooses: 'deposit', 'bonus', 'referral', 'interest', 'investment', 'refund'
-      amount: transactionUSDValue, // USD value for display only
+      type: transactionType,
+      amount: transactionUSDValue,
       asset: rewardAsset.toLowerCase(),
-      assetAmount: rewardValue, // The actual crypto amount
-      currency: 'USD', // Display currency
+      assetAmount: rewardValue,
+      currency: 'USD',
       status: 'completed',
       method: 'PROMO',
       reference: transactionReference,
@@ -48861,12 +48912,17 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         promoDescription: promo.description,
         isBonus: true,
         transactionType: transactionType,
-        // For percentage bonuses, store the source crypto details
-        sourceCryptoAmount: isPercentageBonus ? cryptoAmount : null,
-        sourceAsset: isPercentageBonus ? asset?.toLowerCase() : null,
-        bonusPercentage: isPercentageBonus ? promo.rewardValue : null,
-        bonusCryptoAmount: isPercentageBonus ? bonusCryptoAmount : null,
-        bonusUSDValue: isPercentageBonus ? bonusUSDValue : null,
+        // Store deposit details
+        appliedToDeposit: recentDeposit._id,
+        depositAsset: finalDepositAsset,
+        depositAmount: finalDepositAmount,
+        depositUSDValue: depositUSDValue,
+        // For percentage bonuses
+        sourceCryptoAmount: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? finalDepositAmount : null,
+        sourceAsset: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? finalDepositAsset : null,
+        bonusPercentage: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? promo.rewardValue : null,
+        bonusCryptoAmount: bonusCryptoAmount,
+        bonusUSDValue: bonusUSDValue,
         cryptoPriceAtRedemption: currentPrice
       },
       fee: 0,
@@ -48874,11 +48930,11 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       exchangeRateAtTime: currentPrice
     });
 
-    // 9. MARK PROMO AS USED
+    // 12. MARK PROMO AS USED
     promo.usedCount = actualUsedCount + 1;
     await promo.save();
 
-    // 10. RECORD REDEMPTION
+    // 13. RECORD REDEMPTION
     const deviceInfo = await getUserDeviceInfo(req);
     
     await RedeemedPromo.create({
@@ -48895,7 +48951,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       userAgent: deviceInfo.userAgent
     });
 
-    // 11. LOG ACTIVITY
+    // 14. LOG ACTIVITY
     await SystemLog.create({
       action: 'promo_code_redeemed',
       entity: 'Transaction',
@@ -48920,14 +48976,17 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         transactionId: transaction._id,
         usedCount: promo.usedCount,
         isBonus: true,
-        sourceCryptoAmount: isPercentageBonus ? cryptoAmount : null,
-        sourceAsset: isPercentageBonus ? asset?.toLowerCase() : null,
-        bonusCryptoAmount: isPercentageBonus ? bonusCryptoAmount : null,
+        appliedToDeposit: recentDeposit._id,
+        depositAmount: finalDepositAmount,
+        depositAsset: finalDepositAsset,
+        depositUSDValue: depositUSDValue,
+        bonusCryptoAmount: bonusCryptoAmount,
+        bonusUSDValue: bonusUSDValue,
         cryptoPriceAtRedemption: currentPrice
       }
     });
 
-    // 12. EMIT REAL-TIME UPDATE
+    // 15. EMIT REAL-TIME UPDATE
     const io = req.app.get('io');
     if (io) {
       const { mainUSD, activeUSD, maturedUSD, mainBreakdown, maturedBreakdown } = 
@@ -48954,11 +49013,12 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         transactionType: transactionType,
         description: rewardDescription,
         transactionId: transaction._id,
+        depositId: recentDeposit._id,
         timestamp: Date.now()
       });
     }
 
-    // 13. SEND EMAIL NOTIFICATION (CRYPTO-ONLY DISPLAY)
+    // 16. SEND EMAIL NOTIFICATION
     const rewardDisplay = promo.rewardType === 'crypto' 
       ? `${rewardValue} ${rewardAsset}`
       : promo.rewardType === 'bonus' || promo.rewardType === 'percentage'
@@ -49010,8 +49070,8 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
                 <td style="padding: 8px 0; text-align: right; font-weight: bold;">${promo.rewardValue}%</td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Source Crypto Amount:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${parseFloat(cryptoAmount).toFixed(8)} ${asset.toUpperCase()}</td>
+                <td style="padding: 8px 0;"><strong>Applied to Deposit:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${finalDepositAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()}</td>
               </tr>
               ` : ''}
               <tr style="border-top: 1px solid #E2E8F0;">
@@ -49064,7 +49124,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       html: emailHtml
     });
 
-    // 14. RETURN SUCCESS RESPONSE
+    // 17. RETURN SUCCESS RESPONSE
     const response = {
       status: 'success',
       success: true,
@@ -49076,9 +49136,10 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         asset: rewardAsset.toLowerCase(),
         wallet: walletType,
         transactionType: transactionType,
-        bonusCryptoAmount: isPercentageBonus ? bonusCryptoAmount : null,
-        sourceCryptoAmount: isPercentageBonus ? cryptoAmount : null,
-        sourceAsset: isPercentageBonus ? asset?.toLowerCase() : null
+        bonusCryptoAmount: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? bonusCryptoAmount : null,
+        sourceCryptoAmount: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? finalDepositAmount : null,
+        sourceAsset: promo.rewardType === 'percentage' || promo.rewardType === 'bonus' ? finalDepositAsset : null,
+        appliedToDeposit: recentDeposit._id
       },
       data: {
         transaction: {
@@ -49090,7 +49151,13 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           type: transactionType
         },
         rewardDescription: rewardDescription,
-        promoCode: promo.code
+        promoCode: promo.code,
+        depositAppliedTo: {
+          id: recentDeposit._id,
+          asset: finalDepositAsset,
+          amount: finalDepositAmount,
+          usdValue: depositUSDValue
+        }
       }
     };
 
@@ -49098,6 +49165,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     console.log(`   Transaction Type: ${transactionType}`);
     console.log(`   Reward: ${rewardDescription}`);
     console.log(`   Wallet: ${walletType}`);
+    console.log(`   Applied to Deposit: ${recentDeposit._id}`);
     console.log(`   Transaction: ${transactionReference}`);
 
     res.status(200).json(response);
@@ -49132,8 +49200,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
   }
 });
-
-
 
 
 
