@@ -48602,27 +48602,30 @@ app.get('/api/users/kyc', protect, async (req, res) => {
 
 
 
-
 // =============================================
-// FIXED: PROMO CODE REDEMPTION ENDPOINT
+// PROMO CODE REDEMPTION ENDPOINT - PRODUCTION READY
 // =============================================
 app.post('/api/promos/redeem', protect, async (req, res) => {
   try {
     const { code } = req.body;
     const userId = req.user._id;
     
+    // =============================================
     // 1. VALIDATE INPUT
+    // =============================================
     if (!code || typeof code !== 'string') {
       return res.status(400).json({
         status: 'fail',
-        message: 'Promo code is required',
+        message: 'Promo code is required.',
         success: false
       });
     }
 
     const promoCode = code.trim().toUpperCase();
     
+    // =============================================
     // 2. FIND VALID PROMO CODE
+    // =============================================
     const promo = await Promo.findOne({
       code: promoCode,
       isActive: true,
@@ -48632,23 +48635,29 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     if (!promo) {
       return res.status(404).json({
         status: 'fail',
-        message: 'Invalid or expired promo code.',
+        message: 'Invalid or expired promo code. Please check the code and try again.',
         success: false
       });
     }
 
+    // =============================================
     // 3. CHECK USAGE LIMIT
+    // =============================================
     const actualUsedCount = await RedeemedPromo.countDocuments({ promoId: promo._id });
 
     if (actualUsedCount >= promo.maxUses) {
       return res.status(409).json({
         status: 'fail',
-        message: 'This promo code has reached its usage limit.',
-        success: false
+        message: `This promo code has reached its usage limit of ${promo.maxUses} redemptions.`,
+        success: false,
+        usedCount: actualUsedCount,
+        maxUses: promo.maxUses
       });
     }
 
+    // =============================================
     // 4. CHECK IF USER ALREADY REDEEMED
+    // =============================================
     const alreadyRedeemed = await RedeemedPromo.findOne({
       userId: userId,
       promoId: promo._id
@@ -48657,34 +48666,38 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     if (alreadyRedeemed) {
       return res.status(409).json({
         status: 'fail',
-        message: 'You have already redeemed this promo code.',
-        success: false
+        message: 'You have already redeemed this promo code. Each code can only be used once per user.',
+        success: false,
+        redeemedAt: alreadyRedeemed.redeemedAt
       });
     }
 
+    // =============================================
     // 5. GET USER
+    // =============================================
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
         status: 'fail',
-        message: 'User not found',
+        message: 'User account not found. Please log in again.',
         success: false
       });
     }
 
     // =============================================
-    // 6. CHECK PROMO PURPOSE - MUST BE DEPOSIT
+    // 6. CHECK PROMO PURPOSE
     // =============================================
     if (promo.category !== 'deposit' && promo.category !== 'general') {
       return res.status(400).json({
         status: 'fail',
-        message: 'This promo code is not valid for deposits.',
-        success: false
+        message: `This promo code (${promo.code}) is not valid for deposits. It is intended for ${promo.category} transactions.`,
+        success: false,
+        category: promo.category
       });
     }
 
     // =============================================
-    // 7. FIND USER'S RECENT DEPOSIT (last 30 days)
+    // 7. FIND USER'S RECENT DEPOSIT
     // =============================================
     const recentDeposit = await Transaction.findOne({
       user: userId,
@@ -48696,14 +48709,15 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     if (!recentDeposit) {
       return res.status(400).json({
         status: 'fail',
-        message: 'You need to make a deposit first to redeem this promo code.',
+        message: 'A completed deposit within the last 30 days is required to redeem this promo code. Please make a deposit first.',
         success: false,
-        requiresDeposit: true
+        requiresDeposit: true,
+        depositWindow: 30
       });
     }
 
     // =============================================
-    // 8. CHECK IF THIS DEPOSIT ALREADY HAS A PROMO APPLIED
+    // 8. CHECK IF DEPOSIT ALREADY HAS A PROMO
     // =============================================
     const existingRedemptionForDeposit = await RedeemedPromo.findOne({
       userId: userId,
@@ -48713,8 +48727,10 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     if (existingRedemptionForDeposit) {
       return res.status(409).json({
         status: 'fail',
-        message: 'This deposit already has a promo code applied.',
-        success: false
+        message: 'This deposit already has a promo code applied. Only one promo code can be used per deposit.',
+        success: false,
+        existingPromo: existingRedemptionForDeposit.code,
+        depositId: recentDeposit._id
       });
     }
 
@@ -48734,17 +48750,17 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         if (price && price > 0) {
           finalDepositAmount = depositUSDValue / price;
         } else {
-          finalDepositAmount = depositUSDValue / 1;
+          finalDepositAmount = depositUSDValue;
         }
       } catch (e) {
-        finalDepositAmount = depositUSDValue / 1;
+        finalDepositAmount = depositUSDValue;
       }
     }
 
     if (finalDepositAmount <= 0 && depositUSDValue <= 0) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Unable to determine deposit amount. Please make a valid deposit first.',
+        message: 'Unable to determine deposit amount. Please ensure you have made a valid deposit.',
         success: false
       });
     }
@@ -48753,17 +48769,13 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       finalDepositAsset = 'usdt';
     }
 
-    console.log(`📊 Found recent deposit for user ${user.email}:`);
-    console.log(`   Asset: ${finalDepositAsset.toUpperCase()}`);
-    console.log(`   Amount: ${finalDepositAmount} ${finalDepositAsset.toUpperCase()}`);
-    console.log(`   USD Value: $${depositUSDValue}`);
-
-    // Initialize balances
+    // =============================================
+    // 10. INITIALIZE BALANCES
+    // =============================================
     if (!user.balances) {
       user.balances = { main: new Map(), active: new Map(), matured: new Map() };
     }
 
-    // Determine which wallet to credit (main or matured)
     const walletType = promo.walletType || 'main';
     
     if (!user.balances[walletType]) {
@@ -48775,7 +48787,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     let rewardDescription = '';
     let rewardValue = 0;
     let rewardAsset = promo.rewardAsset || 'USDT';
-    let successMessage = 'Promo code redeemed successfully!';
+    let successMessage = '';
     let bonusCryptoAmount = 0;
     let bonusUSDValue = 0;
 
@@ -48783,12 +48795,17 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     let currentPrice = 0;
     try {
       currentPrice = await getCryptoPrice(finalDepositAsset);
+      if (!currentPrice || currentPrice <= 0) {
+        currentPrice = depositUSDValue > 0 && finalDepositAmount > 0 ? depositUSDValue / finalDepositAmount : 1;
+      }
     } catch (priceErr) {
       console.warn(`Could not fetch price for ${finalDepositAsset}, using fallback`);
       currentPrice = depositUSDValue > 0 && finalDepositAmount > 0 ? depositUSDValue / finalDepositAmount : 1;
     }
 
-    // 10. APPLY REWARD BASED ON TYPE
+    // =============================================
+    // 11. APPLY REWARD BASED ON TYPE
+    // =============================================
     switch (promo.rewardType) {
       case 'bonus':
       case 'percentage': {
@@ -48798,7 +48815,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         if (bonusCryptoAmount <= 0) {
           return res.status(400).json({
             status: 'fail',
-            message: `Invalid bonus calculation. Deposit: ${finalDepositAmount} ${finalDepositAsset.toUpperCase()}, Percentage: ${percentageValue}%`,
+            message: `Invalid bonus calculation. Deposit: ${finalDepositAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()}, Percentage: ${percentageValue}%. Please contact support.`,
             success: false
           });
         }
@@ -48812,8 +48829,8 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         const currentUSD = targetWallet.get('usd') || 0;
         targetWallet.set('usd', currentUSD + bonusUSDValue);
         
-        rewardDescription = `${percentageValue}% bonus on your deposit of ${finalDepositAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()} = +${bonusCryptoAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()} (≈ $${bonusUSDValue.toFixed(2)} USD)`;
-        successMessage = `🎉 ${percentageValue}% bonus credited! +${bonusCryptoAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()} added to your ${walletType} wallet.`;
+        rewardDescription = `${percentageValue}% bonus on your deposit of ${finalDepositAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()} = +${bonusCryptoAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()} ($${bonusUSDValue.toFixed(2)} USD)`;
+        successMessage = `${percentageValue}% bonus credited successfully. +${bonusCryptoAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()} ($${bonusUSDValue.toFixed(2)} USD) added to your ${walletType === 'main' ? 'Main' : walletType.charAt(0).toUpperCase() + walletType.slice(1)} Wallet.`;
         rewardValue = bonusCryptoAmount;
         rewardAsset = finalDepositAsset.toUpperCase();
         break;
@@ -48830,8 +48847,8 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         const currentUSD = targetWallet.get('usd') || 0;
         targetWallet.set('usd', currentUSD + usdValue);
         
-        rewardDescription = `+${fixedAmount} ${fixedAsset.toUpperCase()} (≈ $${usdValue.toFixed(2)} USD)`;
-        successMessage = `💳 +${fixedAmount} ${fixedAsset.toUpperCase()} credited to your ${walletType} wallet!`;
+        rewardDescription = `+${fixedAmount} ${fixedAsset.toUpperCase()} ($${usdValue.toFixed(2)} USD)`;
+        successMessage = `+${fixedAmount} ${fixedAsset.toUpperCase()} ($${usdValue.toFixed(2)} USD) credited to your ${walletType === 'main' ? 'Main' : walletType.charAt(0).toUpperCase() + walletType.slice(1)} Wallet.`;
         rewardValue = fixedAmount;
         rewardAsset = fixedAsset.toUpperCase();
         break;
@@ -48848,8 +48865,8 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         const currentUSD = targetWallet.get('usd') || 0;
         targetWallet.set('usd', currentUSD + usdValue);
         
-        rewardDescription = `+${cryptoAmountReward} ${cryptoAsset.toUpperCase()} (≈ $${usdValue.toFixed(2)} USD)`;
-        successMessage = `💰 +${cryptoAmountReward} ${cryptoAsset.toUpperCase()} credited to your ${walletType} wallet!`;
+        rewardDescription = `+${cryptoAmountReward} ${cryptoAsset.toUpperCase()} ($${usdValue.toFixed(2)} USD)`;
+        successMessage = `+${cryptoAmountReward} ${cryptoAsset.toUpperCase()} ($${usdValue.toFixed(2)} USD) credited to your ${walletType === 'main' ? 'Main' : walletType.charAt(0).toUpperCase() + walletType.slice(1)} Wallet.`;
         rewardValue = cryptoAmountReward;
         rewardAsset = cryptoAsset.toUpperCase();
         break;
@@ -48858,7 +48875,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       default:
         return res.status(400).json({
           status: 'fail',
-          message: 'Invalid reward type',
+          message: `Invalid reward type: ${promo.rewardType}. Please contact support.`,
           success: false
         });
     }
@@ -48867,21 +48884,20 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     await user.save();
 
     // =============================================
-    // 11. CREATE TRANSACTION RECORD - FIXED
+    // 12. CREATE TRANSACTION RECORD
     // =============================================
     const transactionReference = `PROMO-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const transactionUSDValue = rewardValue * currentPrice;
     
-    // ✅ FIXED: Use the asset as METHOD, and 'Promo' as TYPE
     const transaction = await Transaction.create({
       user: userId,
-      type: 'Promo',  // ← FIXED: Type is "Promo"
+      type: 'Promo',
       amount: transactionUSDValue,
-      asset: rewardAsset.toLowerCase(),  // ← The asset paid (BTC, ETH, USDT, etc.)
+      asset: rewardAsset.toLowerCase(),
       assetAmount: rewardValue,
       currency: 'USD',
       status: 'completed',
-      method: rewardAsset,  // ← FIXED: Method is the asset (BTC, ETH, USDT, etc.)
+      method: rewardAsset,
       reference: transactionReference,
       details: {
         promoCode: promo.code,
@@ -48893,7 +48909,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
         description: rewardDescription,
         promoDescription: promo.description,
         isBonus: true,
-        transactionType: 'Promo',  // Added for clarity
+        transactionType: 'Promo',
         appliedToDeposit: recentDeposit._id,
         depositAsset: finalDepositAsset,
         depositAmount: finalDepositAmount,
@@ -48910,11 +48926,15 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       exchangeRateAtTime: currentPrice
     });
 
-    // 12. MARK PROMO AS USED
+    // =============================================
+    // 13. MARK PROMO AS USED
+    // =============================================
     promo.usedCount = actualUsedCount + 1;
     await promo.save();
 
-    // 13. RECORD REDEMPTION
+    // =============================================
+    // 14. RECORD REDEMPTION
+    // =============================================
     const deviceInfo = await getUserDeviceInfo(req);
     
     await RedeemedPromo.create({
@@ -48931,7 +48951,9 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       userAgent: deviceInfo.userAgent
     });
 
-    // 14. LOG ACTIVITY
+    // =============================================
+    // 15. LOG ACTIVITY
+    // =============================================
     await SystemLog.create({
       action: 'promo_code_redeemed',
       entity: 'Transaction',
@@ -48966,7 +48988,9 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       }
     });
 
-    // 15. EMIT REAL-TIME UPDATE
+    // =============================================
+    // 16. EMIT REAL-TIME UPDATE
+    // =============================================
     const io = req.app.get('io');
     if (io) {
       const { mainUSD, activeUSD, maturedUSD, mainBreakdown, maturedBreakdown } = 
@@ -48998,7 +49022,9 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       });
     }
 
-    // 16. SEND EMAIL NOTIFICATION
+    // =============================================
+    // 17. SEND EMAIL TO USER
+    // =============================================
     const rewardDisplay = promo.rewardType === 'crypto' 
       ? `${rewardValue} ${rewardAsset}`
       : promo.rewardType === 'bonus' || promo.rewardType === 'percentage'
@@ -49009,7 +49035,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
                           walletType === 'matured' ? 'Matured Wallet' : 
                           walletType.charAt(0).toUpperCase() + walletType.slice(1) + ' Wallet';
 
-    const emailHtml = `
+    const userEmailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
         <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
           <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
@@ -49030,9 +49056,13 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           </div>
           
           <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-          <p style="color: #333333; line-height: 1.6;">You have successfully redeemed the promo code <strong>${promo.code}</strong>!</p>
+          <p style="color: #333333; line-height: 1.6;">We are pleased to confirm that you have successfully redeemed the promo code <strong>${promo.code}</strong>. The reward has been credited to your account.</p>
           
           <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+              <div style="font-weight: bold; font-size: 18px; color: #10B981;">+ ${rewardDisplay}</div>
+            </div>
+            
             <table style="width: 100%; border-collapse: collapse;">
               <tr style="border-bottom: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Transaction Type:</strong></td>
@@ -49068,6 +49098,10 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
                 <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
                 <td style="padding: 8px 0; text-align: right; font-size: 11px;">${transactionReference}</td>
               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
+              </tr>
             </table>
           </div>
           
@@ -49099,10 +49133,131 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
       from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
       to: user.email,
       subject: `🎉 Promo Bonus Credited - ₿itHash Capital`,
-      html: emailHtml
+      html: userEmailHtml
     });
 
-    // 17. RETURN SUCCESS RESPONSE
+    // =============================================
+    // 18. SEND ADMIN NOTIFICATION
+    // =============================================
+    const adminEmailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+        </div>
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
+              </svg>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
+                <path d="M8 12L11 15L16 9" stroke="#F7A600" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">🎉 Promo Code Redeemed!</h2>
+            <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} successfully redeemed a promo code</p>
+          </div>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>User:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Email:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${user.email}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Promo Code:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; color: #F7A600;">${promo.code}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Reward Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right; text-transform: capitalize;">${promo.rewardType}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Reward Value:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${rewardDisplay}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${walletDisplay}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Applied to Deposit:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-weight: bold;">${finalDepositAmount.toFixed(8)} ${finalDepositAsset.toUpperCase()}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Deposit USD Value:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">$${depositUSDValue.toFixed(2)}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Promo Used Count:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${promo.usedCount} / ${promo.maxUses}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Transaction Reference:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 11px;">${transactionReference}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Redeemed At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${deviceInfo.ip}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Location:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${deviceInfo.location || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Device:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${deviceInfo.device || 'Unknown'}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Reward Details</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">${rewardDescription}</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/admin/promos/${promo._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Promo Details</a>
+            <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #3B82F6; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-left: 12px;">View User Profile</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${new Date().toLocaleString()}</p>
+        </div>
+        
+        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+          </p>
+        </div>
+      </div>
+    `;
+
+    await supportTransporter.sendMail({
+      from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+      to: 'thieretw@gmail.com',
+      subject: `🎉 Promo Code Redeemed: ${user.firstName} ${user.lastName} used ${promo.code}`,
+      html: adminEmailHtml
+    });
+
+    // =============================================
+    // 19. RETURN SUCCESS RESPONSE (NO EMOJIS)
+    // =============================================
     const response = {
       status: 'success',
       success: true,
@@ -49127,7 +49282,8 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           asset: transaction.asset,
           method: transaction.method,
           type: transaction.type,
-          status: transaction.status
+          status: transaction.status,
+          createdAt: transaction.createdAt
         },
         rewardDescription: rewardDescription,
         promoCode: promo.code,
@@ -49135,8 +49291,12 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
           id: recentDeposit._id,
           asset: finalDepositAsset,
           amount: finalDepositAmount,
-          usdValue: depositUSDValue
-        }
+          usdValue: depositUSDValue,
+          createdAt: recentDeposit.createdAt
+        },
+        walletType: walletType,
+        usedCount: promo.usedCount,
+        maxUses: promo.maxUses
       }
     };
 
@@ -49147,6 +49307,7 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     console.log(`   Wallet: ${walletType}`);
     console.log(`   Applied to Deposit: ${recentDeposit._id}`);
     console.log(`   Transaction: ${transactionReference}`);
+    console.log(`   Admin notification sent to thieretw@gmail.com`);
 
     res.status(200).json(response);
 
@@ -49180,7 +49341,6 @@ app.post('/api/promos/redeem', protect, async (req, res) => {
     });
   }
 });
-
 
 
 
