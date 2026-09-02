@@ -45690,6 +45690,13 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 
 
 
+
+
+
+
+
+
+
 // =============================================
 // MINING STATISTICS - SINGLE SOURCE OF TRUTH (REDIS)
 // =============================================
@@ -45723,8 +45730,8 @@ setTimeout(async () => {
 const MINING_CONFIG = {
     // Hashpower range (PH/s) - WHAT THE FRONTEND DISPLAYS
     hashrate: {
-        min: 2000,   // 2,000 PH/s
-        max: 15000   // 15,000 PH/s
+        min: 20000,   // 20,000 PH/s
+        max: 150000   // 150,000 PH/s
     },
     // BTC rewards range per day
     btcRewards: {
@@ -45733,10 +45740,10 @@ const MINING_CONFIG = {
     },
     // Capacity range (TH/s) - LOGICALLY CONSISTENT with PH/s
     // 1 PH/s = 1,000 TH/s
-    // So 2,000 PH/s = 2,000,000 TH/s and 15,000 PH/s = 15,000,000 TH/s
+    // So 20,000 PH/s = 20,000,000 TH/s and 150,000 PH/s = 150,000,000 TH/s
     capacity: {
-        min: 2000000,    // 2,000,000 TH/s (matches 2,000 PH/s)
-        max: 15000000    // 15,000,000 TH/s (matches 15,000 PH/s)
+        min: 20000000,    // 20,000,000 TH/s (matches 20,000 PH/s)
+        max: 150000000    // 150,000,000 TH/s (matches 150,000 PH/s)
     },
     // Uptime range (%)
     uptime: {
@@ -46188,25 +46195,6 @@ console.log(`   - BTC rewards range: ${MINING_CONFIG.btcRewards.min}-${MINING_CO
 console.log(`   - Uptime range: ${MINING_CONFIG.uptime.min}%-${MINING_CONFIG.uptime.max}%`);
 console.log(`   - Formula: Capacity (TH/s) = Hashrate (PH/s) × 1,000`);
 console.log('🗑️ Redis will be cleared on startup');
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
