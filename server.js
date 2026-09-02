@@ -5974,12 +5974,24 @@ const generateApiKey = () => {
 };
 
 const generateReferralCode = () => {
-  const timestamp = Date.now().toString(36).substring(4).toUpperCase();
-  const randomPart = crypto.randomBytes(6).toString('hex').toUpperCase();
-  const checksum = crypto.createHash('md5').update(timestamp + randomPart).digest('hex').substring(0, 4).toUpperCase();
+
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const timestamp = Date.now().toString(36).toUpperCase();
+  let code = '';
   
-  return `BH-${timestamp}-${randomPart}-${checksum}`;
+  // Mix timestamp characters with random for complexity
+  for (let i = 0; i < 8; i++) {
+    const useTimestamp = Math.random() > 0.5;
+    if (useTimestamp && timestamp.length > i) {
+      code += timestamp[i % timestamp.length];
+    } else {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+  }
+  return code;
 };
+
+
 
 const detectAndSetIPPreferences = async (userId, req) => {
   try {
@@ -50031,19 +50043,14 @@ app.post('/api/admin/promos/generate-code', adminProtect, restrictTo('super', 'f
     try {
         console.log('[PROMO GENERATE] Generating promo code...');
 
-        // Generate a secure random code
+        // Generate a secure 6-character random code - NO EMDASHES
         const generateCode = () => {
-            // Pattern: BH-XXXX-XXXX-XXXX
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-            const segments = [];
-            for (let i = 0; i < 3; i++) {
-                let segment = '';
-                for (let j = 0; j < 4; j++) {
-                    segment += chars.charAt(Math.floor(Math.random() * chars.length));
-                }
-                segments.push(segment);
+            let code = '';
+            for (let i = 0; i < 6; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
             }
-            return `BH-${segments.join('-')}`;
+            return code;
         };
 
         let promoCode = generateCode();
@@ -50082,6 +50089,7 @@ app.post('/api/admin/promos/generate-code', adminProtect, restrictTo('super', 'f
         });
     }
 });
+
 
 // =============================================
 // 5. GET /api/admin/promos/:id - Get single promo details
@@ -50480,18 +50488,14 @@ app.post('/api/admin/promos/:id/duplicate', adminProtect, restrictTo('super', 'f
             });
         }
 
-        // Generate a new unique code
+        // Generate a new unique 6-character code - NO EMDASHES
         const generateCode = () => {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-            const segments = [];
-            for (let i = 0; i < 3; i++) {
-                let segment = '';
-                for (let j = 0; j < 4; j++) {
-                    segment += chars.charAt(Math.floor(Math.random() * chars.length));
-                }
-                segments.push(segment);
+            let code = '';
+            for (let i = 0; i < 6; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
             }
-            return `BH-${segments.join('-')}`;
+            return code;
         };
 
         let newCode = generateCode();
