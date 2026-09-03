@@ -12727,6 +12727,15 @@ app.post('/api/auth/verify-otp', [
 
 
 
+
+
+
+
+
+
+
+
+
 // =============================================
 // 1. GET NONCE - GENERATES COMPLETE CHALLENGE
 // =============================================
@@ -14142,6 +14151,9 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
             `;
         }
 
+        // =============================================
+        // FIXED: Use the SAME header and footer as other emails
+        // =============================================
         const brandHeader = `
             <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
                 <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
@@ -14288,23 +14300,6 @@ async function sendAdminWeb3SignupNotification(user, web3User, req) {
         console.error('Failed to send admin Web3 signup notification:', err);
     }
 }
-
-// =============================================
-// All other endpoints remain unchanged
-// =============================================
-// The rest of the file continues with all other routes and functionality
-// (withdrawals, deposits, investments, etc.) - they remain exactly as they were
-
-
-
-
-
-
-
-
-
-
-
 
 
 
