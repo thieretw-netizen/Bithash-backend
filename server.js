@@ -41555,6 +41555,8 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, restrictTo('supe
     }
 });
 
+
+
 // =============================================
 // 5. GET /api/admin/wallet-management/wallets - Wallet Addresses
 // =============================================
@@ -41670,19 +41672,27 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
                 status: 'completed'
             }).sort({ createdAt: -1 });
 
+            // =============================================
+            // ✅ CRITICAL: Format response EXACTLY as frontend expects
+            // The frontend expects 'user' field with populated data, not 'userId'
+            // =============================================
+            const userData = wallet.userId ? {
+                _id: wallet.userId._id,
+                firstName: wallet.userId.firstName || '',
+                lastName: wallet.userId.lastName || '',
+                email: wallet.userId.email || '',
+                fullName: `${wallet.userId.firstName || ''} ${wallet.userId.lastName || ''}`.trim() || 'N/A'
+            } : null;
+
             return {
                 _id: wallet._id,
                 address: wallet.address,
                 network: platformWallet.getNetworkName(wallet.asset),
                 coin: wallet.asset.toUpperCase(),
                 // =============================================
-                // ✅ CRITICAL: Shows which user is assigned to this wallet
+                // ✅ CRITICAL: Use 'user' field (not 'userId') for frontend compatibility
                 // =============================================
-                assignedUser: wallet.userId ? {
-                    _id: wallet.userId._id,
-                    name: `${wallet.userId.firstName} ${wallet.userId.lastName}`,
-                    email: wallet.userId.email
-                } : null,
+                user: userData,
                 userId: wallet.userId?._id || null,
                 label: wallet.label || null,
                 generatedDate: wallet.createdAt,
@@ -41692,7 +41702,13 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
                 lastDeposit: lastDeposit?.createdAt || null,
                 lastActivity: lastActivity?.createdAt || null,
                 status: wallet.isActive ? 'active' : 'inactive',
-                derivationPath: wallet.derivationPath
+                derivationPath: wallet.derivationPath,
+                // Additional fields for completeness
+                asset: wallet.asset,
+                createdAt: wallet.createdAt,
+                expiresAt: wallet.expiresAt,
+                isActive: wallet.isActive,
+                lastUsedAt: wallet.lastUsedAt || null
             };
         }));
 
@@ -41704,7 +41720,9 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
                     currentPage: page,
                     totalPages: totalPages,
                     totalItems: total,
-                    itemsPerPage: limit
+                    itemsPerPage: limit,
+                    hasNextPage: page < totalPages,
+                    hasPrevPage: page > 1
                 }
             }
         };
@@ -41727,6 +41745,9 @@ app.get('/api/admin/wallet-management/wallets', adminProtect, restrictTo('super'
         console.log(`[WALLET ADDRESSES] Completed in ${duration}ms`);
     }
 });
+
+
+
 
 // =============================================
 // 6. GET /api/admin/wallet-management/transactions - Detailed Transactions
