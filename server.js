@@ -41557,6 +41557,356 @@ app.get('/api/admin/wallet-management/dashboard', adminProtect, restrictTo('supe
 
 
 
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// WITHDRAWAL SEND OTP ENDPOINT - DEDICATED
+// POST /api/auth/withdrawal/send-otp
+// =============================================
+app.post('/api/auth/withdrawal/send-otp', [
+    body('email').isEmail().withMessage('Please provide a valid email')
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            status: 'fail',
+            message: 'Please provide a valid email address'
+        });
+    }
+
+    try {
+        const { email, purpose } = req.body;
+        const originalEmail = email;
+
+        const user = await User.findOne({ email: originalEmail });
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Check for recent OTP attempts
+        const recentOtp = await OTP.findOne({
+            email: originalEmail,
+            type: 'withdrawal',
+            used: false,
+            createdAt: { $gte: new Date(Date.now() - 60 * 1000) }
+        });
+
+        if (recentOtp) {
+            return res.status(429).json({
+                status: 'fail',
+                message: 'Please wait 60 seconds before requesting a new OTP'
+            });
+        }
+
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        await OTP.deleteMany({ email: originalEmail, type: 'withdrawal', used: false });
+
+        await OTP.create({
+            email: originalEmail,
+            otp: otp,
+            type: 'withdrawal',
+            expiresAt: expiresAt,
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown'
+        });
+
+        // Send branded email - MATCHES EXISTING EMAIL BRANDING
+        const brandHeader = `
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+        `;
+
+        const brandFooter = `
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+                    <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+                </p>
+            </div>
+        `;
+
+        const emailHtml = `
+            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+                ${brandHeader}
+                <div style="padding: 30px; background: #FFFFFF;">
+                    <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
+                                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#F7A600" stroke-width="2" fill="none"/>
+                                <circle cx="12" cy="9" r="2.5" stroke="#F7A600" stroke-width="2" fill="none"/>
+                            </svg>
+                        </div>
+                        <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WITHDRAWAL VERIFICATION CODE</h2>
+                        <p style="color: #92400E; font-size: 13px; margin: 0;">Your withdrawal requires verification</p>
+                    </div>
+                    
+                    <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
+                    <p style="color: #333333; line-height: 1.6;">You have initiated a withdrawal request from your ₿itHash Capital account.</p>
+                    
+                    <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; text-align: center; margin: 20px 0;">
+                        <p style="color: #6B7280; font-size: 13px; margin: 0 0 12px 0;">Enter the following verification code to complete your withdrawal:</p>
+                        <div style="background: #FFFFFF; padding: 16px 24px; border-radius: 8px; border: 1px solid #E5E7EB; font-size: 32px; letter-spacing: 10px; font-weight: bold; color: #0B0E11; font-family: 'Inter', monospace; display: inline-block;">
+                            ${otp}
+                        </div>
+                        <p style="color: #6B7280; font-size: 12px; margin-top: 12px;">This code expires in 5 minutes</p>
+                    </div>
+                    
+                    <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                        <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
+                        <p style="color: #78350F; margin: 0; font-size: 14px;">If you did not request this withdrawal, please contact our support team immediately.</p>
+                    </div>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://www.bithashcapital.live/withdraw" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Complete Withdrawal</a>
+                    </div>
+                    
+                    <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
+                </div>
+                ${brandFooter}
+            </div>
+        `;
+
+        const mailTransporter = infoTransporter;
+        await mailTransporter.sendMail({
+            from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+            to: originalEmail,
+            subject: `🔐 Withdrawal Verification Code - ₿itHash Capital`,
+            html: emailHtml
+        });
+
+        console.log(`📧 Withdrawal OTP sent to ${originalEmail}`);
+
+        res.status(200).json({
+            status: 'success',
+            message: 'OTP sent successfully'
+        });
+
+        await logActivity('withdrawal_otp_sent', 'User', user._id, user._id, 'User', req, {
+            email: originalEmail,
+            type: 'withdrawal'
+        });
+
+    } catch (err) {
+        console.error('Send withdrawal OTP error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to send OTP. Please try again.'
+        });
+    }
+});
+
+
+// =============================================
+// WITHDRAWAL VERIFY OTP ENDPOINT - DEDICATED
+// POST /api/auth/withdrawal/verify-otp
+// =============================================
+app.post('/api/auth/withdrawal/verify-otp', [
+    body('email').isEmail().withMessage('Please provide a valid email'),
+    body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            status: 'fail',
+            message: 'Please enter a valid 6-digit OTP code'
+        });
+    }
+
+    try {
+        const { email, otp, withdrawalData } = req.body;
+        const token = req.headers.authorization?.replace('Bearer ', '');
+
+        if (!token) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Authentication required. Please try logging in again.'
+            });
+        }
+
+        let decoded;
+        try {
+            decoded = verifyJWT(token);
+        } catch (err) {
+            return res.status(401).json({
+                status: 'fail',
+                message: 'Session expired. Please try logging in again.'
+            });
+        }
+
+        const user = await User.findById(decoded.id).select('-password');
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        if (user.email !== email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email does not match user account'
+            });
+        }
+
+        const otpRecord = await OTP.findOne({
+            email: email,
+            otp: otp,
+            type: 'withdrawal',
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!otpRecord) {
+            await OTP.updateMany(
+                { email: email, otp: otp, type: 'withdrawal', used: false },
+                { $inc: { attempts: 1 } }
+            );
+
+            const failedAttempts = await OTP.countDocuments({
+                email: email,
+                type: 'withdrawal',
+                used: false,
+                createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+                attempts: { $gte: 5 }
+            });
+
+            if (failedAttempts >= 5) {
+                await SystemLog.create({
+                    action: 'withdrawal_otp_failed_too_many',
+                    entity: 'User',
+                    entityId: user._id,
+                    performedBy: user._id,
+                    performedByModel: 'User',
+                    performedByEmail: user.email,
+                    performedByName: `${user.firstName} ${user.lastName}`,
+                    status: 'failed',
+                    metadata: {
+                        email: email,
+                        failureReason: 'Too many failed OTP attempts',
+                        failedAttempts: failedAttempts
+                    }
+                });
+
+                return res.status(429).json({
+                    status: 'fail',
+                    message: 'Too many failed attempts. Please try again later.'
+                });
+            }
+
+            const expiredOtp = await OTP.findOne({
+                email: email,
+                otp: otp,
+                type: 'withdrawal',
+                used: false,
+                expiresAt: { $lte: new Date() }
+            });
+
+            if (expiredOtp) {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'Verification code has expired. Please request a new one.'
+                });
+            }
+
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid verification code. Please try again.'
+            });
+        }
+
+        // Mark OTP as used
+        otpRecord.used = true;
+        await otpRecord.save();
+
+        // If withdrawalData is provided, store it for processing
+        if (withdrawalData) {
+            // Store in a temporary session or pass through
+            // The withdrawal will be processed by the calling function
+        }
+
+        // Generate final token
+        const finalToken = generateJWT(user._id);
+
+        await SystemLog.create({
+            action: 'withdrawal_otp_verified',
+            entity: 'User',
+            entityId: user._id,
+            performedBy: user._id,
+            performedByModel: 'User',
+            performedByEmail: user.email,
+            performedByName: `${user.firstName} ${user.lastName}`,
+            status: 'success',
+            metadata: {
+                email: email,
+                otpVerified: true,
+                verifiedAt: new Date().toISOString()
+            }
+        });
+
+        res.status(200).json({
+            status: 'success',
+            message: 'OTP verified successfully',
+            token: finalToken,
+            data: {
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email
+                },
+                otpVerified: true
+            }
+        });
+
+    } catch (err) {
+        console.error('Verify withdrawal OTP error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'An error occurred during verification. Please try again.'
+        });
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // 5. GET /api/admin/wallet-management/wallets - Wallet Addresses
 // =============================================
