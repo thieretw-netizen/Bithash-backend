@@ -20101,181 +20101,105 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
+
 // =============================================
-// BITCOIN CLOUD MINING CONTRACTS ENDPOINT
+// CLOUD MINING HASHRATE PLANS ENDPOINT
 // =============================================
 
 app.get('/api/plans', async (req, res) => {
     try {
         // =============================================
-        // 1. FETCH ACTIVE MINING CONTRACTS
+        // 1. FETCH MINING CONTRACTS FROM DATABASE
         // =============================================
-        //
-        // IMPORTANT:
-        // The database remains the single source of truth.
-        // No plan names, tiers, colors, features, prices,
-        // hashrates or contract characteristics are invented
-        // by this endpoint.
-        //
         const plans = await Plan.find({ isActive: true }).lean();
-
+        
         if (!plans || plans.length === 0) {
             return res.status(200).json({
                 status: 'success',
                 data: {
                     plans: [],
                     marketContext: null,
-                    userContext: null,
-                    totalPlans: 0
+                    userContext: null
                 }
             });
         }
 
         // =============================================
-        // 2. GET REAL-TIME BITCOIN PRICE
+        // 2. GET REAL-TIME BTC PRICE
         // =============================================
-
         let btcPrice = 0;
-
         try {
             const btcPriceResult = await getRealTimeBitcoinPrice();
-            btcPrice = Number(btcPriceResult) || 0;
+            btcPrice = btcPriceResult || 0;
         } catch (priceErr) {
-            console.error(
-                'Failed to fetch BTC price:',
-                priceErr.message
-            );
+            console.error('Failed to fetch BTC price:', priceErr.message);
         }
 
         // =============================================
-        // 3. GET USER CONTEXT
+        // 3. GET USER CONTEXT (if logged in)
         // =============================================
-
         let userContext = null;
-
         let isLoggedIn = false;
+        let mainBalanceUSD = 0;
+        let maturedBalanceUSD = 0;
         let kycVerified = false;
         let hasRecentTransaction = false;
 
-        let mainBalanceUSD = 0;
-        let maturedBalanceUSD = 0;
-
-        const token =
-            req.headers.authorization?.split(' ')[1] ||
-            req.cookies?.jwt;
-
+        const token = req.headers.authorization?.split(' ')[1] || req.cookies.jwt;
+        
         if (token) {
             try {
                 const decoded = verifyJWT(token);
-
                 const user = await User.findById(decoded.id)
-                    .select(
-                        'balances kycStatus firstName lastName email isVerified'
-                    );
-
+                    .select('balances kycStatus firstName lastName email isVerified');
+                
                 if (user) {
                     isLoggedIn = true;
-
-                    // ---------------------------------------------
-                    // KYC STATUS
-                    // ---------------------------------------------
-
+                    
                     if (user.kycStatus) {
-                        kycVerified =
-                            user.kycStatus.identity === 'verified' &&
-                            user.kycStatus.address === 'verified' &&
-                            user.kycStatus.facial === 'verified';
+                        kycVerified = user.kycStatus.identity === 'verified' && 
+                                     user.kycStatus.address === 'verified' &&
+                                     user.kycStatus.facial === 'verified';
                     }
-
-                    // ---------------------------------------------
-                    // REAL WALLET BALANCES
-                    // ---------------------------------------------
-
-                    const balances =
-                        await calculateRealWalletBalances(user);
-
-                    mainBalanceUSD =
-                        Number(balances.mainUSD) || 0;
-
-                    maturedBalanceUSD =
-                        Number(balances.maturedUSD) || 0;
-
-                    // ---------------------------------------------
-                    // RECENT TRANSACTION
-                    // ---------------------------------------------
-
+                    
+                    const balances = await calculateRealWalletBalances(user);
+                    mainBalanceUSD = balances.mainUSD || 0;
+                    maturedBalanceUSD = balances.maturedUSD || 0;
+                    
                     const thirtyDaysAgo = new Date();
-
-                    thirtyDaysAgo.setDate(
-                        thirtyDaysAgo.getDate() - 30
-                    );
-
-                    const recentTx =
-                        await Transaction.findOne({
-                            user: user._id,
-                            type: {
-                                $in: [
-                                    'deposit',
-                                    'withdrawal'
-                                ]
-                            },
-                            status: 'completed',
-                            createdAt: {
-                                $gte: thirtyDaysAgo
-                            }
-                        });
-
-                    hasRecentTransaction = Boolean(recentTx);
-
-                    // ---------------------------------------------
-                    // USER CONTEXT
-                    // ---------------------------------------------
-
+                    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                    const recentTx = await Transaction.findOne({
+                        user: user._id,
+                        type: { $in: ['deposit', 'withdrawal'] },
+                        status: 'completed',
+                        createdAt: { $gte: thirtyDaysAgo }
+                    });
+                    hasRecentTransaction = !!recentTx;
+                    
                     userContext = {
                         isLoggedIn: true,
-
                         firstName: user.firstName,
                         lastName: user.lastName,
                         email: user.email,
-
-                        isVerified:
-                            user.isVerified || false,
-
-                        kycVerified,
-
+                        isVerified: user.isVerified || false,
+                        kycVerified: kycVerified,
                         mainBalance: {
                             usd: mainBalanceUSD
                         },
-
                         maturedBalance: {
                             usd: maturedBalanceUSD
                         },
-
                         totalPortfolio: {
-                            usd:
-                                mainBalanceUSD +
-                                maturedBalanceUSD
+                            usd: mainBalanceUSD + maturedBalanceUSD
                         },
-
-                        hasRecentTransaction,
-
-                        // This is an eligibility capability,
-                        // not a visual plan property.
+                        hasRecentTransaction: hasRecentTransaction,
                         canRent: true
                     };
                 }
-
             } catch (authErr) {
-                console.warn(
-                    'Auth token invalid for plans endpoint:',
-                    authErr.message
-                );
+                console.warn('Auth token invalid for plans endpoint:', authErr.message);
             }
         }
-
-        // =============================================
-        // 4. DEFAULT USER CONTEXT
-        // =============================================
 
         if (!userContext) {
             userContext = {
@@ -20283,364 +20207,212 @@ app.get('/api/plans', async (req, res) => {
                 canRent: false,
                 kycVerified: false,
                 hasRecentTransaction: false,
-
-                mainBalance: {
-                    usd: 0
-                },
-
-                maturedBalance: {
-                    usd: 0
-                },
-
-                totalPortfolio: {
-                    usd: 0
-                }
+                mainBalance: { usd: 0 },
+                maturedBalance: { usd: 0 },
+                totalPortfolio: { usd: 0 }
             };
         }
 
         // =============================================
-        // 5. BUILD MINING CONTRACT DATA
+        // 4. BUILD CONTRACT DATA
         // =============================================
-        //
-        // IMPORTANT:
-        //
-        // DO NOT create subscription tiers here.
-        //
-        // The database owns:
-        // - name
-        // - description
-        // - price limits
-        // - percentage
-        // - duration
-        // - hashrate
-        // - features
-        // - and every other contract property.
-        //
-        // The endpoint only calculates derived financial
-        // values that depend on the current BTC market price
-        // and user eligibility.
-        //
-
         const enhancedPlans = plans.map((plan) => {
-
-            // ---------------------------------------------
-            // PRESERVE DATABASE VALUES
-            // ---------------------------------------------
-
-            const minAmountUSD =
-                Number(plan.minAmount) || 0;
-
-            const maxAmountUSD =
-                Number(plan.maxAmount) || 0;
-
-            const percentage =
-                Number(plan.percentage) || 0;
-
-            const durationHours =
-                Number(plan.duration) || 0;
-
-            const hashrate =
-                Number(plan.hashrate) || 0;
-
-            // ---------------------------------------------
-            // BTC CONVERSION
-            // ---------------------------------------------
-
-            const minAmountBTC =
-                btcPrice > 0
-                    ? minAmountUSD / btcPrice
-                    : 0;
-
-            const maxAmountBTC =
-                btcPrice > 0
-                    ? maxAmountUSD / btcPrice
-                    : 0;
-
-            // ---------------------------------------------
-            // CONTRACT DURATION
-            // ---------------------------------------------
-
-            const durationDays =
-                durationHours > 0
-                    ? durationHours / 24
-                    : 0;
-
-            const dailyMiningPercentage =
-                durationDays > 0
-                    ? percentage / durationDays
-                    : percentage;
-
-            // ---------------------------------------------
-            // DERIVED MINING ESTIMATES
-            // ---------------------------------------------
-
-            const dailyMiningMin =
-                minAmountUSD *
-                (dailyMiningPercentage / 100);
-
-            const dailyMiningMax =
-                maxAmountUSD *
-                (dailyMiningPercentage / 100);
-
-            const monthlyMiningMin =
-                dailyMiningMin * 30;
-
-            const monthlyMiningMax =
-                dailyMiningMax * 30;
-
-            const annualMiningMin =
-                dailyMiningMin * 365;
-
-            const annualMiningMax =
-                dailyMiningMax * 365;
-
-            const dailyMiningBTC =
-                btcPrice > 0
-                    ? dailyMiningMin / btcPrice
-                    : 0;
-
-            // ---------------------------------------------
-            // RENT ELIGIBILITY
-            // ---------------------------------------------
-
+            const minAmountUSD = plan.minAmount || 0;
+            const maxAmountUSD = plan.maxAmount || 0;
+            const percentage = plan.percentage || 0;
+            const durationHours = plan.duration || 0;
+            const hashrate = plan.hashrate || 0;
+            const planName = plan.name || 'Mining Contract';
+            const planDescription = plan.description || `${planName} SHA-256 ASIC mining contract`;
+            
+            const minAmountBTC = btcPrice > 0 ? minAmountUSD / btcPrice : 0;
+            const maxAmountBTC = btcPrice > 0 ? maxAmountUSD / btcPrice : 0;
+            
+            const durationDays = durationHours / 24;
+            const dailyMiningPercentage = durationDays > 0 ? percentage / durationDays : percentage;
+            
+            const dailyMiningMin = minAmountUSD * (dailyMiningPercentage / 100);
+            const dailyMiningMax = maxAmountUSD * (dailyMiningPercentage / 100);
+            const monthlyMiningMin = dailyMiningMin * 30;
+            const monthlyMiningMax = dailyMiningMax * 30;
+            const annualMiningMin = dailyMiningMin * 365;
+            const annualMiningMax = dailyMiningMax * 365;
+            
+            const dailyMiningBTC = btcPrice > 0 ? dailyMiningMin / btcPrice : 0;
+            
             let canRent = false;
-
             let buttonState = 'login';
             let buttonText = 'Login to Rent Hashrate';
-            let buttonTooltip =
-                'Please login to rent mining hashrate';
-
+            let buttonTooltip = 'Please login to rent mining hashrate';
+            
             if (isLoggedIn && userContext) {
-
                 if (!kycVerified) {
-
                     buttonState = 'kyc_required';
                     buttonText = 'Complete KYC';
-                    buttonTooltip =
-                        'KYC verification required to rent hashrate';
-
+                    buttonTooltip = 'KYC verification required to rent hashrate';
                 } else if (!hasRecentTransaction) {
-
                     buttonState = 'transaction_required';
                     buttonText = 'Make a Deposit';
-                    buttonTooltip =
-                        'A recent deposit or withdrawal is required';
-
+                    buttonTooltip = 'A recent deposit or withdrawal is required';
                 } else {
-
-                    const totalUserBalance =
-                        Number(
-                            userContext.mainBalance.usd
-                        ) +
-                        Number(
-                            userContext.maturedBalance.usd
-                        );
-
-                    if (
-                        totalUserBalance >=
-                        minAmountUSD
-                    ) {
-
+                    const totalUserBalance = userContext.mainBalance.usd + userContext.maturedBalance.usd;
+                    if (totalUserBalance >= plan.minAmount) {
                         canRent = true;
-
                         buttonState = 'rent';
                         buttonText = 'Rent Hashrate';
-
-                        buttonTooltip =
-                            hashrate > 0
-                                ? `Rent ${hashrate} TH/s mining capacity`
-                                : 'Rent mining capacity';
-
+                        buttonTooltip = `Rent ${hashrate} TH/s mining capacity`;
                     } else {
-
                         buttonState = 'insufficient';
                         buttonText = 'Insufficient Balance';
-
-                        buttonTooltip =
-                            `Minimum $${minAmountUSD.toLocaleString()} required. ` +
-                            `Your balance: $${totalUserBalance.toLocaleString()}`;
+                        buttonTooltip = `Minimum $${plan.minAmount.toLocaleString()} required. Your balance: $${totalUserBalance.toLocaleString()}`;
                     }
                 }
             }
-
-            // =============================================
-            // RETURN DATABASE PLAN + DERIVED DATA
-            // =============================================
-            //
-            // ...plan is intentionally preserved.
-            //
-            // Nothing from the database plan is removed.
-            // Nothing is reclassified into subscription tiers.
-            //
-
+            
+            const planNameLower = planName.toLowerCase();
+            let tierKey = 'standard';
+            let badge = 'Standard';
+            let color = '#2ECC71';
+            let lightColor = '#58D68D';
+            let bgColor = 'rgba(46, 204, 113, 0.12)';
+            let borderColor = 'rgba(46, 204, 113, 0.3)';
+            
+            if (planNameLower.includes('starter') || planNameLower.includes('basic')) {
+                tierKey = 'starter';
+                badge = 'Starter';
+                color = '#4A90D9';
+                lightColor = '#6BA8E8';
+                bgColor = 'rgba(74, 144, 217, 0.12)';
+                borderColor = 'rgba(74, 144, 217, 0.3)';
+            } else if (planNameLower.includes('gold')) {
+                tierKey = 'gold';
+                badge = 'Gold';
+                color = '#F1C40F';
+                lightColor = '#F4D03F';
+                bgColor = 'rgba(241, 196, 15, 0.12)';
+                borderColor = 'rgba(241, 196, 15, 0.3)';
+            } else if (planNameLower.includes('enterprise')) {
+                tierKey = 'enterprise';
+                badge = 'Enterprise';
+                color = '#9B59B6';
+                lightColor = '#AF7AC5';
+                bgColor = 'rgba(155, 89, 182, 0.12)';
+                borderColor = 'rgba(155, 89, 182, 0.3)';
+            } else if (planNameLower.includes('ultimate')) {
+                tierKey = 'ultimate';
+                badge = 'Ultimate';
+                color = '#E74C3C';
+                lightColor = '#EC7063';
+                bgColor = 'rgba(231, 76, 60, 0.12)';
+                borderColor = 'rgba(231, 76, 60, 0.3)';
+            } else if (planNameLower.includes('standard')) {
+                tierKey = 'standard';
+                badge = 'Standard';
+                color = '#2ECC71';
+                lightColor = '#58D68D';
+                bgColor = 'rgba(46, 204, 113, 0.12)';
+                borderColor = 'rgba(46, 204, 113, 0.3)';
+            }
+            
+            const features = [
+                'SHA-256 ASIC mining',
+                '24/7 performance monitoring',
+                'Automatic daily mining rewards',
+                `${hashrate > 0 ? hashrate + ' TH/s hashrate' : 'Premium mining capacity'}`
+            ];
+            
+            if (tierKey === 'gold' || tierKey === 'enterprise' || tierKey === 'ultimate') {
+                features.push('Priority support');
+            }
+            if (tierKey === 'enterprise' || tierKey === 'ultimate') {
+                features.push('Dedicated mining capacity');
+            }
+            if (tierKey === 'ultimate') {
+                features.push('Exclusive bonuses');
+            }
+            
             return {
-                ...plan,
-
                 id: plan._id,
-
-                // -----------------------------------------
-                // GENERIC CONTRACT IDENTITY
-                // -----------------------------------------
-                //
-                // This is not a plan tier.
-                // It tells the frontend what kind of
-                // financial product it is rendering.
-                //
-                contractType: 'bitcoin_cloud_mining',
-
-                contractPresentation: {
-                    category: 'mining_contract',
-                    asset: 'BTC',
-                    industry: 'bitcoin_mining',
-                    infrastructure: 'SHA-256',
-                    visualContext: 'bitcoin_mining_contract'
-                },
-
-                // -----------------------------------------
-                // ORIGINAL DATABASE VALUES
-                // -----------------------------------------
-
+                name: planName,
+                tier: tierKey,
+                badge: badge,
+                color: color,
+                lightColor: lightColor,
+                bgColor: bgColor,
+                borderColor: borderColor,
+                description: planDescription,
                 minAmount: {
                     usd: minAmountUSD,
                     btc: minAmountBTC
                 },
-
                 maxAmount: {
                     usd: maxAmountUSD,
                     btc: maxAmountBTC
                 },
-
-                percentage,
-
+                percentage: percentage,
                 duration: {
                     hours: durationHours,
                     days: durationDays
                 },
-
-                hashrate,
-
-                // -----------------------------------------
-                // PRESERVE DATABASE FEATURES
-                // -----------------------------------------
-                //
-                // If the database has features, return them.
-                // If it does not, return an empty array.
-                //
-                // DO NOT manufacture features here.
-                //
-                features: Array.isArray(plan.features)
-                    ? plan.features
-                    : [],
-
-                // -----------------------------------------
-                // REAL-TIME MINING ESTIMATES
-                // -----------------------------------------
-
+                hashrate: hashrate,
+                features: features,
                 estimatedMining: {
                     daily: {
                         min: dailyMiningMin,
                         max: dailyMiningMax,
-                        minBTC: dailyMiningBTC
+                        minBTC: dailyMiningBTC,
+                        display: `<span style="color: #2ECC71;">$${dailyMiningMin.toFixed(2)} - $${dailyMiningMax.toFixed(2)}</span>`
                     },
-
                     monthly: {
                         min: monthlyMiningMin,
-                        max: monthlyMiningMax
+                        max: monthlyMiningMax,
+                        display: `<span style="color: #2ECC71;">$${monthlyMiningMin.toFixed(2)} - $${monthlyMiningMax.toFixed(2)}</span>`
                     },
-
                     annual: {
                         min: annualMiningMin,
-                        max: annualMiningMax
+                        max: annualMiningMax,
+                        display: `<span style="color: #2ECC71;">$${annualMiningMin.toFixed(2)} - $${annualMiningMax.toFixed(2)}</span>`
                     }
                 },
-
-                // -----------------------------------------
-                // USER ACTION STATE
-                // -----------------------------------------
-
-                buttonState,
-                buttonText,
-                buttonTooltip,
-                canRent
+                buttonState: buttonState,
+                buttonText: buttonText,
+                buttonTooltip: buttonTooltip,
+                canRent: canRent,
+                isPopular: tierKey === 'gold',
+                isBestValue: tierKey === 'standard'
             };
         });
 
         // =============================================
-        // 6. BUILD RESPONSE
+        // 5. BUILD RESPONSE
         // =============================================
-
         const response = {
             status: 'success',
-
             data: {
-
-                // Every active mining contract
-                // remains available to the frontend.
                 plans: enhancedPlans,
-
-                // -----------------------------------------
-                // MARKET CONTEXT
-                // -----------------------------------------
-
                 marketContext: {
-                    btcPrice,
-                    asset: 'BTC',
+                    btcPrice: btcPrice,
                     timestamp: new Date().toISOString()
                 },
-
-                // -----------------------------------------
-                // USER CONTEXT
-                // -----------------------------------------
-
-                userContext,
-
+                userContext: userContext,
                 totalPlans: enhancedPlans.length
             }
         };
 
-        // =============================================
-        // 7. RESPONSE HEADERS
-        // =============================================
-        //
-        // This endpoint contains user-specific information.
-        // Do not publicly cache it.
-        //
-
-        res.set(
-            'Cache-Control',
-            'private, no-store, no-cache, must-revalidate'
-        );
-
-        res.set(
-            'Pragma',
-            'no-cache'
-        );
-
-        res.set(
-            'Expires',
-            '0'
-        );
-
-        return res.status(200).json(response);
+        res.set('Cache-Control', 'public, max-age=60');
+        res.status(200).json(response);
 
     } catch (err) {
-
-        console.error(
-            'Plans endpoint error:',
-            err
-        );
-
-        return res.status(500).json({
+        console.error('Plans endpoint error:', err);
+        res.status(500).json({
             status: 'error',
             message: 'Failed to load mining contracts',
-
-            error:
-                process.env.NODE_ENV === 'development'
-                    ? err.message
-                    : undefined
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
         });
     }
 });
+
+
 
 
 
