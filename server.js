@@ -52522,22 +52522,20 @@ startPnLCronJob(io);
 // START MINING STATS JOB WITH WEBSOCKET INTEGRATION
 // =============================================
 
-// Import the mining stats functions
-const miningStats = require('./mining-stats.js'); // Adjust path as needed
+// ✅ FIXED: REMOVED require('./mining-stats.js') - functions are already in this file
+// The mining stats functions (startMiningStatsJob, getCurrentMiningStats, etc.)
+// are defined earlier in this file. Use them directly.
 
 // Initialize mining stats with io instance
 const initializeMiningStats = async () => {
     try {
-        // Start the mining stats job with io instance
-        if (typeof miningStats.startMiningStatsJob === 'function') {
-            await miningStats.startMiningStatsJob(io);
-            console.log('⛏️ Mining stats job started with 2-10 second updates');
-        } else {
-            console.warn('⚠️ miningStats.startMiningStatsJob not found, using fallback');
-            startFallbackMiningStatsInterval();
-        }
+        // Start the mining stats job directly - functions are in this file
+        await startMiningStatsJob();
+        console.log('⛏️ Mining stats job started with 2-10 second updates');
     } catch (err) {
         console.error('❌ Failed to initialize mining stats:', err);
+        // Use fallback with the functions already in this file
+        console.warn('⚠️ Using fallback mining stats interval (10 seconds)');
         startFallbackMiningStatsInterval();
     }
 };
@@ -52547,7 +52545,8 @@ const startFallbackMiningStatsInterval = () => {
     console.warn('⚠️ Using fallback mining stats interval (10 seconds)');
     setInterval(async () => {
         try {
-            const stats = await miningStats.getCurrentMiningStats();
+            // Use the function from this file
+            const stats = await getCurrentMiningStats();
             if (stats && io) {
                 io.emit('mining_stats_update', {
                     hashrate: stats.hashrate,
