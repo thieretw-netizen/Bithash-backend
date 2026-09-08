@@ -46108,15 +46108,39 @@ app.post('/api/admin/wallet-management/treasury/transfer', adminProtect, restric
 
 
 
+
+
+
+
+
 // =============================================
 // MINING STATISTICS - SINGLE SOURCE OF TRUTH (REDIS)
-// WITH REAL-TIME RANDOM UPDATES (2-10 SECONDS)
 // =============================================
 
 // Redis keys for mining stats (single source of truth)
 const REDIS_MINING_KEY = 'mining_stats';
 const REDIS_MINING_LAST_UPDATE_KEY = 'mining_stats_last_update';
-const REDIS_MINING_HISTORY_KEY = 'mining_stats_history';
+
+// =============================================
+// CLEAR REDIS - FORCE FRESH START
+// =============================================
+const clearRedisMiningStats = async () => {
+    try {
+        await redis.del(REDIS_MINING_KEY);
+        await redis.del(REDIS_MINING_LAST_UPDATE_KEY);
+        console.log('🗑️ Redis mining stats cleared successfully');
+        return true;
+    } catch (err) {
+        console.error('Error clearing Redis mining stats:', err);
+        return false;
+    }
+};
+
+// Execute clear on startup
+setTimeout(async () => {
+    await clearRedisMiningStats();
+    console.log('🔄 Redis mining stats reset complete - starting fresh');
+}, 1000);
 
 // Mining configuration - SINGLE SOURCE OF TRUTH
 const MINING_CONFIG = {
@@ -46132,6 +46156,7 @@ const MINING_CONFIG = {
     },
     // Capacity range (TH/s) - LOGICALLY CONSISTENT with PH/s
     // 1 PH/s = 1,000 TH/s
+    // So 20,000 PH/s = 20,000,000 TH/s and 150,000 PH/s = 150,000,000 TH/s
     capacity: {
         min: 20000000,    // 20,000,000 TH/s (matches 20,000 PH/s)
         max: 150000000    // 150,000,000 TH/s (matches 150,000 PH/s)
@@ -46148,11 +46173,8 @@ const MINING_CONFIG = {
     },
     // Volatility percentage (for random fluctuations)
     volatility: 0.15, // 15% variance
-    // Update interval (milliseconds) - NOW 2-10 SECONDS
-    updateInterval: {
-        min: 2000,    // 2 seconds minimum
-        max: 10000    // 10 seconds maximum
-    }
+    // Update interval (milliseconds)
+    updateInterval: 1800000 // 30 minutes (1800000 ms)
 };
 
 // Current mining stats cache (in-memory fallback)
@@ -46197,22 +46219,6 @@ const getMiningStatsFromRedis = async () => {
 };
 
 /**
- * Get mining history from Redis
- */
-const getMiningHistoryFromRedis = async () => {
-    try {
-        const historyData = await redis.get(REDIS_MINING_HISTORY_KEY);
-        if (historyData) {
-            return JSON.parse(historyData);
-        }
-        return null;
-    } catch (err) {
-        console.error('Error reading mining history from Redis:', err);
-        return null;
-    }
-};
-
-/**
  * Save mining stats to Redis
  */
 const saveMiningStatsToRedis = async (stats) => {
@@ -46222,23 +46228,6 @@ const saveMiningStatsToRedis = async (stats) => {
         return true;
     } catch (err) {
         console.error('Error saving mining stats to Redis:', err);
-        return false;
-    }
-};
-
-/**
- * Save mining history to Redis
- */
-const saveMiningHistoryToRedis = async (history) => {
-    try {
-        // Keep only last 100 entries
-        if (history.length > 100) {
-            history = history.slice(-100);
-        }
-        await redis.set(REDIS_MINING_HISTORY_KEY, JSON.stringify(history));
-        return true;
-    } catch (err) {
-        console.error('Error saving mining history to Redis:', err);
         return false;
     }
 };
@@ -46255,18 +46244,18 @@ const generateInitialMiningStats = async () => {
         (Math.random() * (MINING_CONFIG.contractsPercentage.max - MINING_CONFIG.contractsPercentage.min));
     const contracts = Math.floor(investorCount * contractPercentage);
     
-    // Generate random hashrate within range
-    const hashrate = MINING_CONFIG.hashrate.min + 
+    // Hashrate random walk - BTC mined increases slowly over time
+    const baseHashrate = MINING_CONFIG.hashrate.min + 
         (Math.random() * (MINING_CONFIG.hashrate.max - MINING_CONFIG.hashrate.min));
+    // Slight upward bias for BTC mined over time
+    const timeMultiplier = 1 + (Math.random() * 0.02); // 0-2% increase
+    const hashrate = baseHashrate * timeMultiplier;
     
     // Calculate BTC rewards based on hashrate (linear interpolation)
     const hashrateRange = MINING_CONFIG.hashrate.max - MINING_CONFIG.hashrate.min;
     const btcRange = MINING_CONFIG.btcRewards.max - MINING_CONFIG.btcRewards.min;
     const normalizedHashrate = (hashrate - MINING_CONFIG.hashrate.min) / hashrateRange;
-    let btcRewards = MINING_CONFIG.btcRewards.min + (normalizedHashrate * btcRange);
-    // Add small random variation
-    btcRewards += (Math.random() - 0.5) * 0.5;
-    btcRewards = Math.max(MINING_CONFIG.btcRewards.min, Math.min(MINING_CONFIG.btcRewards.max, btcRewards));
+    const btcRewards = MINING_CONFIG.btcRewards.min + (normalizedHashrate * btcRange);
     
     // Capacity follows hashrate - LOGICALLY CONSISTENT (1 PH/s = 1,000 TH/s)
     const capacity = hashrate * 1000; // Convert PH/s to TH/s
@@ -46276,7 +46265,7 @@ const generateInitialMiningStats = async () => {
         (Math.random() * (MINING_CONFIG.uptime.max - MINING_CONFIG.uptime.min));
     
     return {
-        hashrate: parseFloat(hashrate.toFixed(1)),
+        hashrate: parseFloat(Math.min(hashrate, MINING_CONFIG.hashrate.max).toFixed(1)),
         btcRewards: parseFloat(btcRewards.toFixed(2)),
         capacity: parseFloat(capacity.toFixed(0)),
         uptime: parseFloat(uptime.toFixed(2)),
@@ -46316,32 +46305,9 @@ const generateInitialChartData = (baseHashrate) => {
 };
 
 /**
- * Generate a random value within a range with realistic volatility
- * Uses random walk with mean reversion
- */
-const generateRandomValue = (currentValue, min, max, volatility) => {
-    // Random walk with mean reversion
-    const mean = (min + max) / 2;
-    const range = max - min;
-    
-    // Random change with volatility
-    let change = (Math.random() - 0.5) * 2 * volatility * range * 0.01;
-    
-    // Add slight upward drift to simulate growth over time
-    const upwardDrift = 0.0005 * range;
-    change += upwardDrift;
-    
-    let newValue = currentValue + change;
-    
-    // Clamp to range
-    newValue = Math.max(min, Math.min(max, newValue));
-    
-    return newValue;
-};
-
-/**
- * Update mining stats with realistic random fluctuations
- * Updates every 2-10 seconds with random values
+ * Update mining stats with realistic fluctuations
+ * BTC mined increases slowly over time
+ * Tied to investor count for contracts
  */
 const updateMiningStats = async () => {
     try {
@@ -46358,47 +46324,37 @@ const updateMiningStats = async () => {
             return currentStats;
         }
         
-        // Apply realistic random fluctuations
+        // Apply realistic fluctuations with slow upward trend for BTC mined
         const volatility = MINING_CONFIG.volatility;
         
-        // =============================================
-        // HASH RATE - Random walk within range (2-10 second updates)
-        // =============================================
-        let newHashrate = generateRandomValue(
-            currentStats.hashrate,
-            MINING_CONFIG.hashrate.min,
-            MINING_CONFIG.hashrate.max,
-            volatility * 0.5  // Lower volatility for 2-10 second updates
-        );
+        // Random walk for hashrate (bounded) - with slight upward bias for BTC mined over time
+        let hashrateChange = (Math.random() - 0.5) * 2 * volatility * MINING_CONFIG.hashrate.max * 0.01;
+        // Add small upward drift (BTC mined increases slowly)
+        const upwardDrift = 0.001 * (MINING_CONFIG.hashrate.max - MINING_CONFIG.hashrate.min);
+        hashrateChange += upwardDrift;
+        let newHashrate = currentStats.hashrate + hashrateChange;
         newHashrate = Math.max(MINING_CONFIG.hashrate.min, Math.min(MINING_CONFIG.hashrate.max, newHashrate));
         
-        // =============================================
-        // BTC REWARDS - Based on hashrate with random variation
-        // =============================================
+        // Calculate BTC rewards based on new hashrate
         const hashrateRange = MINING_CONFIG.hashrate.max - MINING_CONFIG.hashrate.min;
         const btcRange = MINING_CONFIG.btcRewards.max - MINING_CONFIG.btcRewards.min;
         const normalizedHashrate = (newHashrate - MINING_CONFIG.hashrate.min) / hashrateRange;
         let newBtcRewards = MINING_CONFIG.btcRewards.min + (normalizedHashrate * btcRange);
-        // Add random variation
         newBtcRewards += (Math.random() - 0.5) * 0.3;
         newBtcRewards = Math.max(MINING_CONFIG.btcRewards.min, Math.min(MINING_CONFIG.btcRewards.max, newBtcRewards));
         
-        // =============================================
-        // CAPACITY - LOGICALLY CONSISTENT (1 PH/s = 1,000 TH/s)
-        // =============================================
+        // Capacity LOGICALLY CONSISTENT - follows hashrate exactly (1 PH/s = 1,000 TH/s)
         let newCapacity = newHashrate * 1000; // Convert PH/s to TH/s
         // Add small random variation for realism
         newCapacity += (Math.random() - 0.5) * 5000;
         newCapacity = Math.max(MINING_CONFIG.capacity.min, Math.min(MINING_CONFIG.capacity.max, newCapacity));
         
-        // =============================================
-        // UPTIME - Small random fluctuations
-        // =============================================
+        // Uptime with small fluctuations
         let newUptime = currentStats.uptime + (Math.random() - 0.5) * 0.04;
         newUptime = Math.max(MINING_CONFIG.uptime.min, Math.min(MINING_CONFIG.uptime.max, newUptime));
         
         // =============================================
-        // CONTRACTS - ALWAYS 5%-30% of investor count
+        // CRITICAL: Contracts are ALWAYS 5%-30% of investor count
         // =============================================
         const contractPercentage = MINING_CONFIG.contractsPercentage.min + 
             (Math.random() * (MINING_CONFIG.contractsPercentage.max - MINING_CONFIG.contractsPercentage.min));
@@ -46412,11 +46368,10 @@ const updateMiningStats = async () => {
         // =============================================
         // CHART DATA - TIED TO THE SYSTEM
         // =============================================
-        let chartData = currentStats.chartData || generateInitialChartData(newHashrate);
+        const chartData = currentStats.chartData || generateInitialChartData(newHashrate);
         const now = new Date();
         const todayStr = now.toISOString().split('T')[0];
         
-        // Check if we already have today's entry
         const lastPoint = chartData[chartData.length - 1];
         if (lastPoint && lastPoint.date === todayStr) {
             // Update today's value with new hashrate
@@ -46433,9 +46388,6 @@ const updateMiningStats = async () => {
             }
         }
         
-        // =============================================
-        // BUILD UPDATED STATS
-        // =============================================
         const updatedStats = {
             hashrate: parseFloat(newHashrate.toFixed(1)),
             btcRewards: parseFloat(newBtcRewards.toFixed(2)),
@@ -46455,27 +46407,8 @@ const updateMiningStats = async () => {
         miningStatsCache = updatedStats;
         miningStatsLastCacheTime = Date.now();
         
-        // =============================================
-        // SAVE HISTORY
-        // =============================================
-        let history = await getMiningHistoryFromRedis() || [];
-        history.push({
-            timestamp: Date.now(),
-            hashrate: updatedStats.hashrate,
-            btcRewards: updatedStats.btcRewards,
-            capacity: updatedStats.capacity,
-            uptime: updatedStats.uptime,
-            contracts: updatedStats.contracts,
-            contractsPercentage: updatedStats.contractsPercentage,
-            investorCount: updatedStats.investorCount
-        });
-        await saveMiningHistoryToRedis(history);
-        
-        // =============================================
-        // BROADCAST UPDATE VIA WEBSOCKET
-        // =============================================
+        // Broadcast update via WebSocket
         if (io) {
-            // Emit to all connected clients
             io.emit('mining_stats_update', {
                 hashrate: updatedStats.hashrate,
                 btcRewards: updatedStats.btcRewards,
@@ -46486,12 +46419,6 @@ const updateMiningStats = async () => {
                 hashrateChange: updatedStats.hashrateChange,
                 rewardsChange: updatedStats.rewardsChange,
                 investorCount: investorCount,
-                timestamp: Date.now()
-            });
-            
-            // Also emit chart data update
-            io.emit('mining_chart_update', {
-                chartData: updatedStats.chartData,
                 timestamp: Date.now()
             });
         }
@@ -46507,7 +46434,7 @@ const updateMiningStats = async () => {
 };
 
 /**
- * Start the mining stats update job with random interval (2-10 seconds)
+ * Start the mining stats update job (similar to investor growth)
  */
 const startMiningStatsJob = async () => {
     // Initialize stats if they don't exist
@@ -46524,12 +46451,11 @@ const startMiningStatsJob = async () => {
         console.log(`📊 Mining stats loaded from Redis: ${formatNumberWithCommas(stats.hashrate)} PH/s, ${formatNumberWithCommas(stats.capacity)} TH/s`);
     }
     
-    // Schedule the next update with random interval (2-10 seconds)
+    // Schedule the next update
     const scheduleNextUpdate = () => {
-        // Random interval between 2 and 10 seconds (in milliseconds)
-        const minInterval = MINING_CONFIG.updateInterval.min;
-        const maxInterval = MINING_CONFIG.updateInterval.max;
-        const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
+        const baseInterval = MINING_CONFIG.updateInterval;
+        const jitter = Math.floor(Math.random() * 60000) - 30000; // ±30 second jitter
+        const interval = Math.max(60000, baseInterval + jitter);
         
         miningStatsUpdateInterval = setTimeout(async () => {
             try {
@@ -46539,16 +46465,11 @@ const startMiningStatsJob = async () => {
                 console.error('Error in mining stats update job:', err);
                 scheduleNextUpdate();
             }
-        }, randomInterval);
+        }, interval);
     };
     
-    // Start the first update immediately
-    setTimeout(async () => {
-        await updateMiningStats();
-        scheduleNextUpdate();
-    }, 1000);
-    
-    console.log(`🚀 Mining stats job started. Updates every 2-10 seconds with random jitter`);
+    scheduleNextUpdate();
+    console.log(`🚀 Mining stats job started. Updates every ${MINING_CONFIG.updateInterval/60000} minutes with jitter`);
 };
 
 /**
@@ -46587,21 +46508,12 @@ const getCurrentMiningStats = async () => {
     return fallback;
 };
 
-/**
- * Clear Redis mining stats - force fresh start
- */
-const clearRedisMiningStats = async () => {
-    try {
-        await redis.del(REDIS_MINING_KEY);
-        await redis.del(REDIS_MINING_LAST_UPDATE_KEY);
-        await redis.del(REDIS_MINING_HISTORY_KEY);
-        console.log('🗑️ Redis mining stats cleared successfully');
-        return true;
-    } catch (err) {
-        console.error('Error clearing Redis mining stats:', err);
-        return false;
-    }
-};
+// =============================================
+// START MINING STATS JOB ON SERVER STARTUP
+// =============================================
+setTimeout(() => {
+    startMiningStatsJob();
+}, 3000);
 
 // =============================================
 // ENDPOINT 1: GET /api/mining/stats - Mining Performance Strip
@@ -46654,34 +46566,7 @@ app.get('/api/mining/dashboard', async (req, res) => {
 });
 
 // =============================================
-// ENDPOINT 3: GET /api/mining/history - Mining History (for charts)
-// =============================================
-app.get('/api/mining/history', async (req, res) => {
-    try {
-        const history = await getMiningHistoryFromRedis() || [];
-        const limit = parseInt(req.query.limit) || 100;
-        
-        // Return latest history entries
-        const recentHistory = history.slice(-limit);
-        
-        res.status(200).json({
-            status: 'success',
-            data: recentHistory,
-            count: recentHistory.length,
-            total: history.length
-        });
-        
-    } catch (err) {
-        console.error('Error in /api/mining/history:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch mining history'
-        });
-    }
-});
-
-// =============================================
-// ENDPOINT 4: POST /api/mining/reset - Force reset mining stats
+// ENDPOINT 3: POST /api/mining/reset - Force reset mining stats
 // =============================================
 app.post('/api/mining/reset', async (req, res) => {
     try {
@@ -46694,9 +46579,6 @@ app.post('/api/mining/reset', async (req, res) => {
         await saveMiningStatsToRedis(newStats);
         miningStatsCache = newStats;
         miningStatsLastCacheTime = Date.now();
-        
-        // Reset history
-        await saveMiningHistoryToRedis([]);
         
         res.status(200).json({
             status: 'success',
@@ -46717,22 +46599,12 @@ app.post('/api/mining/reset', async (req, res) => {
     }
 });
 
-// =============================================
-// START MINING STATS JOB ON SERVER STARTUP
-// =============================================
-// This should be called after the server is fully initialized
-// and the io object is available
-
-// The startMiningStatsJob function will be called from the main server
-// after the io object is defined
-
 console.log('✅ Mining Statistics endpoints loaded:');
 console.log('   - GET /api/mining/stats');
 console.log('   - GET /api/mining/dashboard');
-console.log('   - GET /api/mining/history');
 console.log('   - POST /api/mining/reset');
 console.log(`   - Active contracts: 5%-30% of investor count (${MINING_CONFIG.contractsPercentage.min*100}%-${MINING_CONFIG.contractsPercentage.max*100}%)`);
-console.log(`   - Update interval: ${MINING_CONFIG.updateInterval.min/1000}-${MINING_CONFIG.updateInterval.max/1000} seconds (random)`);
+console.log(`   - Update interval: ${MINING_CONFIG.updateInterval/60000} minutes`);
 console.log(`   - Hashrate range: ${MINING_CONFIG.hashrate.min}-${MINING_CONFIG.hashrate.max} PH/s`);
 console.log(`   - Capacity range: ${formatNumberWithCommas(MINING_CONFIG.capacity.min)}-${formatNumberWithCommas(MINING_CONFIG.capacity.max)} TH/s (LOGICALLY CONSISTENT with PH/s)`);
 console.log(`   - BTC rewards range: ${MINING_CONFIG.btcRewards.min}-${MINING_CONFIG.btcRewards.max} BTC/day`);
@@ -46740,22 +46612,17 @@ console.log(`   - Uptime range: ${MINING_CONFIG.uptime.min}%-${MINING_CONFIG.upt
 console.log(`   - Formula: Capacity (TH/s) = Hashrate (PH/s) × 1,000`);
 console.log('🗑️ Redis will be cleared on startup');
 
-// =============================================
-// EXPORT MINING FUNCTIONS FOR USE IN MAIN SERVER
-// =============================================
-module.exports = {
-    startMiningStatsJob,
-    stopMiningStatsJob,
-    updateMiningStats,
-    getCurrentMiningStats,
-    clearRedisMiningStats,
-    MINING_CONFIG,
-    REDIS_MINING_KEY,
-    REDIS_MINING_LAST_UPDATE_KEY,
-    REDIS_MINING_HISTORY_KEY,
-    miningStatsCache,
-    miningStatsLastCacheTime
-};
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -52519,60 +52386,6 @@ startRealTimePriceBroadcaster();
 startPnLCronJob(io);
 
 // =============================================
-// START MINING STATS JOB WITH WEBSOCKET INTEGRATION
-// =============================================
-
-// ✅ FIXED: REMOVED require('./mining-stats.js') - functions are already in this file
-// The mining stats functions (startMiningStatsJob, getCurrentMiningStats, etc.)
-// are defined earlier in this file. Use them directly.
-
-// Initialize mining stats with io instance
-const initializeMiningStats = async () => {
-    try {
-        // Start the mining stats job directly - functions are in this file
-        await startMiningStatsJob();
-        console.log('⛏️ Mining stats job started with 2-10 second updates');
-    } catch (err) {
-        console.error('❌ Failed to initialize mining stats:', err);
-        // Use fallback with the functions already in this file
-        console.warn('⚠️ Using fallback mining stats interval (10 seconds)');
-        startFallbackMiningStatsInterval();
-    }
-};
-
-// Fallback interval for mining stats emission
-const startFallbackMiningStatsInterval = () => {
-    console.warn('⚠️ Using fallback mining stats interval (10 seconds)');
-    setInterval(async () => {
-        try {
-            // Use the function from this file
-            const stats = await getCurrentMiningStats();
-            if (stats && io) {
-                io.emit('mining_stats_update', {
-                    hashrate: stats.hashrate,
-                    btcRewards: stats.btcRewards,
-                    capacity: stats.capacity,
-                    uptime: stats.uptime,
-                    contracts: stats.contracts,
-                    contractsPercentage: stats.contractsPercentage,
-                    hashrateChange: stats.hashrateChange || 0,
-                    rewardsChange: stats.rewardsChange || 0,
-                    investorCount: stats.investorCount || 0,
-                    timestamp: Date.now()
-                });
-            }
-        } catch (err) {
-            console.error('Error emitting mining stats:', err);
-        }
-    }, 10000); // 10 seconds for fallback
-};
-
-// Start mining stats after server initialization
-setTimeout(() => {
-    initializeMiningStats();
-}, 5000);
-
-// =============================================
 // GRACEFUL SHUTDOWN
 // =============================================
 const gracefulShutdown = () => {
@@ -52611,6 +52424,5 @@ httpServer.listen(PORT, () => {
   console.log(`📊 Real-time price broadcaster: EVERY 5 SECONDS`);
   console.log(`📈 Investor growth job: ${INITIAL_INVESTOR_COUNT.toLocaleString()} base, +1-49 every 3-120s, max ${DAILY_GROWTH_LIMIT}/day`);
   console.log(`🔐 Socket.IO forced logout: ENABLED`);
-  console.log(`⛏️ Mining stats job: ACTIVE (2-10 second updates)`);
   console.log(`${'='.repeat(60)}\n`);
 });
