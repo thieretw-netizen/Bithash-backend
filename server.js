@@ -20101,7 +20101,6 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-
 // =============================================
 // CLOUD MINING HASHRATE PLANS ENDPOINT
 // =============================================
@@ -20214,7 +20213,7 @@ app.get('/api/plans', async (req, res) => {
         }
 
         // =============================================
-        // 4. BUILD CONTRACT DATA
+        // 4. BUILD CONTRACT DATA - MATCHING HTML EXPECTATIONS
         // =============================================
         const enhancedPlans = plans.map((plan) => {
             const minAmountUSD = plan.minAmount || 0;
@@ -20240,35 +20239,7 @@ app.get('/api/plans', async (req, res) => {
             
             const dailyMiningBTC = btcPrice > 0 ? dailyMiningMin / btcPrice : 0;
             
-            let canRent = false;
-            let buttonState = 'login';
-            let buttonText = 'Login to Rent Hashrate';
-            let buttonTooltip = 'Please login to rent mining hashrate';
-            
-            if (isLoggedIn && userContext) {
-                if (!kycVerified) {
-                    buttonState = 'kyc_required';
-                    buttonText = 'Complete KYC';
-                    buttonTooltip = 'KYC verification required to rent hashrate';
-                } else if (!hasRecentTransaction) {
-                    buttonState = 'transaction_required';
-                    buttonText = 'Make a Deposit';
-                    buttonTooltip = 'A recent deposit or withdrawal is required';
-                } else {
-                    const totalUserBalance = userContext.mainBalance.usd + userContext.maturedBalance.usd;
-                    if (totalUserBalance >= plan.minAmount) {
-                        canRent = true;
-                        buttonState = 'rent';
-                        buttonText = 'Rent Hashrate';
-                        buttonTooltip = `Rent ${hashrate} TH/s mining capacity`;
-                    } else {
-                        buttonState = 'insufficient';
-                        buttonText = 'Insufficient Balance';
-                        buttonTooltip = `Minimum $${plan.minAmount.toLocaleString()} required. Your balance: $${totalUserBalance.toLocaleString()}`;
-                    }
-                }
-            }
-            
+            // Determine plan tier and styling
             const planNameLower = planName.toLowerCase();
             let tierKey = 'standard';
             let badge = 'Standard';
@@ -20276,6 +20247,8 @@ app.get('/api/plans', async (req, res) => {
             let lightColor = '#58D68D';
             let bgColor = 'rgba(46, 204, 113, 0.12)';
             let borderColor = 'rgba(46, 204, 113, 0.3)';
+            let isPopular = false;
+            let isBestValue = false;
             
             if (planNameLower.includes('starter') || planNameLower.includes('basic')) {
                 tierKey = 'starter';
@@ -20284,6 +20257,7 @@ app.get('/api/plans', async (req, res) => {
                 lightColor = '#6BA8E8';
                 bgColor = 'rgba(74, 144, 217, 0.12)';
                 borderColor = 'rgba(74, 144, 217, 0.3)';
+                isBestValue = true;
             } else if (planNameLower.includes('gold')) {
                 tierKey = 'gold';
                 badge = 'Gold';
@@ -20291,6 +20265,7 @@ app.get('/api/plans', async (req, res) => {
                 lightColor = '#F4D03F';
                 bgColor = 'rgba(241, 196, 15, 0.12)';
                 borderColor = 'rgba(241, 196, 15, 0.3)';
+                isPopular = true;
             } else if (planNameLower.includes('enterprise')) {
                 tierKey = 'enterprise';
                 badge = 'Enterprise';
@@ -20312,8 +20287,10 @@ app.get('/api/plans', async (req, res) => {
                 lightColor = '#58D68D';
                 bgColor = 'rgba(46, 204, 113, 0.12)';
                 borderColor = 'rgba(46, 204, 113, 0.3)';
+                isBestValue = true;
             }
             
+            // Build features array matching HTML expectations
             const features = [
                 'SHA-256 ASIC mining',
                 '24/7 performance monitoring',
@@ -20331,60 +20308,115 @@ app.get('/api/plans', async (req, res) => {
                 features.push('Exclusive bonuses');
             }
             
+            // BTC range for display - HTML expects this format
+            const btcRange = btcPrice > 0 
+                ? `${minAmountBTC.toFixed(5)} - ${maxAmountBTC.toFixed(5)} BTC` 
+                : `${minAmountUSD.toFixed(0)} - ${maxAmountUSD.toFixed(0)} USD`;
+            
+            // Daily return display - HTML expects estimatedReturns.daily.display
+            const dailyReturnDisplay = btcPrice > 0 
+                ? `${dailyMiningBTC.toFixed(5)} BTC` 
+                : `$${dailyMiningMin.toFixed(2)} - $${dailyMiningMax.toFixed(2)}`;
+            
+            // Determine button state (matching HTML logic)
+            let buttonState = 'login';
+            let buttonText = 'Login to Rent Hashrate';
+            let buttonTooltip = 'Please login to rent hashrate';
+            let canRent = false;
+            
+            if (isLoggedIn && userContext) {
+                if (!kycVerified) {
+                    buttonState = 'kyc_required';
+                    buttonText = 'Complete KYC';
+                    buttonTooltip = 'KYC verification required to rent hashrate';
+                } else if (!hasRecentTransaction) {
+                    buttonState = 'transaction_required';
+                    buttonText = 'Make a Deposit';
+                    buttonTooltip = 'A recent deposit or withdrawal is required';
+                } else {
+                    const totalUserBalance = userContext.mainBalance.usd + userContext.maturedBalance.usd;
+                    if (totalUserBalance >= minAmountUSD) {
+                        canRent = true;
+                        buttonState = 'rent';
+                        buttonText = 'Rent Hashrate';
+                        buttonTooltip = `Rent ${hashrate} TH/s mining capacity`;
+                    } else {
+                        buttonState = 'insufficient';
+                        buttonText = `Need $${minAmountUSD.toLocaleString()}`;
+                        buttonTooltip = `Required balance for this plan: $${minAmountUSD.toLocaleString()}`;
+                    }
+                }
+            }
+            
+            // =============================================
+            // HTML EXPECTED FORMAT - CRITICAL FIELDS
+            // =============================================
             return {
-                id: plan._id,
+                // These fields are REQUIRED by the HTML
+                id: plan._id.toString(),
                 name: planName,
-                tier: tierKey,
                 badge: badge,
-                color: color,
-                lightColor: lightColor,
-                bgColor: bgColor,
-                borderColor: borderColor,
                 description: planDescription,
-                minAmount: {
-                    usd: minAmountUSD,
-                    btc: minAmountBTC
-                },
-                maxAmount: {
-                    usd: maxAmountUSD,
-                    btc: maxAmountBTC
-                },
+                tier: tierKey,
+                isPopular: isPopular,
+                isBestValue: isBestValue,
+                
+                // Styling fields
+                bgColor: bgColor,
+                color: color,
+                borderColor: borderColor,
+                
+                // Core metrics - HTML uses these directly
                 percentage: percentage,
                 duration: {
-                    hours: durationHours,
-                    days: durationDays
+                    hours: durationHours
                 },
                 hashrate: hashrate,
+                
+                // Investment amounts - HTML expects nested objects
+                minAmount: {
+                    usd: minAmountUSD
+                },
+                maxAmount: {
+                    usd: maxAmountUSD
+                },
+                
+                // BTC range - HTML expects this exact field name
+                btcRange: btcRange,
+                
+                // Features array
                 features: features,
-                estimatedMining: {
+                
+                // Estimated returns - HTML expects this exact structure
+                estimatedReturns: {
                     daily: {
-                        min: dailyMiningMin,
-                        max: dailyMiningMax,
-                        minBTC: dailyMiningBTC,
-                        display: `<span style="color: #2ECC71;">$${dailyMiningMin.toFixed(2)} - $${dailyMiningMax.toFixed(2)}</span>`
-                    },
-                    monthly: {
-                        min: monthlyMiningMin,
-                        max: monthlyMiningMax,
-                        display: `<span style="color: #2ECC71;">$${monthlyMiningMin.toFixed(2)} - $${monthlyMiningMax.toFixed(2)}</span>`
-                    },
-                    annual: {
-                        min: annualMiningMin,
-                        max: annualMiningMax,
-                        display: `<span style="color: #2ECC71;">$${annualMiningMin.toFixed(2)} - $${annualMiningMax.toFixed(2)}</span>`
+                        display: dailyReturnDisplay
                     }
                 },
+                
+                // Video URL - HTML expects this field
+                videoUrl: 'https://media.bithashcapital.live/Cryptocurrency%20Bitcoins%20mining%20in%204K%20UHD%20flat%20animation%20(1).mp4',
+                
+                // Button state fields (for frontend logic)
                 buttonState: buttonState,
                 buttonText: buttonText,
                 buttonTooltip: buttonTooltip,
                 canRent: canRent,
-                isPopular: tierKey === 'gold',
-                isBestValue: tierKey === 'standard'
+                
+                // Additional fields that might be useful
+                lightColor: lightColor,
+                minAmountBTC: minAmountBTC,
+                maxAmountBTC: maxAmountBTC,
+                dailyMining: {
+                    min: dailyMiningMin,
+                    max: dailyMiningMax,
+                    minBTC: dailyMiningBTC
+                }
             };
         });
 
         // =============================================
-        // 5. BUILD RESPONSE
+        // 5. BUILD RESPONSE - MATCHING HTML EXPECTATIONS
         // =============================================
         const response = {
             status: 'success',
@@ -20395,7 +20427,7 @@ app.get('/api/plans', async (req, res) => {
                     timestamp: new Date().toISOString()
                 },
                 userContext: userContext,
-                totalPlans: enhancedPlans.length
+                estimatedReturns: {} // HTML expects this field
             }
         };
 
@@ -20411,7 +20443,6 @@ app.get('/api/plans', async (req, res) => {
         });
     }
 });
-
 
 
 
