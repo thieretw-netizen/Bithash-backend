@@ -51232,7 +51232,325 @@ app.get('/api/admin/promos/export', adminProtect, restrictTo('super', 'finance')
 
 
 
+// =============================================
+// TRACKING ENDPOINT - LOGS ALL ACTIVITIES TO SYSTEMLOG
+// =============================================
 
+// This endpoint receives batched events from the frontend tracker
+// and logs them to the SystemLog collection
+app.post('/api/tracked', async (req, res) => {
+    try {
+        const { events } = req.body;
+        
+        if (!events || !Array.isArray(events) || events.length === 0) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'No events provided'
+            });
+        }
+
+        console.log(`📊 [TRACKER] Received ${events.length} events from frontend`);
+
+        // Map frontend event types to SystemLog actions
+        const eventToActionMap = {
+            'page_view': 'page_view',
+            'page_exit': 'page_exit',
+            'button_click': 'button_click',
+            'link_click': 'link_click',
+            'form_start': 'form_start',
+            'form_submit': 'form_submit',
+            'signup_started': 'signup_started',
+            'signup_submitted': 'signup_submitted',
+            'login_started': 'login_started',
+            'login_submitted': 'login_submitted',
+            'logout': 'logout',
+            'start_mining': 'start_mining',
+            'stop_mining': 'stop_mining',
+            'claim_reward': 'claim_reward',
+            'transaction_started': 'transaction_started',
+            'transaction_completed': 'transaction_completed',
+            'deposit_started': 'deposit_started',
+            'withdrawal_started': 'withdrawal_started',
+            'settings_changed': 'settings_changed'
+        };
+
+        // Map event types to categories
+        const eventToCategoryMap = {
+            'page_view': 'navigation',
+            'page_exit': 'navigation',
+            'button_click': 'navigation',
+            'link_click': 'navigation',
+            'form_start': 'system',
+            'form_submit': 'system',
+            'signup_started': 'authentication',
+            'signup_submitted': 'authentication',
+            'login_started': 'authentication',
+            'login_submitted': 'authentication',
+            'logout': 'authentication',
+            'start_mining': 'investment',
+            'stop_mining': 'investment',
+            'claim_reward': 'investment',
+            'transaction_started': 'financial',
+            'transaction_completed': 'financial',
+            'deposit_started': 'financial',
+            'withdrawal_started': 'financial',
+            'settings_changed': 'profile'
+        };
+
+        // Get IP and user agent from request
+        const ipAddress = getRealClientIP(req);
+        const userAgent = req.headers['user-agent'] || 'Unknown';
+        
+        // Get device info
+        let deviceInfo = {
+            type: 'unknown',
+            os: { name: 'Unknown', version: 'Unknown' },
+            browser: { name: 'Unknown', version: 'Unknown' },
+            platform: 'Unknown',
+            language: req.headers['accept-language'] || 'Unknown',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        };
+
+        try {
+            const rawDeviceInfo = await getUserDeviceInfo(req);
+            deviceInfo = {
+                type: getDeviceType(req),
+                os: {
+                    name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(userAgent) || 'Unknown',
+                    version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
+                },
+                browser: {
+                    name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(userAgent) || 'Unknown',
+                    version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
+                },
+                platform: rawDeviceInfo.device || 'Unknown',
+                language: req.headers['accept-language'] || 'Unknown',
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            };
+        } catch (err) {
+            console.warn('Could not get detailed device info:', err.message);
+        }
+
+        // Get location info
+        let locationInfo = {
+            country: { name: 'Unknown', code: 'UN' },
+            region: { name: 'Unknown', code: 'UN' },
+            city: 'Unknown',
+            postalCode: 'Unknown',
+            latitude: null,
+            longitude: null,
+            timezone: 'Unknown',
+            isp: 'Unknown',
+            exactLocation: false,
+            formatted: 'Unknown'
+        };
+
+        try {
+            const rawDeviceInfo = await getUserDeviceInfo(req);
+            if (rawDeviceInfo.locationDetails) {
+                locationInfo = {
+                    country: {
+                        name: rawDeviceInfo.locationDetails.country || 'Unknown',
+                        code: (rawDeviceInfo.locationDetails.country_code || rawDeviceInfo.locationDetails.country || 'Unknown').substring(0, 2)
+                    },
+                    region: {
+                        name: rawDeviceInfo.locationDetails.region || 'Unknown',
+                        code: rawDeviceInfo.locationDetails.region_code || rawDeviceInfo.locationDetails.region || 'Unknown'
+                    },
+                    city: rawDeviceInfo.locationDetails.city || 'Unknown',
+                    postalCode: rawDeviceInfo.locationDetails.postalCode || 'Unknown',
+                    latitude: rawDeviceInfo.locationDetails.latitude || null,
+                    longitude: rawDeviceInfo.locationDetails.longitude || null,
+                    timezone: rawDeviceInfo.locationDetails.timezone || 'Unknown',
+                    isp: rawDeviceInfo.locationDetails.isp || 'Unknown',
+                    exactLocation: rawDeviceInfo.exactLocation || false,
+                    formatted: rawDeviceInfo.location || 'Unknown'
+                };
+            }
+        } catch (err) {
+            console.warn('Could not get detailed location info:', err.message);
+        }
+
+        // Try to find user by visitor_id or session_id
+        let userId = null;
+        let userEmail = null;
+        let userName = null;
+
+        // Check if we have a session token in the request
+        const authToken = req.headers.authorization?.split(' ')[1] || req.cookies?.jwt;
+        if (authToken) {
+            try {
+                const decoded = verifyJWT(authToken);
+                if (decoded && decoded.id) {
+                    const user = await User.findById(decoded.id).select('_id firstName lastName email');
+                    if (user) {
+                        userId = user._id;
+                        userEmail = user.email;
+                        userName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || userEmail;
+                    }
+                }
+            } catch (err) {
+                // Token invalid - continue without user info
+            }
+        }
+
+        // Process each event and create SystemLog entries
+        const logEntries = [];
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (const event of events) {
+            try {
+                const { event: eventName, page, timestamp, visitor_id, session_id, ...eventData } = event;
+
+                // Map to SystemLog action
+                const action = eventToActionMap[eventName] || eventName;
+                const actionCategory = eventToCategoryMap[eventName] || 'system';
+
+                // Determine entity
+                let entity = 'System';
+                let entityId = null;
+
+                if (eventName === 'page_view' || eventName === 'page_exit') {
+                    entity = 'Page';
+                } else if (eventName === 'button_click' || eventName === 'link_click') {
+                    entity = 'UI';
+                } else if (eventName === 'form_start' || eventName === 'form_submit') {
+                    entity = 'Form';
+                } else if (eventName === 'signup_started' || eventName === 'signup_submitted') {
+                    entity = 'User';
+                } else if (eventName === 'login_started' || eventName === 'login_submitted' || eventName === 'logout') {
+                    entity = 'User';
+                } else if (eventName === 'start_mining' || eventName === 'stop_mining' || eventName === 'claim_reward') {
+                    entity = 'Investment';
+                } else if (eventName === 'transaction_started' || eventName === 'transaction_completed') {
+                    entity = 'Transaction';
+                } else if (eventName === 'deposit_started' || eventName === 'withdrawal_started') {
+                    entity = 'Transaction';
+                } else if (eventName === 'settings_changed') {
+                    entity = 'User';
+                }
+
+                // Determine status
+                let status = 'success';
+                if (eventName === 'page_exit') {
+                    status = 'success';
+                } else if (eventName === 'login_started' || eventName === 'signup_started') {
+                    status = 'pending';
+                } else if (eventName === 'form_start') {
+                    status = 'pending';
+                } else {
+                    status = 'success';
+                }
+
+                // Build metadata
+                const metadata = {
+                    ...eventData,
+                    visitor_id: visitor_id,
+                    session_id: session_id,
+                    page: page || getPage(),
+                    tracked_at: timestamp,
+                    source: 'frontend_tracker'
+                };
+
+                // If the event has user-related data, add it
+                if (eventData.email) {
+                    metadata.email = eventData.email;
+                }
+                if (eventData.userId) {
+                    metadata.userId = eventData.userId;
+                }
+
+                // Create SystemLog entry
+                const logEntry = {
+                    action: action,
+                    entity: entity,
+                    entityId: entityId,
+                    performedBy: userId,
+                    performedByModel: userId ? 'User' : 'System',
+                    performedByEmail: userEmail || eventData.email || 'tracker@anonymous',
+                    performedByName: userName || 'Anonymous User',
+                    status: status,
+                    requestMethod: req.method,
+                    requestPath: req.path,
+                    ip: ipAddress,
+                    userAgent: userAgent,
+                    location: locationInfo.formatted,
+                    deviceType: deviceInfo.type,
+                    os: deviceInfo.os.name,
+                    browser: deviceInfo.browser.name,
+                    countryCode: locationInfo.country.code,
+                    city: locationInfo.city,
+                    region: locationInfo.region.name,
+                    latitude: locationInfo.latitude,
+                    longitude: locationInfo.longitude,
+                    requestId: visitor_id,
+                    sessionId: session_id,
+                    metadata: metadata
+                };
+
+                logEntries.push(logEntry);
+                successCount++;
+
+            } catch (eventError) {
+                console.error('Error processing individual event:', eventError);
+                errorCount++;
+            }
+        }
+
+        // Bulk insert all log entries
+        if (logEntries.length > 0) {
+            try {
+                await SystemLog.insertMany(logEntries);
+                console.log(`✅ [TRACKER] Successfully logged ${logEntries.length} events to SystemLog`);
+            } catch (insertError) {
+                console.error('Error inserting SystemLog entries:', insertError);
+                // Try inserting one by one if bulk fails
+                for (const entry of logEntries) {
+                    try {
+                        await SystemLog.create(entry);
+                    } catch (singleError) {
+                        console.error('Error inserting single SystemLog entry:', singleError);
+                    }
+                }
+            }
+        }
+
+        // Return success response with counts
+        res.status(200).json({
+            status: 'success',
+            message: `${successCount} events logged successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`,
+            data: {
+                received: events.length,
+                logged: successCount,
+                errors: errorCount
+            }
+        });
+
+    } catch (err) {
+        console.error('[TRACKER] Error processing tracking events:', err);
+        
+        // Always return 200 to prevent frontend errors
+        res.status(200).json({
+            status: 'success',
+            message: 'Events received (processing error)',
+            data: {
+                received: req.body?.events?.length || 0,
+                logged: 0,
+                errors: 1
+            }
+        });
+    }
+});
+
+// Also add a simpler health check endpoint for the tracker
+app.get('/api/tracked/health', (req, res) => {
+    res.status(200).json({
+        status: 'success',
+        message: 'Tracking endpoint is healthy',
+        timestamp: new Date().toISOString()
+    });
+});
 
 
 
