@@ -20096,11 +20096,8 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-
-
 // =============================================
-// CLOUD MINING HASHRATE PLANS ENDPOINT - COMPLETE REWRITE
-// Gold plan = Best Value + Most Popular
+// CLOUD MINING HASHRATE PLANS ENDPOINT - REWRITTEN
 // =============================================
 
 app.get('/api/plans', async (req, res) => {
@@ -20215,12 +20212,12 @@ app.get('/api/plans', async (req, res) => {
             const dailyMiningBTC = btcPrice > 0 ? dailyMiningMin / btcPrice : 0;
             
             // =============================================
-            // PLAN TIER CONFIGURATION
-            // Gold plan = Best Value + Most Popular
+            // PLAN TIER DETECTION - UPDATED
             // =============================================
             const planNameLower = planName.toLowerCase();
             let tierKey = 'standard';
             let badge = 'Standard';
+            let displayName = planName; // Default to plan name
             let color = '#2ECC71';
             let lightColor = '#58D68D';
             let bgColor = 'rgba(46, 204, 113, 0.12)';
@@ -20228,51 +20225,65 @@ app.get('/api/plans', async (req, res) => {
             let isPopular = false;
             let isBestValue = false;
             
-            // Starter Plan
-            if (planNameLower.includes('starter') || planNameLower.includes('basic')) {
-                tierKey = 'starter';
-                badge = 'Starter';
-                color = '#4A90D9';
-                lightColor = '#6BA8E8';
-                bgColor = 'rgba(74, 144, 217, 0.12)';
-                borderColor = 'rgba(74, 144, 217, 0.3)';
-                // No badges for Starter
-            } 
-            // =============================================
-            // GOLD PLAN - BEST VALUE + MOST POPULAR
-            // =============================================
-            else if (planNameLower.includes('gold') || planNameLower.includes('premium')) {
+            // Check for Gold plan FIRST - ONLY Gold gets both badges
+            if (planNameLower.includes('gold') || planNameLower.includes('premium')) {
                 tierKey = 'gold';
                 badge = 'Gold';
+                displayName = 'Gold Contract'; // Label format
                 color = '#F1C40F';
                 lightColor = '#F4D03F';
                 bgColor = 'rgba(241, 196, 15, 0.12)';
                 borderColor = 'rgba(241, 196, 15, 0.3)';
-                // =============================================
-                // CRITICAL: Set BOTH flags for Gold plan
-                // =============================================
-                isPopular = true;      // Shows "Most Popular" badge
-                isBestValue = true;    // Shows "Best Value" badge
+                isPopular = true;
+                isBestValue = true; // ONLY Gold is Best Value
             } 
-            // Enterprise Plan
+            // Check for Basic/Starter
+            else if (planNameLower.includes('starter') || planNameLower.includes('basic')) {
+                tierKey = 'starter';
+                badge = 'Basic';
+                displayName = 'Basic Contract';
+                color = '#4A90D9';
+                lightColor = '#6BA8E8';
+                bgColor = 'rgba(74, 144, 217, 0.12)';
+                borderColor = 'rgba(74, 144, 217, 0.3)';
+                isPopular = false;
+                isBestValue = false;
+            } 
+            // Check for Enterprise/Business
             else if (planNameLower.includes('enterprise') || planNameLower.includes('business')) {
                 tierKey = 'enterprise';
                 badge = 'Enterprise';
+                displayName = 'Enterprise Contract';
                 color = '#9B59B6';
                 lightColor = '#AF7AC5';
                 bgColor = 'rgba(155, 89, 182, 0.12)';
                 borderColor = 'rgba(155, 89, 182, 0.3)';
-                // No badges for Enterprise
+                isPopular = false;
+                isBestValue = false;
             } 
-            // Ultimate Plan
+            // Check for Ultimate/Max
             else if (planNameLower.includes('ultimate') || planNameLower.includes('max')) {
                 tierKey = 'ultimate';
                 badge = 'Ultimate';
+                displayName = 'Ultimate Contract';
                 color = '#E74C3C';
                 lightColor = '#EC7063';
                 bgColor = 'rgba(231, 76, 60, 0.12)';
                 borderColor = 'rgba(231, 76, 60, 0.3)';
-                // No badges for Ultimate
+                isPopular = false;
+                isBestValue = false;
+            }
+            // Default for Standard
+            else {
+                tierKey = 'standard';
+                badge = 'Standard';
+                displayName = 'Standard Contract';
+                color = '#2ECC71';
+                lightColor = '#58D68D';
+                bgColor = 'rgba(46, 204, 113, 0.12)';
+                borderColor = 'rgba(46, 204, 113, 0.3)';
+                isPopular = false;
+                isBestValue = false;
             }
             
             // Build features
@@ -20303,9 +20314,7 @@ app.get('/api/plans', async (req, res) => {
                 ? `${dailyMiningBTC.toFixed(5)} BTC` 
                 : `$${dailyMiningMin.toFixed(2)} - $${dailyMiningMax.toFixed(2)}`;
             
-            // =============================================
-            // CRITICAL FIX: Video URL - Ensure this is always provided
-            // =============================================
+            // Video URL - Ensure this is always provided
             const videoUrl = plan.videoUrl && plan.videoUrl.trim() !== '' 
                 ? plan.videoUrl.trim() 
                 : 'https://media.bithashcapital.live/Cryptocurrency%20Bitcoins%20mining%20in%204K%20UHD%20flat%20animation%20(1).mp4';
@@ -20345,12 +20354,12 @@ app.get('/api/plans', async (req, res) => {
             // =============================================
             return {
                 id: plan._id.toString(),
-                name: planName,
+                name: displayName,  // Display as label (e.g., "Gold Contract")
                 badge: badge,
                 description: planDescription,
                 tier: tierKey,
-                isPopular: isPopular,
-                isBestValue: isBestValue,
+                isPopular: isPopular,      // TRUE only for Gold
+                isBestValue: isBestValue,  // TRUE only for Gold
                 bgColor: bgColor,
                 color: color,
                 borderColor: borderColor,
@@ -20372,7 +20381,7 @@ app.get('/api/plans', async (req, res) => {
                         display: dailyReturnDisplay
                     }
                 },
-                videoUrl: videoUrl,  // CRITICAL: This must be included
+                videoUrl: videoUrl,
                 buttonState: buttonState,
                 buttonText: buttonText,
                 buttonTooltip: buttonTooltip,
@@ -20413,7 +20422,6 @@ app.get('/api/plans', async (req, res) => {
         });
     }
 });
-
 
 
 
