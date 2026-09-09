@@ -20098,18 +20098,12 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-
-
-
 // =============================================
-// CLOUD MINING HASHRATE PLANS ENDPOINT
+// CLOUD MINING HASHRATE PLANS ENDPOINT - FIXED
 // =============================================
 
 app.get('/api/plans', async (req, res) => {
     try {
-        // =============================================
-        // 1. FETCH MINING CONTRACTS FROM DATABASE
-        // =============================================
         const plans = await Plan.find({ isActive: true }).lean();
         
         if (!plans || plans.length === 0) {
@@ -20132,9 +20126,7 @@ app.get('/api/plans', async (req, res) => {
             });
         }
 
-        // =============================================
-        // 2. GET REAL-TIME BTC PRICE
-        // =============================================
+        // Get BTC price
         let btcPrice = 0;
         try {
             const btcPriceResult = await getRealTimeBitcoinPrice();
@@ -20143,9 +20135,7 @@ app.get('/api/plans', async (req, res) => {
             console.error('Failed to fetch BTC price:', priceErr.message);
         }
 
-        // =============================================
-        // 3. GET USER CONTEXT (if logged in)
-        // =============================================
+        // Get user context
         let userContext = {
             isLoggedIn: false,
             canRent: false,
@@ -20165,17 +20155,14 @@ app.get('/api/plans', async (req, res) => {
                     .select('balances kycStatus firstName lastName email isVerified');
                 
                 if (user) {
-                    // Calculate KYC status
                     const kycVerified = user.kycStatus?.identity === 'verified' && 
                                      user.kycStatus?.address === 'verified' &&
                                      user.kycStatus?.facial === 'verified';
                     
-                    // Calculate balances
                     const balances = await calculateRealWalletBalances(user);
                     const mainBalanceUSD = balances.mainUSD || 0;
                     const maturedBalanceUSD = balances.maturedUSD || 0;
                     
-                    // Check for recent transaction (30 days)
                     const thirtyDaysAgo = new Date();
                     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                     const recentTx = await Transaction.findOne({
@@ -20193,15 +20180,9 @@ app.get('/api/plans', async (req, res) => {
                         email: user.email,
                         isVerified: user.isVerified || false,
                         kycVerified: kycVerified,
-                        mainBalance: {
-                            usd: mainBalanceUSD
-                        },
-                        maturedBalance: {
-                            usd: maturedBalanceUSD
-                        },
-                        totalPortfolio: {
-                            usd: mainBalanceUSD + maturedBalanceUSD
-                        },
+                        mainBalance: { usd: mainBalanceUSD },
+                        maturedBalance: { usd: maturedBalanceUSD },
+                        totalPortfolio: { usd: mainBalanceUSD + maturedBalanceUSD },
                         hasRecentTransaction: hasRecentTransaction,
                         canRent: kycVerified && hasRecentTransaction
                     };
@@ -20211,11 +20192,8 @@ app.get('/api/plans', async (req, res) => {
             }
         }
 
-        // =============================================
-        // 4. BUILD CONTRACT DATA - MATCHING HTML EXPECTATIONS
-        // =============================================
+        // Enhanced plans
         const enhancedPlans = plans.map((plan) => {
-            // Extract plan data with defaults
             const minAmountUSD = plan.minAmount || 0;
             const maxAmountUSD = plan.maxAmount || 0;
             const percentage = plan.percentage || 0;
@@ -20228,16 +20206,14 @@ app.get('/api/plans', async (req, res) => {
             const minAmountBTC = btcPrice > 0 ? minAmountUSD / btcPrice : 0;
             const maxAmountBTC = btcPrice > 0 ? maxAmountUSD / btcPrice : 0;
             
-            // Calculate daily mining percentages
             const durationDays = durationHours / 24;
             const dailyMiningPercentage = durationDays > 0 ? percentage / durationDays : percentage;
             
-            // Calculate daily mining returns
             const dailyMiningMin = minAmountUSD * (dailyMiningPercentage / 100);
             const dailyMiningMax = maxAmountUSD * (dailyMiningPercentage / 100);
             const dailyMiningBTC = btcPrice > 0 ? dailyMiningMin / btcPrice : 0;
             
-            // Determine plan tier and styling
+            // Determine plan tier
             const planNameLower = planName.toLowerCase();
             let tierKey = 'standard';
             let badge = 'Standard';
@@ -20248,7 +20224,6 @@ app.get('/api/plans', async (req, res) => {
             let isPopular = false;
             let isBestValue = false;
             
-            // Tier detection based on plan name
             if (planNameLower.includes('starter') || planNameLower.includes('basic')) {
                 tierKey = 'starter';
                 badge = 'Starter';
@@ -20279,25 +20254,16 @@ app.get('/api/plans', async (req, res) => {
                 lightColor = '#EC7063';
                 bgColor = 'rgba(231, 76, 60, 0.12)';
                 borderColor = 'rgba(231, 76, 60, 0.3)';
-            } else if (planNameLower.includes('standard')) {
-                tierKey = 'standard';
-                badge = 'Standard';
-                color = '#2ECC71';
-                lightColor = '#58D68D';
-                bgColor = 'rgba(46, 204, 113, 0.12)';
-                borderColor = 'rgba(46, 204, 113, 0.3)';
-                isBestValue = true;
             }
             
-            // Build features array matching HTML expectations
+            // Build features
             const features = [
-                `SHA-256 ASIC mining`,
-                `24/7 performance monitoring`,
-                `Automatic daily mining rewards`,
+                'SHA-256 ASIC mining',
+                '24/7 performance monitoring',
+                'Automatic daily mining rewards',
                 `${hashrate > 0 ? hashrate + ' TH/s hashrate' : 'Premium mining capacity'}`
             ];
             
-            // Add tier-specific features
             if (tierKey === 'gold' || tierKey === 'enterprise' || tierKey === 'ultimate') {
                 features.push('Priority support');
             }
@@ -20308,17 +20274,20 @@ app.get('/api/plans', async (req, res) => {
                 features.push('Exclusive bonuses');
             }
             
-            // BTC range for display - HTML expects this format
+            // BTC range
             const btcRange = btcPrice > 0 
                 ? `${minAmountBTC.toFixed(5)} - ${maxAmountBTC.toFixed(5)} BTC` 
                 : `${minAmountUSD.toFixed(0)} - ${maxAmountUSD.toFixed(0)} USD`;
             
-            // Daily return display - HTML expects estimatedReturns.daily.display
+            // Daily return
             const dailyReturnDisplay = btcPrice > 0 
                 ? `${dailyMiningBTC.toFixed(5)} BTC` 
                 : `$${dailyMiningMin.toFixed(2)} - $${dailyMiningMax.toFixed(2)}`;
             
-            // Determine button state and availability (matching HTML logic)
+            // Video URL - CRITICAL FIX: Ensure this is always provided
+            const videoUrl = plan.videoUrl || 'https://media.bithashcapital.live/Cryptocurrency%20Bitcoins%20mining%20in%204K%20UHD%20flat%20animation%20(1).mp4';
+            
+            // Button state
             let buttonState = 'login';
             let buttonText = 'Login to Rent Hashrate';
             let buttonTooltip = 'Please login to rent hashrate';
@@ -20349,10 +20318,9 @@ app.get('/api/plans', async (req, res) => {
             }
             
             // =============================================
-            // HTML EXPECTED FORMAT - CRITICAL FIELDS
+            // HTML EXPECTED FORMAT - WITH VIDEO URL
             // =============================================
             return {
-                // These fields are REQUIRED by the HTML
                 id: plan._id.toString(),
                 name: planName,
                 badge: badge,
@@ -20360,50 +20328,32 @@ app.get('/api/plans', async (req, res) => {
                 tier: tierKey,
                 isPopular: isPopular,
                 isBestValue: isBestValue,
-                
-                // Styling fields (HTML expects these exact names)
                 bgColor: bgColor,
                 color: color,
                 borderColor: borderColor,
-                
-                // Core metrics - HTML uses these directly
                 percentage: percentage,
                 duration: {
                     hours: durationHours
                 },
                 hashrate: hashrate,
-                
-                // Investment amounts - HTML expects nested objects
                 minAmount: {
                     usd: minAmountUSD
                 },
                 maxAmount: {
                     usd: maxAmountUSD
                 },
-                
-                // BTC range - HTML expects this exact field name
                 btcRange: btcRange,
-                
-                // Features array
                 features: features,
-                
-                // Estimated returns - HTML expects this exact structure
                 estimatedReturns: {
                     daily: {
                         display: dailyReturnDisplay
                     }
                 },
-                
-                // Video URL - HTML expects this field (provide default if not in DB)
-                videoUrl: plan.videoUrl || 'https://media.bithashcapital.live/Cryptocurrency%20Bitcoins%20mining%20in%204K%20UHD%20flat%20animation%20(1).mp4',
-                
-                // Button state fields (for frontend logic)
+                videoUrl: videoUrl,  // CRITICAL: This must be included
                 buttonState: buttonState,
                 buttonText: buttonText,
                 buttonTooltip: buttonTooltip,
                 canRent: canRent,
-                
-                // Additional fields that might be useful
                 lightColor: lightColor,
                 minAmountBTC: minAmountBTC,
                 maxAmountBTC: maxAmountBTC,
@@ -20415,9 +20365,6 @@ app.get('/api/plans', async (req, res) => {
             };
         });
 
-        // =============================================
-        // 5. BUILD RESPONSE - MATCHING HTML EXPECTATIONS
-        // =============================================
         const response = {
             status: 'success',
             data: {
@@ -20431,7 +20378,6 @@ app.get('/api/plans', async (req, res) => {
             }
         };
 
-        // Cache control for performance
         res.set('Cache-Control', 'public, max-age=60');
         res.status(200).json(response);
 
@@ -20444,6 +20390,27 @@ app.get('/api/plans', async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
