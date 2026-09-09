@@ -20118,7 +20118,16 @@ app.get('/api/plans', async (req, res) => {
                 data: {
                     plans: [],
                     marketContext: null,
-                    userContext: null
+                    userContext: {
+                        isLoggedIn: false,
+                        canRent: false,
+                        kycVerified: false,
+                        hasRecentTransaction: false,
+                        mainBalance: { usd: 0 },
+                        maturedBalance: { usd: 0 },
+                        totalPortfolio: { usd: 0 }
+                    },
+                    estimatedReturns: {}
                 }
             });
         }
@@ -20137,14 +20146,17 @@ app.get('/api/plans', async (req, res) => {
         // =============================================
         // 3. GET USER CONTEXT (if logged in)
         // =============================================
-        let userContext = null;
-        let isLoggedIn = false;
-        let mainBalanceUSD = 0;
-        let maturedBalanceUSD = 0;
-        let kycVerified = false;
-        let hasRecentTransaction = false;
+        let userContext = {
+            isLoggedIn: false,
+            canRent: false,
+            kycVerified: false,
+            hasRecentTransaction: false,
+            mainBalance: { usd: 0 },
+            maturedBalance: { usd: 0 },
+            totalPortfolio: { usd: 0 }
+        };
 
-        const token = req.headers.authorization?.split(' ')[1] || req.cookies.jwt;
+        const token = req.headers.authorization?.split(' ')[1] || req.cookies?.jwt;
         
         if (token) {
             try {
@@ -20153,18 +20165,17 @@ app.get('/api/plans', async (req, res) => {
                     .select('balances kycStatus firstName lastName email isVerified');
                 
                 if (user) {
-                    isLoggedIn = true;
+                    // Calculate KYC status
+                    const kycVerified = user.kycStatus?.identity === 'verified' && 
+                                     user.kycStatus?.address === 'verified' &&
+                                     user.kycStatus?.facial === 'verified';
                     
-                    if (user.kycStatus) {
-                        kycVerified = user.kycStatus.identity === 'verified' && 
-                                     user.kycStatus.address === 'verified' &&
-                                     user.kycStatus.facial === 'verified';
-                    }
-                    
+                    // Calculate balances
                     const balances = await calculateRealWalletBalances(user);
-                    mainBalanceUSD = balances.mainUSD || 0;
-                    maturedBalanceUSD = balances.maturedUSD || 0;
+                    const mainBalanceUSD = balances.mainUSD || 0;
+                    const maturedBalanceUSD = balances.maturedUSD || 0;
                     
+                    // Check for recent transaction (30 days)
                     const thirtyDaysAgo = new Date();
                     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                     const recentTx = await Transaction.findOne({
@@ -20173,7 +20184,7 @@ app.get('/api/plans', async (req, res) => {
                         status: 'completed',
                         createdAt: { $gte: thirtyDaysAgo }
                     });
-                    hasRecentTransaction = !!recentTx;
+                    const hasRecentTransaction = !!recentTx;
                     
                     userContext = {
                         isLoggedIn: true,
@@ -20192,7 +20203,7 @@ app.get('/api/plans', async (req, res) => {
                             usd: mainBalanceUSD + maturedBalanceUSD
                         },
                         hasRecentTransaction: hasRecentTransaction,
-                        canRent: true
+                        canRent: kycVerified && hasRecentTransaction
                     };
                 }
             } catch (authErr) {
@@ -20200,22 +20211,11 @@ app.get('/api/plans', async (req, res) => {
             }
         }
 
-        if (!userContext) {
-            userContext = {
-                isLoggedIn: false,
-                canRent: false,
-                kycVerified: false,
-                hasRecentTransaction: false,
-                mainBalance: { usd: 0 },
-                maturedBalance: { usd: 0 },
-                totalPortfolio: { usd: 0 }
-            };
-        }
-
         // =============================================
         // 4. BUILD CONTRACT DATA - MATCHING HTML EXPECTATIONS
         // =============================================
         const enhancedPlans = plans.map((plan) => {
+            // Extract plan data with defaults
             const minAmountUSD = plan.minAmount || 0;
             const maxAmountUSD = plan.maxAmount || 0;
             const percentage = plan.percentage || 0;
@@ -20224,19 +20224,17 @@ app.get('/api/plans', async (req, res) => {
             const planName = plan.name || 'Mining Contract';
             const planDescription = plan.description || `${planName} SHA-256 ASIC mining contract`;
             
+            // Calculate BTC amounts
             const minAmountBTC = btcPrice > 0 ? minAmountUSD / btcPrice : 0;
             const maxAmountBTC = btcPrice > 0 ? maxAmountUSD / btcPrice : 0;
             
+            // Calculate daily mining percentages
             const durationDays = durationHours / 24;
             const dailyMiningPercentage = durationDays > 0 ? percentage / durationDays : percentage;
             
+            // Calculate daily mining returns
             const dailyMiningMin = minAmountUSD * (dailyMiningPercentage / 100);
             const dailyMiningMax = maxAmountUSD * (dailyMiningPercentage / 100);
-            const monthlyMiningMin = dailyMiningMin * 30;
-            const monthlyMiningMax = dailyMiningMax * 30;
-            const annualMiningMin = dailyMiningMin * 365;
-            const annualMiningMax = dailyMiningMax * 365;
-            
             const dailyMiningBTC = btcPrice > 0 ? dailyMiningMin / btcPrice : 0;
             
             // Determine plan tier and styling
@@ -20250,6 +20248,7 @@ app.get('/api/plans', async (req, res) => {
             let isPopular = false;
             let isBestValue = false;
             
+            // Tier detection based on plan name
             if (planNameLower.includes('starter') || planNameLower.includes('basic')) {
                 tierKey = 'starter';
                 badge = 'Starter';
@@ -20258,7 +20257,7 @@ app.get('/api/plans', async (req, res) => {
                 bgColor = 'rgba(74, 144, 217, 0.12)';
                 borderColor = 'rgba(74, 144, 217, 0.3)';
                 isBestValue = true;
-            } else if (planNameLower.includes('gold')) {
+            } else if (planNameLower.includes('gold') || planNameLower.includes('premium')) {
                 tierKey = 'gold';
                 badge = 'Gold';
                 color = '#F1C40F';
@@ -20266,14 +20265,14 @@ app.get('/api/plans', async (req, res) => {
                 bgColor = 'rgba(241, 196, 15, 0.12)';
                 borderColor = 'rgba(241, 196, 15, 0.3)';
                 isPopular = true;
-            } else if (planNameLower.includes('enterprise')) {
+            } else if (planNameLower.includes('enterprise') || planNameLower.includes('business')) {
                 tierKey = 'enterprise';
                 badge = 'Enterprise';
                 color = '#9B59B6';
                 lightColor = '#AF7AC5';
                 bgColor = 'rgba(155, 89, 182, 0.12)';
                 borderColor = 'rgba(155, 89, 182, 0.3)';
-            } else if (planNameLower.includes('ultimate')) {
+            } else if (planNameLower.includes('ultimate') || planNameLower.includes('max')) {
                 tierKey = 'ultimate';
                 badge = 'Ultimate';
                 color = '#E74C3C';
@@ -20292,12 +20291,13 @@ app.get('/api/plans', async (req, res) => {
             
             // Build features array matching HTML expectations
             const features = [
-                'SHA-256 ASIC mining',
-                '24/7 performance monitoring',
-                'Automatic daily mining rewards',
+                `SHA-256 ASIC mining`,
+                `24/7 performance monitoring`,
+                `Automatic daily mining rewards`,
                 `${hashrate > 0 ? hashrate + ' TH/s hashrate' : 'Premium mining capacity'}`
             ];
             
+            // Add tier-specific features
             if (tierKey === 'gold' || tierKey === 'enterprise' || tierKey === 'ultimate') {
                 features.push('Priority support');
             }
@@ -20318,18 +20318,18 @@ app.get('/api/plans', async (req, res) => {
                 ? `${dailyMiningBTC.toFixed(5)} BTC` 
                 : `$${dailyMiningMin.toFixed(2)} - $${dailyMiningMax.toFixed(2)}`;
             
-            // Determine button state (matching HTML logic)
+            // Determine button state and availability (matching HTML logic)
             let buttonState = 'login';
             let buttonText = 'Login to Rent Hashrate';
             let buttonTooltip = 'Please login to rent hashrate';
             let canRent = false;
             
-            if (isLoggedIn && userContext) {
-                if (!kycVerified) {
+            if (userContext.isLoggedIn) {
+                if (!userContext.kycVerified) {
                     buttonState = 'kyc_required';
                     buttonText = 'Complete KYC';
                     buttonTooltip = 'KYC verification required to rent hashrate';
-                } else if (!hasRecentTransaction) {
+                } else if (!userContext.hasRecentTransaction) {
                     buttonState = 'transaction_required';
                     buttonText = 'Make a Deposit';
                     buttonTooltip = 'A recent deposit or withdrawal is required';
@@ -20361,7 +20361,7 @@ app.get('/api/plans', async (req, res) => {
                 isPopular: isPopular,
                 isBestValue: isBestValue,
                 
-                // Styling fields
+                // Styling fields (HTML expects these exact names)
                 bgColor: bgColor,
                 color: color,
                 borderColor: borderColor,
@@ -20394,8 +20394,8 @@ app.get('/api/plans', async (req, res) => {
                     }
                 },
                 
-                // Video URL - HTML expects this field
-                videoUrl: 'https://media.bithashcapital.live/Cryptocurrency%20Bitcoins%20mining%20in%204K%20UHD%20flat%20animation%20(1).mp4',
+                // Video URL - HTML expects this field (provide default if not in DB)
+                videoUrl: plan.videoUrl || 'https://media.bithashcapital.live/Cryptocurrency%20Bitcoins%20mining%20in%204K%20UHD%20flat%20animation%20(1).mp4',
                 
                 // Button state fields (for frontend logic)
                 buttonState: buttonState,
@@ -20427,10 +20427,11 @@ app.get('/api/plans', async (req, res) => {
                     timestamp: new Date().toISOString()
                 },
                 userContext: userContext,
-                estimatedReturns: {} // HTML expects this field
+                estimatedReturns: {}
             }
         };
 
+        // Cache control for performance
         res.set('Cache-Control', 'public, max-age=60');
         res.status(200).json(response);
 
