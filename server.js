@@ -20275,18 +20275,22 @@ app.get('/api/plans', async (req, res) => {
                 features.push('Exclusive bonuses');
             }
             
-            // BTC range
+            // BTC range - EXACT FORMAT HTML EXPECTS
             const btcRange = btcPrice > 0 
                 ? `${minAmountBTC.toFixed(5)} - ${maxAmountBTC.toFixed(5)} BTC` 
                 : `${minAmountUSD.toFixed(0)} - ${maxAmountUSD.toFixed(0)} USD`;
             
-            // Daily return
+            // Daily return - EXACT FORMAT HTML EXPECTS
             const dailyReturnDisplay = btcPrice > 0 
                 ? `${dailyMiningBTC.toFixed(5)} BTC` 
                 : `$${dailyMiningMin.toFixed(2)} - $${dailyMiningMax.toFixed(2)}`;
             
-            // Video URL - CRITICAL FIX: Ensure this is always provided
-            const videoUrl = plan.videoUrl || 'https://media.bithashcapital.live/Cryptocurrency%20Bitcoins%20mining%20in%204K%20UHD%20flat%20animation%20(1).mp4';
+            // =============================================
+            // CRITICAL FIX: Video URL - Ensure this is always provided
+            // =============================================
+            const videoUrl = plan.videoUrl && plan.videoUrl.trim() !== '' 
+                ? plan.videoUrl.trim() 
+                : 'https://media.bithashcapital.live/Cryptocurrency%20Bitcoins%20mining%20in%204K%20UHD%20flat%20animation%20(1).mp4';
             
             // Button state
             let buttonState = 'login';
