@@ -20098,9 +20098,9 @@ app.delete('/api/admin/two-factor', adminProtect, [
 
 
 
-
 // =============================================
-// CLOUD MINING HASHRATE PLANS ENDPOINT - FIXED
+// CLOUD MINING HASHRATE PLANS ENDPOINT - COMPLETE REWRITE
+// Gold plan = Best Value + Most Popular
 // =============================================
 
 app.get('/api/plans', async (req, res) => {
@@ -20214,7 +20214,10 @@ app.get('/api/plans', async (req, res) => {
             const dailyMiningMax = maxAmountUSD * (dailyMiningPercentage / 100);
             const dailyMiningBTC = btcPrice > 0 ? dailyMiningMin / btcPrice : 0;
             
-            // Determine plan tier
+            // =============================================
+            // PLAN TIER CONFIGURATION
+            // Gold plan = Best Value + Most Popular
+            // =============================================
             const planNameLower = planName.toLowerCase();
             let tierKey = 'standard';
             let badge = 'Standard';
@@ -20225,6 +20228,7 @@ app.get('/api/plans', async (req, res) => {
             let isPopular = false;
             let isBestValue = false;
             
+            // Starter Plan
             if (planNameLower.includes('starter') || planNameLower.includes('basic')) {
                 tierKey = 'starter';
                 badge = 'Starter';
@@ -20232,29 +20236,43 @@ app.get('/api/plans', async (req, res) => {
                 lightColor = '#6BA8E8';
                 bgColor = 'rgba(74, 144, 217, 0.12)';
                 borderColor = 'rgba(74, 144, 217, 0.3)';
-                isBestValue = true;
-            } else if (planNameLower.includes('gold') || planNameLower.includes('premium')) {
+                // No badges for Starter
+            } 
+            // =============================================
+            // GOLD PLAN - BEST VALUE + MOST POPULAR
+            // =============================================
+            else if (planNameLower.includes('gold') || planNameLower.includes('premium')) {
                 tierKey = 'gold';
                 badge = 'Gold';
                 color = '#F1C40F';
                 lightColor = '#F4D03F';
                 bgColor = 'rgba(241, 196, 15, 0.12)';
                 borderColor = 'rgba(241, 196, 15, 0.3)';
-                isPopular = true;
-            } else if (planNameLower.includes('enterprise') || planNameLower.includes('business')) {
+                // =============================================
+                // CRITICAL: Set BOTH flags for Gold plan
+                // =============================================
+                isPopular = true;      // Shows "Most Popular" badge
+                isBestValue = true;    // Shows "Best Value" badge
+            } 
+            // Enterprise Plan
+            else if (planNameLower.includes('enterprise') || planNameLower.includes('business')) {
                 tierKey = 'enterprise';
                 badge = 'Enterprise';
                 color = '#9B59B6';
                 lightColor = '#AF7AC5';
                 bgColor = 'rgba(155, 89, 182, 0.12)';
                 borderColor = 'rgba(155, 89, 182, 0.3)';
-            } else if (planNameLower.includes('ultimate') || planNameLower.includes('max')) {
+                // No badges for Enterprise
+            } 
+            // Ultimate Plan
+            else if (planNameLower.includes('ultimate') || planNameLower.includes('max')) {
                 tierKey = 'ultimate';
                 badge = 'Ultimate';
                 color = '#E74C3C';
                 lightColor = '#EC7063';
                 bgColor = 'rgba(231, 76, 60, 0.12)';
                 borderColor = 'rgba(231, 76, 60, 0.3)';
+                // No badges for Ultimate
             }
             
             // Build features
