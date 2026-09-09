@@ -3397,6 +3397,7 @@ const PlanSchema = new mongoose.Schema({
   maxAmount: { type: Number, required: [true, 'Maximum amount is required'] },
     hashrate: { type: Number, default: 0, min: [0, 'Hashrate cannot be negative'] },
   isActive: { type: Boolean, default: true },
+      videoUrl: { type: String, default: '' },
   referralBonus: { type: Number, default: 5, min: [0, 'Bonus cannot be negative'] }
 }, { timestamps: true });
 
