@@ -1,10 +1,8 @@
 const crypto = require('crypto');
 
 const FILES = Object.freeze({
-  'BitHash-Capital-android.apk': 'application/vnd.android.package-archive',
   'BitHash-Capital-windows.exe': 'application/vnd.microsoft.portable-executable',
-  'BitHash-Capital-macos.dmg': 'application/x-apple-diskimage',
-  'BitHash-Capital-ios.ipa': 'application/octet-stream'
+  'BitHash-Capital-macos.dmg': 'application/x-apple-diskimage'
 });
 
 const DOWNLOAD_PREFIX = 'apps/latest/';
@@ -24,7 +22,14 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function buildPresignedUrl({ accountId, bucket, key, accessKeyId, secretAccessKey, expiresIn }) {
+function buildPresignedUrl({
+  accountId,
+  bucket,
+  key,
+  accessKeyId,
+  secretAccessKey,
+  expiresIn
+}) {
   const host = `${accountId}.r2.cloudflarestorage.com`;
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
@@ -48,6 +53,7 @@ function buildPresignedUrl({ accountId, bucket, key, accessKeyId, secretAccessKe
   const canonicalHeaders = `host:${host}\n`;
   const signedHeaders = 'host';
   const payloadHash = 'UNSIGNED-PAYLOAD';
+
   const canonicalRequest = [
     'GET',
     canonicalUri,
@@ -93,12 +99,20 @@ function installAppDownloadRoute(app) {
       R2_SECRET_ACCESS_KEY
     } = process.env;
 
-    if (!R2_ACCOUNT_ID || !R2_BUCKET_NAME || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
+    if (
+      !R2_ACCOUNT_ID ||
+      !R2_BUCKET_NAME ||
+      !R2_ACCESS_KEY_ID ||
+      !R2_SECRET_ACCESS_KEY
+    ) {
       console.error('App download R2 endpoint is not configured');
-      return res.status(503).json({ error: 'Downloads are temporarily unavailable' });
+      return res.status(503).json({
+        error: 'Downloads are temporarily unavailable'
+      });
     }
 
     const key = `${DOWNLOAD_PREFIX}${file}`;
+
     const url = buildPresignedUrl({
       accountId: R2_ACCOUNT_ID,
       bucket: R2_BUCKET_NAME,
@@ -114,8 +128,6 @@ function installAppDownloadRoute(app) {
     res.setHeader('Content-Type', contentType);
     res.setHeader('Location', url);
 
-    // R2 performs the actual file transfer. The backend only authorizes
-    // the request with a short-lived, object-specific signed URL.
     return res.status(302).end();
   }
 
