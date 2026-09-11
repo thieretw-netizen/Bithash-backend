@@ -35,7 +35,7 @@ const WebSocket = require('ws');
 const OpenAI = require('openai');
 const DeviceDetector = require('node-device-detector');
 const DeviceHelper = require('node-device-detector/helper');
-
+const { installAppDownloadRoute } = require('./app-download');
 // =============================================
 // PLATFORM WALLET IMPORTS - COMBINED
 // =============================================
@@ -51557,7 +51557,16 @@ app.get('/api/tracked/health', (req, res) => {
 
 
 
+// ============================================================
+// BitHash App Downloads — Cloudflare R2
+// ============================================================
 
+try {
+    installAppDownloadRoute(app);
+    console.log('✓ App download endpoint registered: GET /api/app-download');
+} catch (error) {
+    console.error('✗ Failed to register app download endpoint:', error);
+}
 
 
 
