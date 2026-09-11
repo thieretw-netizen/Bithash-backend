@@ -2,10 +2,9 @@ const crypto = require('crypto');
 
 const FILES = Object.freeze({
   'BitHash-Capital-android.apk': 'application/vnd.android.package-archive',
-  'BitHash-Capital-android.aab': 'application/octet-stream',
   'BitHash-Capital-windows.exe': 'application/vnd.microsoft.portable-executable',
   'BitHash-Capital-macos.dmg': 'application/x-apple-diskimage',
-  'BitHash-Capital-ios-unsigned.zip': 'application/zip'
+  'BitHash-Capital-ios.ipa': 'application/octet-stream'
 });
 
 const DOWNLOAD_PREFIX = 'apps/latest/';
@@ -79,7 +78,7 @@ function installAppDownloadRoute(app) {
 
   app.__bithashAppDownloadRouteInstalled = true;
 
-  app.get('/api/app-download', (req, res) => {
+  function handleDownload(req, res) {
     const file = typeof req.query?.file === 'string' ? req.query.file : '';
     const contentType = FILES[file];
 
@@ -112,18 +111,16 @@ function installAppDownloadRoute(app) {
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-BitHash-Download', 'r2-presigned');
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Location', url);
 
     // R2 performs the actual file transfer. The backend only authorizes
     // the request with a short-lived, object-specific signed URL.
-    if (req.method === 'HEAD') {
-      res.setHeader('Location', url);
-      res.setHeader('Content-Type', contentType);
-      return res.status(302).end();
-    }
-
-    res.setHeader('Location', url);
     return res.status(302).end();
-  });
+  }
+
+  app.get('/api/app-download', handleDownload);
+  app.head('/api/app-download', handleDownload);
 }
 
 module.exports = { installAppDownloadRoute };
