@@ -4,6 +4,7 @@
 // missing bodies before the application routes execute.
 
 const express = require('express');
+const http = require('http');
 
 const originalJson = express.json;
 
@@ -24,3 +25,38 @@ express.json = function bithashSafeJsonParser(...args) {
     });
   };
 };
+
+// Some tracker clients can send an empty POST (no body at all).  The legacy
+// tracker handler assumes req.body exists and throws before Express can reply.
+// Stop only those malformed/empty tracking requests; valid tracking payloads
+// continue through the normal application route unchanged.
+if (!http.__bithashTrackingGuard) {
+  http.__bithashTrackingGuard = true;
+  const originalCreateServer = http.createServer;
+
+  http.createServer = function bithashTrackingSafeServer(requestListener, ...args) {
+    if (typeof requestListener !== 'function') {
+      return originalCreateServer.call(this, requestListener, ...args);
+    }
+
+    const guardedListener = function bithashTrackingGuardedListener(req, res) {
+      const method = String(req.method || '').toUpperCase();
+      const url = String(req.url || '').split('?')[0].toLowerCase();
+      const lengthHeader = req.headers && req.headers['content-length'];
+      const contentLength = lengthHeader == null ? null : Number(lengthHeader);
+      const isEmptyBody = contentLength === 0 || (contentLength == null && !req.headers['transfer-encoding']);
+      const isTrackingRequest = /track|tracking/.test(url);
+
+      if (method === 'POST' && isTrackingRequest && isEmptyBody) {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ success: true, processed: 0 }));
+        return;
+      }
+
+      return requestListener(req, res);
+    };
+
+    return originalCreateServer.call(this, guardedListener, ...args);
+  };
+}
