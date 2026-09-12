@@ -22,6 +22,30 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+function detectPlatform(req) {
+  const headers = req?.headers || {};
+  const userAgent = String(headers['user-agent'] || headers['User-Agent'] || '');
+  const clientHints = String(headers['sec-ch-ua-platform'] || headers['Sec-CH-UA-Platform'] || '').replace(/[\"]/g, '');
+  const value = `${userAgent} ${clientHints}`;
+  if (/Windows NT|Windows Phone/i.test(value)) return 'windows';
+  if (/iPhone|iPad|iPod/i.test(value)) return 'ios';
+  if (/Android/i.test(value)) return 'android';
+  if (/Macintosh|Mac OS X/i.test(value)) return 'macos';
+  return 'other';
+}
+
+function requiredPlatformForFile(file) {
+  if (file === 'BitHash-Capital-windows.exe') return 'windows';
+  if (file === 'BitHash-Capital-macos.dmg') return 'macos';
+  return null;
+}
+
+function platformRequirements(platform) {
+  if (platform === 'windows') return 'Windows 10 (64-bit) or Windows 11 (64-bit). Windows on ARM requires Windows 10 version 1903 or later.';
+  if (platform === 'macos') return 'macOS 13 Ventura or later. Universal Intel + Apple silicon build.';
+  return '';
+}
+
 function buildPresignedUrl({
   accountId,
   bucket,
@@ -90,6 +114,18 @@ function installAppDownloadRoute(app) {
 
     if (!contentType) {
       return res.status(404).json({ error: 'Download not found' });
+    }
+
+    const requiredPlatform = requiredPlatformForFile(file);
+    const clientPlatform = detectPlatform(req);
+    if (requiredPlatform && clientPlatform !== requiredPlatform) {
+      return res.status(403).json({
+        error: 'This native download is only available for the matching device platform.',
+        requestedFile: file,
+        detectedPlatform: clientPlatform,
+        requiredPlatform,
+        requirements: platformRequirements(requiredPlatform)
+      });
     }
 
     const {
