@@ -108,8 +108,8 @@ function installAppDownloadRoute(app) {
 
   app.__bithashAppDownloadRouteInstalled = true;
 
-  function handleDownload(req, res) {
-    const file = typeof req.query?.file === 'string' ? req.query.file : '';
+  function handleDownload(req, res, forcedFile = null) {
+    const file = forcedFile || (typeof req.query?.file === 'string' ? req.query.file : '');
     const contentType = FILES[file];
 
     if (!contentType) {
@@ -135,20 +135,12 @@ function installAppDownloadRoute(app) {
       R2_SECRET_ACCESS_KEY
     } = process.env;
 
-    if (
-      !R2_ACCOUNT_ID ||
-      !R2_BUCKET_NAME ||
-      !R2_ACCESS_KEY_ID ||
-      !R2_SECRET_ACCESS_KEY
-    ) {
+    if (!R2_ACCOUNT_ID || !R2_BUCKET_NAME || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
       console.error('App download R2 endpoint is not configured');
-      return res.status(503).json({
-        error: 'Downloads are temporarily unavailable'
-      });
+      return res.status(503).json({ error: 'Downloads are temporarily unavailable' });
     }
 
     const key = `${DOWNLOAD_PREFIX}${file}`;
-
     const url = buildPresignedUrl({
       accountId: R2_ACCOUNT_ID,
       bucket: R2_BUCKET_NAME,
@@ -167,8 +159,14 @@ function installAppDownloadRoute(app) {
     return res.status(302).end();
   }
 
-  app.get('/api/app-download', handleDownload);
-  app.head('/api/app-download', handleDownload);
+  app.get('/api/app-download', (req, res) => handleDownload(req, res));
+  app.head('/api/app-download', (req, res) => handleDownload(req, res));
+
+  // Backward-compatible native download endpoints used by the desktop installer UI.
+  app.get('/api/apps/download/windows', (req, res) => handleDownload(req, res, 'BitHash-Capital-windows.exe'));
+  app.head('/api/apps/download/windows', (req, res) => handleDownload(req, res, 'BitHash-Capital-windows.exe'));
+  app.get('/api/apps/download/macos', (req, res) => handleDownload(req, res, 'BitHash-Capital-macos.dmg'));
+  app.head('/api/apps/download/macos', (req, res) => handleDownload(req, res, 'BitHash-Capital-macos.dmg'));
 }
 
 module.exports = { installAppDownloadRoute };
