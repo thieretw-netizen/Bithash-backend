@@ -1,0 +1,55 @@
+name: Fix tracking payload handling
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !startsWith(github.event.head_commit.message, 'fix: harden tracking event payload handling') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch tracking endpoint safely
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('server.js')
+          text = path.read_text(encoding='utf-8')
+
+          pattern = re.compile(r"(?m)^(\s*)const\s*\{\s*events\s*\}\s*=\s*req\.body\s*;\s*$")
+          replacement = r'''\1const trackingBody = req.body && typeof req.body === 'object' ? req.body : {};
+\1const events = Array.isArray(trackingBody.events) ? trackingBody.events : [];
+\1if (events.length === 0) {
+\1    return res.status(200).json({ success: true, processed: 0 });
+\1}'''
+
+          patched, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('Tracking payload destructuring pattern was not found exactly once.')
+
+          path.write_text(patched, encoding='utf-8')
+
+      - name: Validate server.js
+        run: node --check server.js
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.js
+          git commit -m "fix: harden tracking event payload handling"
+          git push
+
+      - name: Remove one-time patch workflow
+        if: success()
+        run: |
+          git rm .github/workflows/fix-tracking-body.yml
+          git commit -m "chore: remove one-time tracking patch workflow"
+          git push
