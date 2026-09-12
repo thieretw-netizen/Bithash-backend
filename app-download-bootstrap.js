@@ -8,9 +8,15 @@ function moveRoutesToFront(app) {
   const stack = app && app._router && Array.isArray(app._router.stack) ? app._router.stack : null;
   if (!stack) return;
   const indexes = [];
+  const protectedPaths = new Set([
+    '/api/app-download',
+    '/api/app-update',
+    '/api/apps/download/windows',
+    '/api/apps/download/macos'
+  ]);
   for (let i = 0; i < stack.length; i += 1) {
     const layer = stack[i];
-    if (layer && layer.route && (layer.route.path === '/api/app-download' || layer.route.path === '/api/app-update')) indexes.push(i);
+    if (layer && layer.route && protectedPaths.has(layer.route.path)) indexes.push(i);
   }
   for (let i = indexes.length - 1; i >= 0; i -= 1) {
     const [layer] = stack.splice(indexes[i], 1);
